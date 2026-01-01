@@ -34,10 +34,12 @@ const ensureTapableLink = (basePath) => {
 };
 
 ensureTapableLink(enhancedResolveRoot);
+ensureTapableLink(path.join(enhancedResolveRoot, "lib"));
 try {
   const enhancedResolveReal = fs.realpathSync(enhancedResolveRoot);
   if (enhancedResolveReal !== enhancedResolveRoot) {
     ensureTapableLink(enhancedResolveReal);
+    ensureTapableLink(path.join(enhancedResolveReal, "lib"));
   }
 } catch {
   // Ignore realpath errors.
