@@ -1,436 +1,128 @@
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
 :root {
-  --paper: #f7f2e8;
-  --paper-strong: #fdf8f0;
-  --ink: #1c1a16;
-  --muted: #5b5850;
-  --accent: #ff7a59;
-  --accent-2: #0fa3a0;
-  --accent-3: #f3c05f;
-  --stroke: rgba(28, 26, 22, 0.12);
-  --panel: rgba(253, 248, 240, 0.86);
-  --shadow: 0 28px 80px rgba(28, 26, 22, 0.12);
-  --radius: 24px;
-  --radius-sm: 14px;
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+
+  --primary: 222.2 47.4% 11.2%;
+  --primary-foreground: 210 40% 98%;
+
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 222.2 84% 4.9%;
+
+  --radius: 0.5rem;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+
+  --card: 222.2 84% 4.9%;
+  --card-foreground: 210 40% 98%;
+
+  --popover: 222.2 84% 4.9%;
+  --popover-foreground: 210 40% 98%;
+
+  --primary: 210 40% 98%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 212.7 26.8% 83.9%;
 }
 
-html,
-body {
-  min-height: 100%;
-}
-
-body {
-  font-family: var(--font-text), "Segoe UI", sans-serif;
-  color: var(--ink);
-  background:
-    radial-gradient(1200px 900px at 8% -10%, rgba(255, 212, 177, 0.7), transparent 60%),
-    radial-gradient(900px 600px at 90% 10%, rgba(167, 231, 223, 0.6), transparent 60%),
-    linear-gradient(160deg, #f7f2e8 0%, #f0eadf 50%, #f6f5f1 100%);
-  line-height: 1.5;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-button,
-input,
-select,
-textarea {
-  font-family: inherit;
-  color: inherit;
-}
-
-.page {
-  min-height: 100vh;
-  padding: clamp(24px, 4vw, 64px);
-  display: flex;
-  flex-direction: column;
-  gap: clamp(24px, 4vw, 40px);
-}
-
-.hero {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: clamp(24px, 4vw, 48px);
-  align-items: center;
-  animation: floatIn 0.8s ease-out;
-}
-
-.heroText h1 {
-  font-family: var(--font-display), "Times New Roman", serif;
-  font-size: clamp(2.8rem, 5vw, 4.4rem);
-  letter-spacing: -0.02em;
-  margin-bottom: 12px;
-}
-
-.eyebrow {
-  text-transform: uppercase;
-  font-size: 0.74rem;
-  letter-spacing: 0.24em;
-  color: var(--muted);
-  margin-bottom: 12px;
-}
-
-.lead {
-  font-size: clamp(1rem, 2vw, 1.2rem);
-  color: var(--muted);
-  max-width: 42ch;
-}
-
-.heroCard {
-  display: grid;
-  gap: 16px;
-  padding: 20px;
-  border-radius: var(--radius);
-  background: var(--panel);
-  border: 1px solid var(--stroke);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(8px);
-}
-
-.heroCard div {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.95rem;
-}
-
-.heroCard span {
-  color: var(--muted);
-}
-
-.heroCard strong {
-  font-weight: 600;
-}
-
-.layout {
-  display: grid;
-  gap: 24px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-}
-
-.panel {
-  padding: clamp(20px, 3vw, 28px);
-  border-radius: var(--radius);
-  background: var(--panel);
-  border: 1px solid var(--stroke);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  animation: fadeUp 0.7s ease-out;
-}
-
-.panelHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.panelHeader h2 {
-  font-size: 1.4rem;
-  margin-bottom: 4px;
-}
-
-.panelHeader p {
-  color: var(--muted);
-  font-size: 0.95rem;
-}
-
-.segmented {
-  display: inline-flex;
-  gap: 6px;
-  padding: 6px;
-  border-radius: 999px;
-  background: rgba(28, 26, 22, 0.06);
-}
-
-.seg {
-  border: none;
-  background: transparent;
-  padding: 8px 18px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease;
-}
-
-.seg.active {
-  background: #fff;
-  box-shadow: 0 8px 18px rgba(28, 26, 22, 0.12);
-  font-weight: 600;
-}
-
-.seg:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.fields {
-  display: grid;
-  gap: 16px;
-}
-
-.field {
-  display: grid;
-  gap: 8px;
-  font-size: 0.95rem;
-}
-
-.field span {
-  color: var(--muted);
-  font-size: 0.85rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-input,
-select,
-textarea {
-  width: 100%;
-  padding: 12px 14px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--stroke);
-  background: rgba(255, 255, 255, 0.92);
-  transition: border 0.2s ease, box-shadow 0.2s ease;
-}
-
-input:focus,
-select:focus,
-textarea:focus {
-  outline: none;
-  border-color: var(--accent-2);
-  box-shadow: 0 0 0 3px rgba(15, 163, 160, 0.15);
-}
-
-textarea {
-  resize: vertical;
-}
-
-.inputRow {
-  display: flex;
-  gap: 10px;
-}
-
-.inputRow button {
-  white-space: nowrap;
-}
-
-.helper {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.inlineActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-}
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9rem;
-}
-
-.toggle input {
-  width: auto;
-}
-
-.helperCard {
-  padding: 14px;
-  border-radius: var(--radius-sm);
-  background: rgba(15, 163, 160, 0.1);
-  color: #0b5c5b;
-  font-size: 0.9rem;
-}
-
-.buttonPrimary {
-  border: none;
-  border-radius: 999px;
-  padding: 14px 22px;
-  background: linear-gradient(135deg, #ff7a59, #f3c05f);
-  color: #1c1a16;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.buttonPrimary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 12px 24px rgba(255, 122, 89, 0.22);
-}
-
-.buttonPrimary:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-  box-shadow: none;
-}
-
-.buttonGhost {
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
-  padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.7);
-  cursor: pointer;
-  transition: border 0.2s ease, box-shadow 0.2s ease;
-}
-
-.buttonGhost:hover {
-  border-color: rgba(28, 26, 22, 0.3);
-  box-shadow: 0 8px 16px rgba(28, 26, 22, 0.08);
-}
-
-.status {
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.status .error {
-  color: #c0392b;
-  font-weight: 600;
-}
-
-.imageGrid,
-.galleryGrid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-
-.imageCard,
-.galleryCard {
-  background: #fff;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--stroke);
-  overflow: hidden;
-  display: grid;
-  gap: 10px;
-  box-shadow: 0 16px 30px rgba(28, 26, 22, 0.08);
-}
-
-.imageCard img,
-.galleryCard img {
-  width: 100%;
-  height: 200px;
-  object-fit: cover;
-  display: block;
-}
-
-.imageCard figcaption,
-.galleryCard figcaption {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 14px 16px;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.imageCard a {
-  font-weight: 600;
-  color: #0b5c5b;
-}
-
-.galleryCard figcaption {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.galleryCard strong {
-  text-transform: capitalize;
-  font-size: 0.9rem;
-  color: var(--ink);
-}
-
-.galleryCard span {
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
-.galleryCard .mono {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-    Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 0.75rem;
-  color: rgba(28, 26, 22, 0.7);
-}
-
-.videoCard {
-  display: grid;
-  gap: 12px;
-}
-
-.videoCard video {
-  width: 100%;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--stroke);
-  background: #000;
-}
-
-.videoMeta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.emptyState {
-  text-align: center;
-  padding: 36px 16px;
-  border-radius: var(--radius-sm);
-  border: 1px dashed rgba(28, 26, 22, 0.2);
-  color: var(--muted);
-  display: grid;
-  gap: 6px;
-}
-
-.galleryPanel {
-  animation-delay: 0.1s;
-}
-
-@keyframes floatIn {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (max-width: 720px) {
-  .inputRow {
-    flex-direction: column;
-  }
-
-  .panelHeader {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .heroCard {
-    order: 2;
+@utility container {
+  margin-inline: auto;
+  padding-inline: 2rem;
+  @media (width >= 1400px) {
+    max-width: 1400px;
   }
 }
