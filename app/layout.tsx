@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
-import { DM_Serif_Display, IBM_Plex_Sans } from "next/font/google";
+import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
+import { cn } from "@/lib/utils";
 
-const display = DM_Serif_Display({
-  variable: "--font-display",
-  weight: ["400"],
+const inter = Inter({
   subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
 });
 
-const text = IBM_Plex_Sans({
-  variable: "--font-text",
-  weight: ["400", "500", "600"],
+const playfair = Playfair_Display({
   subsets: ["latin"],
+  variable: "--font-serif",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -26,8 +27,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${display.variable} ${text.variable}`}>
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={cn(
+          "min-h-screen bg-background font-sans antialiased",
+          inter.variable,
+          playfair.variable
+        )}
+      >
         {children}
       </body>
     </html>

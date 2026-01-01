@@ -1,25 +1,32 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-
-type Provider = "gemini" | "navy" | "chutes" | "openrouter";
-
-type Mode = "image" | "video";
-
-type StoredImage = {
-  id: string;
-  dataUrl: string;
-  prompt: string;
-  model: string;
-  provider: Provider;
-  createdAt: string;
-};
-
-type GeneratedImage = {
-  id: string;
-  dataUrl: string;
-  mimeType: string;
-};
+import {
+  DEFAULT_MODELS,
+  GEMINI_IMAGE_MODELS,
+  GEMINI_VIDEO_MODELS,
+  CHUTES_IMAGE_MODELS,
+  OPENROUTER_IMAGE_MODELS,
+  NAVY_IMAGE_MODELS,
+  NAVY_VIDEO_MODELS,
+  IMAGE_ASPECTS,
+  IMAGE_SIZES,
+  IMAGEN_SIZES,
+  VIDEO_ASPECTS,
+  VIDEO_RESOLUTIONS,
+  VIDEO_DURATIONS,
+  type Provider,
+  type Mode,
+} from "@/lib/constants";
+import { type GeneratedImage, type StoredImage } from "@/lib/types";
+import { cn, dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
+import { Header } from "./Header";
+import { ImgGenSettings } from "./img-gen-settings";
+import { PromptInput } from "./prompt-input";
+import { GalleryGrid } from "./gallery-grid";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Button } from "./ui/button";
+import { Download, Film, Image as ImageIcon, Loader2 } from "lucide-react";
 
 const STORAGE_KEYS = {
   provider: "studio_provider",
@@ -32,110 +39,6 @@ const STORAGE_KEYS = {
 };
 
 const MAX_SAVED_IMAGES = 12;
-
-const GEMINI_IMAGE_MODELS = [
-  {
-    id: "gemini-2.5-flash-image",
-    label: "Gemini 2.5 Flash Image",
-  },
-  {
-    id: "gemini-3-pro-image-preview",
-    label: "Gemini 3 Pro Image (Preview)",
-  },
-  {
-    id: "imagen-4.0-generate-001",
-    label: "Imagen 4",
-  },
-  {
-    id: "imagen-4.0-fast-generate-001",
-    label: "Imagen 4 Fast",
-  },
-];
-
-const GEMINI_VIDEO_MODELS = [
-  {
-    id: "veo-3.1-generate-preview",
-    label: "Veo 3.1 Preview",
-  },
-  {
-    id: "veo-3.1-fast-generate-preview",
-    label: "Veo 3.1 Fast Preview",
-  },
-];
-
-const NAVY_IMAGE_MODELS = [
-  {
-    id: "flux.1-schnell",
-    label: "Flux 1 Schnell",
-  },
-  {
-    id: "dall-e-3",
-    label: "DALL-E 3",
-  },
-];
-
-const NAVY_VIDEO_MODELS = [
-  {
-    id: "veo-3.1",
-    label: "Veo 3.1",
-  },
-  {
-    id: "cogvideox-flash",
-    label: "CogVideoX Flash",
-  },
-];
-
-const CHUTES_IMAGE_MODELS = [
-  {
-    id: "z-image-turbo",
-    label: "Chutes Z Image Turbo",
-  },
-];
-
-const OPENROUTER_IMAGE_MODELS = [
-  {
-    id: "google/gemini-2.5-flash-image-preview",
-    label: "Gemini 2.5 Flash Image Preview",
-  },
-  {
-    id: "black-forest-labs/flux.2-pro",
-    label: "Flux 2 Pro",
-  },
-  {
-    id: "black-forest-labs/flux.2-flex",
-    label: "Flux 2 Flex",
-  },
-  {
-    id: "sourceful/riverflow-v2-standard-preview",
-    label: "Riverflow V2 Standard Preview",
-  },
-];
-
-const IMAGE_ASPECTS = ["1:1", "3:4", "4:3", "9:16", "16:9"];
-const IMAGE_SIZES = ["1K", "2K", "4K"];
-const IMAGEN_SIZES = ["1K", "2K"];
-const VIDEO_ASPECTS = ["16:9", "9:16"];
-const VIDEO_RESOLUTIONS = ["720p", "1080p"];
-const VIDEO_DURATIONS = ["4", "6", "8"];
-
-const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
-  gemini: {
-    image: GEMINI_IMAGE_MODELS[0].id,
-    video: GEMINI_VIDEO_MODELS[0].id,
-  },
-  navy: {
-    image: NAVY_IMAGE_MODELS[0].id,
-    video: NAVY_VIDEO_MODELS[0].id,
-  },
-  chutes: {
-    image: CHUTES_IMAGE_MODELS[0].id,
-    video: CHUTES_IMAGE_MODELS[0].id,
-  },
-  openrouter: {
-    image: OPENROUTER_IMAGE_MODELS[0].id,
-    video: OPENROUTER_IMAGE_MODELS[0].id,
-  },
-};
 
 const getKeyStorage = (provider: Provider) => {
   if (provider === "gemini") return STORAGE_KEYS.keyGemini;
@@ -167,29 +70,11 @@ const writeLocalStorage = (key: string, value: string) => {
   window.localStorage.setItem(key, value);
 };
 
-const dataUrlFromBase64 = (data: string, mimeType: string) =>
-  `data:${mimeType};base64,${data}`;
-
-const fetchAsDataUrl = async (url: string) => {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Unable to fetch the generated asset.");
-  }
-  const blob = await response.blob();
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Unable to read the asset."));
-    reader.readAsDataURL(blob);
-  });
-};
-
 export default function Studio() {
   const [hydrated, setHydrated] = useState(false);
   const [provider, setProvider] = useState<Provider>("gemini");
   const [mode, setMode] = useState<Mode>("image");
   const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
 
   const [model, setModel] = useState(DEFAULT_MODELS.gemini.image);
   const [prompt, setPrompt] = useState("");
@@ -197,7 +82,7 @@ export default function Studio() {
   const [imageCount, setImageCount] = useState(1);
   const [imageAspect, setImageAspect] = useState(IMAGE_ASPECTS[0]);
   const [imageSize, setImageSize] = useState(IMAGE_SIZES[0]);
-  const [navyImageSize, setNavyImageSize] = useState("1024x1024");
+  const [navyImageSize, setNavyImageSize] = useState("1024x1024"); // Default
   const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0]);
   const [videoResolution, setVideoResolution] = useState(VIDEO_RESOLUTIONS[0]);
   const [videoDuration, setVideoDuration] = useState(VIDEO_DURATIONS[2]);
@@ -212,19 +97,6 @@ export default function Studio() {
 
   const activeVideoUrl = useRef<string | null>(null);
 
-  const modelSuggestions = useMemo(() => {
-    if (provider === "gemini") {
-      return mode === "image" ? GEMINI_IMAGE_MODELS : GEMINI_VIDEO_MODELS;
-    }
-    if (provider === "chutes") {
-      return CHUTES_IMAGE_MODELS;
-    }
-    if (provider === "openrouter") {
-      return OPENROUTER_IMAGE_MODELS;
-    }
-    return mode === "image" ? NAVY_IMAGE_MODELS : NAVY_VIDEO_MODELS;
-  }, [provider, mode]);
-
   const isChutesProvider = provider === "chutes";
   const isOpenRouterProvider = provider === "openrouter";
   const supportsVideo = provider === "gemini" || provider === "navy";
@@ -236,33 +108,17 @@ export default function Studio() {
       ? model.includes("gemini-3-pro") || isImagenModel
       : provider === "navy" || (isOpenRouterProvider && isOpenRouterGemini);
   const showImageAspect = provider === "gemini" || isOpenRouterGemini;
-  const sizeOptions = isImagenModel ? IMAGEN_SIZES : IMAGE_SIZES;
 
-  useEffect(() => {
-    if (isImagenModel && imageSize === "4K") {
-      setImageSize("2K");
-    }
-  }, [isImagenModel, imageSize]);
-
-  useEffect(() => {
-    if (!supportsVideo && mode === "video") {
-      setMode("image");
-    }
-  }, [supportsVideo, mode]);
-
+  // Hydration & Persistence
   useEffect(() => {
     setHydrated(true);
-    const storedProvider = readLocalStorage<Provider | null>(
-      STORAGE_KEYS.provider,
-      null
-    );
+    const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
     const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
-    const storedImages = readLocalStorage<StoredImage[]>(
-      STORAGE_KEYS.images,
-      []
-    );
+    const storedImages = readLocalStorage<StoredImage[]>(STORAGE_KEYS.images, []);
+
     if (storedProvider) {
       setProvider(storedProvider);
+      // Ensure model is valid for the provider/mode
       setModel(DEFAULT_MODELS[storedProvider][storedMode ?? "image"]);
     }
     if (storedMode) {
@@ -279,8 +135,16 @@ export default function Studio() {
   useEffect(() => {
     if (!hydrated) return;
     writeLocalStorage(STORAGE_KEYS.mode, JSON.stringify(mode));
+    // When mode changes or provider changes, reset model to default if not set manually
+    // But here we just respect the user selection, logic below handles switch
+    if (!model) setModel(DEFAULT_MODELS[provider][mode]);
+  }, [mode, provider, hydrated, model]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    // When switching modes, ensure model is correct if needed
     setModel(DEFAULT_MODELS[provider][mode]);
-  }, [mode, provider, hydrated]);
+  }, [mode, provider]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -349,31 +213,25 @@ export default function Studio() {
     window.localStorage.removeItem(STORAGE_KEYS.images);
   };
 
-  const clearKey = () => {
-    setApiKey("");
-  };
+  const clearKey = () => setApiKey("");
 
   const resetStatus = () => {
     setErrorMessage(null);
     setStatusMessage("");
   };
 
-  const handleImageCountChange = (value: string) => {
-    const next = Math.max(1, Math.min(4, Number(value || 1)));
-    setImageCount(next);
-  };
-
+  // Generation Functions
   const generateImages = async () => {
     resetStatus();
     setBusy(true);
     setGeneratedImages([]);
     try {
+      let images: GeneratedImage[] = [];
+
       if (provider === "gemini") {
         const response = await fetch("/api/gemini/image", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             apiKey,
             model,
@@ -384,52 +242,34 @@ export default function Studio() {
           }),
         });
         const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Image generation failed.");
-        }
-        const images: GeneratedImage[] = payload.images.map(
-          (image: { data: string; mimeType: string }) => ({
-            id: createId(),
-            dataUrl: dataUrlFromBase64(image.data, image.mimeType),
-            mimeType: image.mimeType,
-          })
-        );
-        setGeneratedImages(images);
-        addImagesToGallery(images);
+        if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
+        images = payload.images.map((image: any) => ({
+          id: createId(),
+          dataUrl: dataUrlFromBase64(image.data, image.mimeType),
+          mimeType: image.mimeType,
+        }));
       } else if (provider === "navy") {
         const response = await fetch("/api/navy/image", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             apiKey,
             model,
             prompt,
-            size: navyImageSize,
+            size: navyImageSize, // Assuming this is handled somewhere or we rely on default
             numberOfImages: showImageCount ? imageCount : undefined,
           }),
         });
         const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Image generation failed.");
-        }
-        const urls: string[] = payload.images.map(
-          (image: { url: string }) => image.url
-        );
-        const images: GeneratedImage[] = [];
-        for (const url of urls) {
-          const dataUrl = await fetchAsDataUrl(url);
+        if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
+        for (const image of payload.images) {
+          const dataUrl = await fetchAsDataUrl(image.url);
           images.push({ id: createId(), dataUrl, mimeType: "image/png" });
         }
-        setGeneratedImages(images);
-        addImagesToGallery(images);
       } else if (provider === "openrouter") {
         const response = await fetch("/api/openrouter/image", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             apiKey,
             model,
@@ -439,48 +279,33 @@ export default function Studio() {
           }),
         });
         const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Image generation failed.");
-        }
-        const images: GeneratedImage[] = payload.images.map(
-          (image: { data: string; mimeType: string }) => ({
-            id: createId(),
-            dataUrl: dataUrlFromBase64(image.data, image.mimeType),
-            mimeType: image.mimeType,
-          })
-        );
-        setGeneratedImages(images);
-        addImagesToGallery(images);
+        if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
+        images = payload.images.map((image: any) => ({
+          id: createId(),
+          dataUrl: dataUrlFromBase64(image.data, image.mimeType),
+          mimeType: image.mimeType,
+        }));
       } else {
+        // Chutes
         const response = await fetch("/api/chutes/image", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            apiKey,
-            prompt,
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey, prompt }),
         });
         const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Image generation failed.");
-        }
-        const images: GeneratedImage[] = payload.images.map(
-          (image: { data: string; mimeType: string }) => ({
-            id: createId(),
-            dataUrl: dataUrlFromBase64(image.data, image.mimeType),
-            mimeType: image.mimeType,
-          })
-        );
-        setGeneratedImages(images);
-        addImagesToGallery(images);
+        if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
+        images = payload.images.map((image: any) => ({
+          id: createId(),
+          dataUrl: dataUrlFromBase64(image.data, image.mimeType),
+          mimeType: image.mimeType,
+        }));
       }
+
+      setGeneratedImages(images);
+      addImagesToGallery(images);
       setStatusMessage("Ready.");
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Image generation failed."
-      );
+      setErrorMessage(error instanceof Error ? error.message : "Image generation failed.");
     } finally {
       setBusy(false);
     }
@@ -494,9 +319,7 @@ export default function Studio() {
     try {
       const response = await fetch("/api/gemini/video", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           apiKey,
           model,
@@ -508,57 +331,41 @@ export default function Studio() {
         }),
       });
       const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Video generation failed.");
-      }
+      if (!response.ok) throw new Error(payload.error ?? "Video generation failed.");
+
       const operationName = payload.name as string;
       let pollCount = 0;
       while (pollCount < 120) {
         pollCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 5000));
         setStatusMessage("Rendering on Veo... (about a minute)");
-        const poll = await fetch(
-          `/api/gemini/video?name=${encodeURIComponent(operationName)}`,
-          {
-            headers: {
-              "x-user-api-key": apiKey,
-            },
-          }
-        );
-        const pollPayload = await poll.json();
-        if (!poll.ok) {
-          throw new Error(pollPayload.error ?? "Video generation failed.");
-        }
-        if (!pollPayload.done) {
-          continue;
-        }
-        if (pollPayload.error) {
-          throw new Error(pollPayload.error);
-        }
-        const download = await fetch("/api/gemini/video/download", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            apiKey,
-            uri: pollPayload.videoUri,
-          }),
+
+        const poll = await fetch(`/api/gemini/video?name=${encodeURIComponent(operationName)}`, {
+          headers: { "x-user-api-key": apiKey },
         });
-        if (!download.ok) {
-          throw new Error("Unable to download the rendered video.");
+        const pollPayload = await poll.json();
+        if (!poll.ok) throw new Error(pollPayload.error ?? "Video generation failed.");
+
+        if (pollPayload.done) {
+          if (pollPayload.error) throw new Error(pollPayload.error);
+
+          const download = await fetch("/api/gemini/video/download", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ apiKey, uri: pollPayload.videoUri }),
+          });
+          if (!download.ok) throw new Error("Unable to download the rendered video.");
+
+          const blob = await download.blob();
+          const url = URL.createObjectURL(blob);
+          updateVideoUrl(url);
+          setStatusMessage("Video ready.");
+          return;
         }
-        const blob = await download.blob();
-        const url = URL.createObjectURL(blob);
-        updateVideoUrl(url);
-        setStatusMessage("Video ready.");
-        return;
       }
       throw new Error("Video generation timed out.");
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Video generation failed."
-      );
+      setErrorMessage(error instanceof Error ? error.message : "Video generation failed.");
     } finally {
       setBusy(false);
     }
@@ -572,59 +379,41 @@ export default function Studio() {
     try {
       const response = await fetch("/api/navy/video", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          apiKey,
-          model,
-          prompt,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, model, prompt }),
       });
       const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Video generation failed.");
-      }
+      if (!response.ok) throw new Error(payload.error ?? "Video generation failed.");
+
       const jobId = payload.id as string;
       let pollCount = 0;
       while (pollCount < 120) {
         pollCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 5000));
         setStatusMessage("Rendering on NavyAI...");
-        const poll = await fetch(
-          `/api/navy/video?id=${encodeURIComponent(jobId)}`,
-          {
-            headers: {
-              "x-user-api-key": apiKey,
-            },
-          }
-        );
+
+        const poll = await fetch(`/api/navy/video?id=${encodeURIComponent(jobId)}`, {
+          headers: { "x-user-api-key": apiKey },
+        });
         const pollPayload = await poll.json();
-        if (!poll.ok) {
-          throw new Error(pollPayload.error ?? "Video generation failed.");
+        if (!poll.ok) throw new Error(pollPayload.error ?? "Video generation failed.");
+
+        if (pollPayload.done) {
+          if (pollPayload.error) throw new Error(pollPayload.error);
+          updateVideoUrl(pollPayload.videoUrl as string);
+          setStatusMessage("Video ready.");
+          return;
         }
-        if (!pollPayload.done) {
-          continue;
-        }
-        if (pollPayload.error) {
-          throw new Error(pollPayload.error);
-        }
-        updateVideoUrl(pollPayload.videoUrl as string);
-        setStatusMessage("Video ready.");
-        return;
       }
       throw new Error("Video generation timed out.");
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Video generation failed."
-      );
+      setErrorMessage(error instanceof Error ? error.message : "Video generation failed.");
     } finally {
       setBusy(false);
     }
   };
 
   const handleGenerate = async () => {
-    resetStatus();
     if (!apiKey.trim()) {
       setErrorMessage("Add your API key to start generating.");
       return;
@@ -635,419 +424,120 @@ export default function Studio() {
     }
     if (mode === "image") {
       await generateImages();
-      return;
+    } else {
+      if (provider === "gemini") await generateGeminiVideo();
+      else if (provider === "navy") await generateNavyVideo();
+      else setErrorMessage("Video generation is not available for this provider.");
     }
-    if (provider === "gemini") {
-      await generateGeminiVideo();
-      return;
-    }
-    if (provider === "navy") {
-      await generateNavyVideo();
-      return;
-    }
-    setErrorMessage("Video generation is not available for this provider.");
   };
 
+  if (!hydrated) return null; // Avoid hydration mismatch
+
   return (
-    <div className="page">
-      <header className="hero">
-        <div className="heroText">
-          <p className="eyebrow">Local-first studio</p>
-          <h1>Image & Video Studio</h1>
-          <p className="lead">
-            Generate polished images and cinematic clips with Gemini, NavyAI,
-            OpenRouter, or Chutes. Bring your own API key, keep assets in local
-            storage, and ship on Cloudflare Workers.
-          </p>
+    <div className="container mx-auto max-w-7xl animate-in fade-in space-y-8 p-6 lg:p-12">
+      <Header />
+
+      <main className="grid grid-cols-1 gap-12 lg:grid-cols-12">
+        {/* Left Column: Controls */}
+        <div className="space-y-8 lg:col-span-4 lg:space-y-12">
+          <ImgGenSettings
+            provider={provider}
+            setProvider={setProvider}
+            mode={mode}
+            setMode={setMode}
+            apiKey={apiKey}
+            setApiKey={setApiKey}
+            model={model}
+            setModel={setModel}
+            clearKey={clearKey}
+            imageAspect={imageAspect}
+            setImageAspect={setImageAspect}
+            imageSize={imageSize}
+            setImageSize={setImageSize}
+            imageCount={imageCount}
+            setImageCount={setImageCount}
+            videoAspect={videoAspect}
+            setVideoAspect={setVideoAspect}
+            videoResolution={videoResolution}
+            setVideoResolution={setVideoResolution}
+            videoDuration={videoDuration}
+            setVideoDuration={setVideoDuration}
+            saveToGallery={saveToGallery}
+            setSaveToGallery={setSaveToGallery}
+          />
         </div>
-        <div className="heroCard">
-          <div>
-            <span>Runtime</span>
-            <strong>Edge-first</strong>
-          </div>
-          <div>
-            <span>Storage</span>
-            <strong>Local only</strong>
-          </div>
-          <div>
-            <span>Providers</span>
-            <strong>Gemini + Navy + OpenRouter + Chutes</strong>
-          </div>
-        </div>
-      </header>
 
-      <div className="layout">
-        <section className="panel">
-          <div className="panelHeader">
-            <div>
-              <h2>Create</h2>
-              <p>Use your key, tweak parameters, and generate.</p>
-            </div>
-            <div className="segmented">
-              <button
-                className={mode === "image" ? "seg active" : "seg"}
-                onClick={() => setMode("image")}
-                type="button"
-              >
-                Image
-              </button>
-              <button
-                className={mode === "video" ? "seg active" : "seg"}
-                onClick={() => setMode("video")}
-                type="button"
-                disabled={!supportsVideo}
-              >
-                Video
-              </button>
-            </div>
-          </div>
-
-          <div className="fields">
-            <label className="field">
-              <span>Provider</span>
-              <select
-                value={provider}
-                onChange={(event) =>
-                  setProvider(event.target.value as Provider)
-                }
-              >
-                <option value="gemini">Google Gemini</option>
-                <option value="navy">NavyAI</option>
-                <option value="openrouter">OpenRouter</option>
-                <option value="chutes">Chutes</option>
-              </select>
-            </label>
-            {isChutesProvider && (
-              <div className="helperCard">
-                Chutes runs image-only generation with a fixed model.
-              </div>
-            )}
-            {isOpenRouterProvider && (
-              <div className="helperCard">
-                OpenRouter requires a model that supports image output modalities.
-                Video generation is disabled here.
-              </div>
-            )}
-
-            <label className="field">
-              <span>API key</span>
-              <div className="inputRow">
-                <input
-                  type={showKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder={
-                    provider === "gemini"
-                      ? "Paste Gemini API key"
-                      : provider === "navy"
-                      ? "Paste NavyAI API key"
-                      : provider === "openrouter"
-                      ? "Paste OpenRouter API key"
-                      : "Paste Chutes API token"
-                  }
-                />
-                <button
-                  type="button"
-                  className="buttonGhost"
-                  onClick={() => setShowKey((prev) => !prev)}
-                >
-                  {showKey ? "Hide" : "Show"}
-                </button>
-              </div>
-              <span className="helper">
-                Stored locally in your browser for quick reuse.
-              </span>
-            </label>
-
-            <div className="inlineActions">
-              <button type="button" className="buttonGhost" onClick={clearKey}>
-                Forget key
-              </button>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={saveToGallery}
-                  onChange={(event) => setSaveToGallery(event.target.checked)}
-                />
-                Save images to local gallery
-              </label>
-            </div>
-
-            <label className="field">
-              <span>Model</span>
-              <input
-                list="model-options"
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder="Model id"
-                disabled={isChutesProvider}
+        {/* Right Column: Prompt & Preview */}
+        <div className="space-y-8 lg:col-span-8">
+          <Card className="border-2 border-primary/10 shadow-xl bg-card/50 backdrop-blur-3xl">
+            <CardContent className="p-6 lg:p-8 space-y-8">
+              <PromptInput
+                prompt={prompt}
+                setPrompt={setPrompt}
+                negativePrompt={negativePrompt}
+                setNegativePrompt={setNegativePrompt}
+                onGenerate={handleGenerate}
+                busy={busy}
+                mode={mode}
               />
-              <datalist id="model-options">
-                {modelSuggestions.map((item) => (
-                  <option value={item.id} key={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-              </datalist>
-              <span className="helper">
-                {isChutesProvider
-                  ? "Chutes uses the Z Image Turbo endpoint."
-                  : "You can paste any model id supported by your provider."}
-              </span>
-            </label>
 
-            <label className="field">
-              <span>Prompt</span>
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder={
-                  mode === "image"
-                    ? "Describe the scene, style, and mood..."
-                    : "Describe the action, camera movement, and mood..."
-                }
-                rows={6}
-              />
-            </label>
+              {/* Status & Errors */}
+              <div className="min-h-[24px] text-center">
+                {errorMessage ? (
+                  <p className="text-sm font-semibold text-destructive animate-in fade-in">{errorMessage}</p>
+                ) : statusMessage ? (
+                  <p className="text-sm text-muted-foreground animate-in fade-in flex items-center justify-center gap-2">
+                    {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+                    {statusMessage}
+                  </p>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
 
-            {mode === "image" ? (
-              <>
-                {showImageAspect && (
-                  <label className="field">
-                    <span>Aspect ratio</span>
-                    <select
-                      value={imageAspect}
-                      onChange={(event) => setImageAspect(event.target.value)}
-                    >
-                      {IMAGE_ASPECTS.map((ratio) => (
-                        <option value={ratio} key={ratio}>
-                          {ratio}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
+          {/* Output Preview Area */}
+          {(generatedImages.length > 0 || videoUrl) && (
+            <section className="animate-in slide-in-from-bottom-4 fade-in duration-500">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-xl font-semibold tracking-tight">Latest Generation</h2>
+              </div>
 
-                {showImageSize &&
-                  (provider === "gemini" || provider === "openrouter") && (
-                  <label className="field">
-                    <span>Image size</span>
-                    <select
-                      value={imageSize}
-                      onChange={(event) => setImageSize(event.target.value)}
-                    >
-                      {sizeOptions.map((size) => (
-                        <option value={size} key={size}>
-                          {size}
-                        </option>
-                      ))}
-                    </select>
-                    {provider === "openrouter" && (
-                      <span className="helper">
-                        Image size is honored by Gemini-based models.
-                      </span>
-                    )}
-                  </label>
-                )}
-
-                {provider === "navy" && (
-                  <label className="field">
-                    <span>Image size</span>
-                    <input
-                      value={navyImageSize}
-                      onChange={(event) => setNavyImageSize(event.target.value)}
-                      placeholder="1024x1024"
-                    />
-                    <span className="helper">
-                      Uses the NavyAI size format (ex: 1024x1024).
-                    </span>
-                  </label>
-                )}
-
-                {showImageCount && (
-                  <label className="field">
-                    <span>Image count</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={4}
-                      value={imageCount}
-                      onChange={(event) =>
-                        handleImageCountChange(event.target.value)
-                      }
-                    />
-                  </label>
-                )}
-              </>
-            ) : (
-              <>
-                {provider === "gemini" && (
-                  <>
-                    <label className="field">
-                      <span>Aspect ratio</span>
-                      <select
-                        value={videoAspect}
-                        onChange={(event) => setVideoAspect(event.target.value)}
-                      >
-                        {VIDEO_ASPECTS.map((ratio) => (
-                          <option value={ratio} key={ratio}>
-                            {ratio}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Resolution</span>
-                      <select
-                        value={videoResolution}
-                        onChange={(event) =>
-                          setVideoResolution(event.target.value)
-                        }
-                      >
-                        {VIDEO_RESOLUTIONS.map((size) => (
-                          <option value={size} key={size}>
-                            {size}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Duration (seconds)</span>
-                      <select
-                        value={videoDuration}
-                        onChange={(event) => setVideoDuration(event.target.value)}
-                      >
-                        {VIDEO_DURATIONS.map((duration) => (
-                          <option value={duration} key={duration}>
-                            {duration}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Negative prompt</span>
-                      <input
-                        value={negativePrompt}
-                        onChange={(event) =>
-                          setNegativePrompt(event.target.value)
-                        }
-                        placeholder="Optional exclusions"
-                      />
-                    </label>
-                  </>
-                )}
-                {provider === "navy" && (
-                  <div className="helperCard">
-                    Navy video jobs run async. We poll until the video is ready.
-                  </div>
-                )}
-                {provider === "chutes" && (
-                  <div className="helperCard">
-                    Chutes only supports image generation right now.
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          <button
-            type="button"
-            className="buttonPrimary"
-            onClick={handleGenerate}
-            disabled={busy}
-          >
-            {busy ? "Generating..." : "Generate"}
-          </button>
-          <div className="status">
-            {errorMessage ? (
-              <span className="error">{errorMessage}</span>
-            ) : (
-              <span>{statusMessage}</span>
-            )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panelHeader">
-            <div>
-              <h2>Output</h2>
-              <p>Preview the latest generation.</p>
-            </div>
-          </div>
-
-          {mode === "image" ? (
-            generatedImages.length ? (
-              <div className="imageGrid">
-                {generatedImages.map((image) => (
-                  <figure className="imageCard" key={image.id}>
-                    <img src={image.dataUrl} alt="Generated result" />
-                    <figcaption>
-                      <span>{model}</span>
-                      <a href={image.dataUrl} download>
-                        Download
+              {mode === "image" && generatedImages.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {generatedImages.map((img) => (
+                    <div key={img.id} className="relative rounded-xl overflow-hidden border shadow-lg group">
+                      <img src={img.dataUrl} alt="Generated" className="w-full h-auto object-cover" />
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                        <a href={img.dataUrl} download={`generated-${img.id}.png`} className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform">
+                          <Download className="h-5 w-5" />
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : videoUrl ? (
+                <div className="rounded-xl overflow-hidden border shadow-lg bg-black">
+                  <video src={videoUrl} controls className="w-full aspect-video" />
+                  <div className="p-4 bg-card flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground font-mono">{model}</span>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={videoUrl} download="generated-video.mp4">
+                        <Download className="mr-2 h-4 w-4" /> Download
                       </a>
-                    </figcaption>
-                  </figure>
-                ))}
-              </div>
-            ) : (
-              <div className="emptyState">
-                <p>No images yet.</p>
-                <span>Generated images show up here immediately.</span>
-              </div>
-            )
-          ) : videoUrl ? (
-            <div className="videoCard">
-              <video src={videoUrl} controls preload="metadata" />
-              <div className="videoMeta">
-                <span>{model}</span>
-                <a href={videoUrl} download>
-                  Download
-                </a>
-              </div>
-            </div>
-          ) : (
-            <div className="emptyState">
-              <p>No video yet.</p>
-              <span>Start a render to preview the clip here.</span>
-            </div>
-          )}
-        </section>
-      </div>
-
-      <section className="panel galleryPanel">
-        <div className="panelHeader">
-          <div>
-            <h2>Local gallery</h2>
-            <p>Stored in your browser only. Clear anytime.</p>
-          </div>
-          <button type="button" className="buttonGhost" onClick={clearGallery}>
-            Wipe gallery
-          </button>
-        </div>
-
-        {savedImages.length ? (
-          <div className="galleryGrid">
-            {savedImages.map((image) => (
-              <figure className="galleryCard" key={image.id}>
-                <img src={image.dataUrl} alt="Saved generation" />
-                <figcaption>
-                  <div>
-                    <strong>{image.provider}</strong>
-                    <span>{new Date(image.createdAt).toLocaleString()}</span>
+                    </Button>
                   </div>
-                  <span className="mono">{image.model}</span>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        ) : (
-          <div className="emptyState">
-            <p>Gallery is empty.</p>
-            <span>Generated images will be saved here automatically.</span>
-          </div>
-        )}
-      </section>
+                </div>
+              ) : null}
+            </section>
+          )}
+        </div>
+      </main>
+
+      <div className="my-12 h-px bg-border/50" />
+
+      {/* Gallery Section */}
+      <GalleryGrid images={savedImages} onClear={clearGallery} />
+
     </div>
   );
 }
