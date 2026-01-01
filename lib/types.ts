@@ -1,4 +1,4 @@
-import { Mode, Provider } from "./constants";
+import { Provider } from "./constants";
 
 export type StoredImage = {
     id: string;

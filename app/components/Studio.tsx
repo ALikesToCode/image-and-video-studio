@@ -9,24 +9,28 @@ import {
   OPENROUTER_IMAGE_MODELS,
   NAVY_IMAGE_MODELS,
   NAVY_VIDEO_MODELS,
+  NAVY_TTS_MODELS,
   IMAGE_ASPECTS,
   IMAGE_SIZES,
   IMAGEN_SIZES,
   VIDEO_ASPECTS,
   VIDEO_RESOLUTIONS,
   VIDEO_DURATIONS,
+  TTS_FORMATS,
+  TTS_VOICES,
   type Provider,
   type Mode,
+  type ModelOption,
 } from "@/lib/constants";
 import { type GeneratedImage, type StoredImage } from "@/lib/types";
-import { cn, dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
+import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
 import { Header } from "./Header";
 import { ImgGenSettings } from "./img-gen-settings";
 import { PromptInput } from "./prompt-input";
 import { GalleryGrid } from "./gallery-grid";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Download, Film, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 
 const STORAGE_KEYS = {
   provider: "studio_provider",
@@ -77,6 +81,14 @@ export default function Studio() {
   const [apiKey, setApiKey] = useState("");
 
   const [model, setModel] = useState(DEFAULT_MODELS.gemini.image);
+  const [openRouterImageModels, setOpenRouterImageModels] =
+    useState<ModelOption[]>(OPENROUTER_IMAGE_MODELS);
+  const [navyImageModels, setNavyImageModels] =
+    useState<ModelOption[]>(NAVY_IMAGE_MODELS);
+  const [navyVideoModels, setNavyVideoModels] =
+    useState<ModelOption[]>(NAVY_VIDEO_MODELS);
+  const [navyTtsModels, setNavyTtsModels] =
+    useState<ModelOption[]>(NAVY_TTS_MODELS);
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [imageCount, setImageCount] = useState(1);
@@ -86,20 +98,27 @@ export default function Studio() {
   const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0]);
   const [videoResolution, setVideoResolution] = useState(VIDEO_RESOLUTIONS[0]);
   const [videoDuration, setVideoDuration] = useState(VIDEO_DURATIONS[2]);
+  const [ttsVoice, setTtsVoice] = useState(TTS_VOICES[0]);
+  const [ttsFormat, setTtsFormat] = useState(TTS_FORMATS[0]);
+  const [ttsSpeed, setTtsSpeed] = useState("1");
   const [saveToGallery, setSaveToGallery] = useState(true);
 
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [savedImages, setSavedImages] = useState<StoredImage[]>([]);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioMimeType, setAudioMimeType] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
 
   const activeVideoUrl = useRef<string | null>(null);
 
-  const isChutesProvider = provider === "chutes";
   const isOpenRouterProvider = provider === "openrouter";
   const supportsVideo = provider === "gemini" || provider === "navy";
+  const supportsTts = provider === "navy";
   const isImagenModel = model.startsWith("imagen-");
   const isOpenRouterGemini = isOpenRouterProvider && model.includes("gemini");
   const showImageCount = provider === "navy" || isImagenModel;
@@ -108,6 +127,33 @@ export default function Studio() {
       ? model.includes("gemini-3-pro") || isImagenModel
       : provider === "navy" || (isOpenRouterProvider && isOpenRouterGemini);
   const showImageAspect = provider === "gemini" || isOpenRouterGemini;
+
+  const modelSuggestions = useMemo(() => {
+    if (provider === "gemini") {
+      return mode === "image" ? GEMINI_IMAGE_MODELS : GEMINI_VIDEO_MODELS;
+    }
+    if (provider === "chutes") {
+      return CHUTES_IMAGE_MODELS;
+    }
+    if (provider === "openrouter") {
+      return openRouterImageModels;
+    }
+    if (mode === "video") return navyVideoModels;
+    if (mode === "tts") return navyTtsModels;
+    return navyImageModels;
+  }, [
+    provider,
+    mode,
+    openRouterImageModels,
+    navyImageModels,
+    navyVideoModels,
+    navyTtsModels,
+  ]);
+
+  const hasOutput =
+    (mode === "image" && generatedImages.length > 0) ||
+    (mode === "video" && !!videoUrl) ||
+    (mode === "tts" && !!audioUrl);
 
   // Hydration & Persistence
   useEffect(() => {
@@ -147,10 +193,23 @@ export default function Studio() {
   }, [mode, provider]);
 
   useEffect(() => {
+    if (mode === "video" && !supportsVideo) {
+      setMode("image");
+    }
+    if (mode === "tts" && !supportsTts) {
+      setMode("image");
+    }
+  }, [mode, supportsVideo, supportsTts]);
+
+  useEffect(() => {
     if (!hydrated) return;
     const storedKey = readLocalStorage<string>(getKeyStorage(provider), "");
     setApiKey(storedKey);
   }, [provider, hydrated]);
+
+  useEffect(() => {
+    setModelsError(null);
+  }, [provider, mode]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -195,6 +254,11 @@ export default function Studio() {
     setVideoUrl(null);
   };
 
+  const clearAudioUrl = () => {
+    setAudioUrl(null);
+    setAudioMimeType(null);
+  };
+
   const addImagesToGallery = (newImages: GeneratedImage[]) => {
     if (!saveToGallery) return;
     const entries: StoredImage[] = newImages.map((image) => ({
@@ -220,11 +284,86 @@ export default function Studio() {
     setStatusMessage("");
   };
 
+  const refreshModels = async () => {
+    if (modelsLoading) return;
+    setModelsError(null);
+    if (!apiKey.trim()) {
+      setModelsError("Add your API key to fetch models.");
+      return;
+    }
+    setModelsLoading(true);
+    try {
+      if (provider === "openrouter") {
+        const response = await fetch("/api/openrouter/models", {
+          headers: { "x-user-api-key": apiKey },
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "Unable to fetch OpenRouter models.");
+        }
+        const models = (payload?.data ?? [])
+          .filter((item: any) =>
+            item?.architecture?.output_modalities?.includes("image")
+          )
+          .map((item: any) => ({
+            id: item.id,
+            label: item.name ?? item.id,
+          }))
+          .filter((item: ModelOption) => !!item.id);
+        if (!models.length) {
+          throw new Error("No image models returned by OpenRouter.");
+        }
+        setOpenRouterImageModels(models);
+        if (!models.some((m: ModelOption) => m.id === model)) {
+          setModel(models[0].id);
+        }
+        return;
+      }
+
+      if (provider === "navy") {
+        const response = await fetch("/api/navy/models", {
+          headers: { "x-user-api-key": apiKey },
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "Unable to fetch NavyAI models.");
+        }
+        const models = (payload?.data ?? [])
+          .map((item: any) => ({
+            id: item.id ?? item?.model ?? item?.name,
+            label: item.name ?? item.id ?? item?.model ?? "Unknown",
+          }))
+          .filter((item: ModelOption) => !!item.id);
+        if (!models.length) {
+          throw new Error("No models returned by NavyAI.");
+        }
+        if (mode === "video") {
+          setNavyVideoModels(models);
+        } else if (mode === "tts") {
+          setNavyTtsModels(models);
+        } else {
+          setNavyImageModels(models);
+        }
+        if (!models.some((m: ModelOption) => m.id === model)) {
+          setModel(models[0].id);
+        }
+      }
+    } catch (error) {
+      setModelsError(
+        error instanceof Error ? error.message : "Unable to fetch models."
+      );
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
   // Generation Functions
   const generateImages = async () => {
     resetStatus();
     setBusy(true);
     setGeneratedImages([]);
+    clearVideoUrl();
+    clearAudioUrl();
     try {
       let images: GeneratedImage[] = [];
 
@@ -315,6 +454,7 @@ export default function Studio() {
     resetStatus();
     setBusy(true);
     clearVideoUrl();
+    clearAudioUrl();
     setStatusMessage("Starting video generation...");
     try {
       const response = await fetch("/api/gemini/video", {
@@ -375,6 +515,7 @@ export default function Studio() {
     resetStatus();
     setBusy(true);
     clearVideoUrl();
+    clearAudioUrl();
     setStatusMessage("Queueing video...");
     try {
       const response = await fetch("/api/navy/video", {
@@ -413,6 +554,44 @@ export default function Studio() {
     }
   };
 
+  const generateTts = async () => {
+    resetStatus();
+    setBusy(true);
+    clearVideoUrl();
+    clearAudioUrl();
+    setGeneratedImages([]);
+    setStatusMessage("Synthesizing speech...");
+    try {
+      const speedValue = Number(ttsSpeed);
+      const response = await fetch("/api/navy/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey,
+          model,
+          input: prompt,
+          voice: ttsVoice,
+          speed: Number.isFinite(speedValue) ? speedValue : undefined,
+          responseFormat: ttsFormat,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Speech generation failed.");
+      const audio = payload.audio;
+      if (!audio?.data || !audio?.mimeType) {
+        throw new Error("No audio data returned.");
+      }
+      const dataUrl = dataUrlFromBase64(audio.data, audio.mimeType);
+      setAudioUrl(dataUrl);
+      setAudioMimeType(audio.mimeType);
+      setStatusMessage("Audio ready.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Speech generation failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!apiKey.trim()) {
       setErrorMessage("Add your API key to start generating.");
@@ -424,10 +603,13 @@ export default function Studio() {
     }
     if (mode === "image") {
       await generateImages();
-    } else {
+    } else if (mode === "video") {
       if (provider === "gemini") await generateGeminiVideo();
       else if (provider === "navy") await generateNavyVideo();
       else setErrorMessage("Video generation is not available for this provider.");
+    } else {
+      if (provider === "navy") await generateTts();
+      else setErrorMessage("Text-to-speech is only available for NavyAI.");
     }
   };
 
@@ -462,8 +644,24 @@ export default function Studio() {
             setVideoResolution={setVideoResolution}
             videoDuration={videoDuration}
             setVideoDuration={setVideoDuration}
+            ttsVoice={ttsVoice}
+            setTtsVoice={setTtsVoice}
+            ttsFormat={ttsFormat}
+            setTtsFormat={setTtsFormat}
+            ttsSpeed={ttsSpeed}
+            setTtsSpeed={setTtsSpeed}
             saveToGallery={saveToGallery}
             setSaveToGallery={setSaveToGallery}
+            modelSuggestions={modelSuggestions}
+            supportsVideo={supportsVideo}
+            supportsTts={supportsTts}
+            onRefreshModels={
+              provider === "openrouter" || provider === "navy"
+                ? refreshModels
+                : undefined
+            }
+            modelsLoading={modelsLoading}
+            modelsError={modelsError}
           />
         </div>
 
@@ -479,6 +677,7 @@ export default function Studio() {
                 onGenerate={handleGenerate}
                 busy={busy}
                 mode={mode}
+                showNegativePrompt={mode !== "tts"}
               />
 
               {/* Status & Errors */}
@@ -496,7 +695,7 @@ export default function Studio() {
           </Card>
 
           {/* Output Preview Area */}
-          {(generatedImages.length > 0 || videoUrl) && (
+          {hasOutput && (
             <section className="animate-in slide-in-from-bottom-4 fade-in duration-500">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-semibold tracking-tight">Latest Generation</h2>
@@ -515,13 +714,39 @@ export default function Studio() {
                     </div>
                   ))}
                 </div>
-              ) : videoUrl ? (
+              ) : mode === "video" && videoUrl ? (
                 <div className="rounded-xl overflow-hidden border shadow-lg bg-black">
                   <video src={videoUrl} controls className="w-full aspect-video" />
                   <div className="p-4 bg-card flex justify-between items-center">
                     <span className="text-sm text-muted-foreground font-mono">{model}</span>
                     <Button variant="outline" size="sm" asChild>
                       <a href={videoUrl} download="generated-video.mp4">
+                        <Download className="mr-2 h-4 w-4" /> Download
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              ) : mode === "tts" && audioUrl ? (
+                <div className="rounded-xl overflow-hidden border shadow-lg bg-card">
+                  <div className="p-4">
+                    <audio src={audioUrl} controls className="w-full" />
+                  </div>
+                  <div className="p-4 border-t flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground font-mono">
+                      {model} · {ttsVoice}
+                    </span>
+                    <Button variant="outline" size="sm" asChild>
+                      <a
+                        href={audioUrl}
+                        download={`generated-audio.${audioMimeType?.includes("opus")
+                          ? "opus"
+                          : audioMimeType?.includes("aac")
+                            ? "aac"
+                            : audioMimeType?.includes("flac")
+                              ? "flac"
+                              : "mp3"
+                          }`}
+                      >
                         <Download className="mr-2 h-4 w-4" /> Download
                       </a>
                     </Button>

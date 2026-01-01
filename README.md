@@ -6,6 +6,7 @@ Local-first studio for generating images and short videos with Gemini and NavyAI
 
 - Gemini image models (Gemini Native Image + Imagen 4) and Veo 3.1 video models
 - NavyAI image and video generation (OpenAI-style endpoints)
+- NavyAI text-to-speech (TTS) with voice selection
 - OpenRouter image generation via chat completions + modalities
 - Chutes Z Image Turbo endpoint support
 - Local gallery with one-click wipe

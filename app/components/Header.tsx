@@ -1,5 +1,4 @@
 import { Palette } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export function Header() {
     return (
@@ -15,8 +14,8 @@ export function Header() {
                     Image & Video Studio
                 </h1>
                 <p className="max-w-2xl text-lg text-muted-foreground">
-                    Generate polished images and cinematic clips with Gemini, NavyAI,
-                    OpenRouter, or Chutes. Secure, local, and fast.
+                    Generate polished images, cinematic clips, and speech with Gemini,
+                    NavyAI, OpenRouter, or Chutes. Secure, local, and fast.
                 </p>
             </div>
 

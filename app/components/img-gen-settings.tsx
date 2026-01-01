@@ -17,23 +17,19 @@ import {
 } from "@/app/components/ui/card";
 import { Eye, EyeOff, Settings2, Trash2 } from "lucide-react";
 import {
-    CHUTES_IMAGE_MODELS,
-    GEMINI_IMAGE_MODELS,
-    GEMINI_VIDEO_MODELS,
     IMAGE_ASPECTS,
     IMAGE_SIZES,
     IMAGEN_SIZES,
     Mode,
-    NAVY_IMAGE_MODELS,
-    NAVY_VIDEO_MODELS,
-    OPENROUTER_IMAGE_MODELS,
     Provider,
+    ModelOption,
+    TTS_FORMATS,
+    TTS_VOICES,
     VIDEO_ASPECTS,
     VIDEO_DURATIONS,
     VIDEO_RESOLUTIONS,
 } from "@/lib/constants";
-import { useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
+import { useState } from "react";
 
 interface ImgGenSettingsProps {
     provider: Provider;
@@ -57,8 +53,20 @@ interface ImgGenSettingsProps {
     setVideoResolution: (r: string) => void;
     videoDuration: string;
     setVideoDuration: (d: string) => void;
+    ttsVoice: string;
+    setTtsVoice: (v: string) => void;
+    ttsFormat: string;
+    setTtsFormat: (f: string) => void;
+    ttsSpeed: string;
+    setTtsSpeed: (s: string) => void;
     saveToGallery: boolean;
     setSaveToGallery: (s: boolean) => void;
+    modelSuggestions: ModelOption[];
+    supportsVideo: boolean;
+    supportsTts: boolean;
+    onRefreshModels?: () => void;
+    modelsLoading?: boolean;
+    modelsError?: string | null;
 }
 
 export function ImgGenSettings({
@@ -83,27 +91,25 @@ export function ImgGenSettings({
     setVideoResolution,
     videoDuration,
     setVideoDuration,
+    ttsVoice,
+    setTtsVoice,
+    ttsFormat,
+    setTtsFormat,
+    ttsSpeed,
+    setTtsSpeed,
     saveToGallery,
     setSaveToGallery,
+    modelSuggestions,
+    supportsVideo,
+    supportsTts,
+    onRefreshModels,
+    modelsLoading,
+    modelsError,
 }: ImgGenSettingsProps) {
     const [showKey, setShowKey] = useState(false);
 
-    const modelSuggestions = useMemo(() => {
-        if (provider === "gemini") {
-            return mode === "image" ? GEMINI_IMAGE_MODELS : GEMINI_VIDEO_MODELS;
-        }
-        if (provider === "chutes") {
-            return CHUTES_IMAGE_MODELS;
-        }
-        if (provider === "openrouter") {
-            return OPENROUTER_IMAGE_MODELS;
-        }
-        return mode === "image" ? NAVY_IMAGE_MODELS : NAVY_VIDEO_MODELS;
-    }, [provider, mode]);
-
     const isChutes = provider === "chutes";
     const isOpenRouter = provider === "openrouter";
-    const supportsVideo = provider === "gemini" || provider === "navy";
     const isImagenModel = model.startsWith("imagen-");
     const isOpenRouterGemini = isOpenRouter && model.includes("gemini");
 
@@ -114,6 +120,7 @@ export function ImgGenSettings({
             : provider === "navy" || (isOpenRouter && isOpenRouterGemini);
     const showImageAspect = provider === "gemini" || isOpenRouterGemini;
     const availableImageSizes = isImagenModel ? IMAGEN_SIZES : IMAGE_SIZES;
+    const galleryDisabled = mode !== "image";
 
     return (
         <Card className="h-fit">
@@ -139,6 +146,9 @@ export function ImgGenSettings({
                                 <SelectItem value="image">Image</SelectItem>
                                 <SelectItem value="video" disabled={!supportsVideo}>
                                     Video
+                                </SelectItem>
+                                <SelectItem value="tts" disabled={!supportsTts}>
+                                    TTS
                                 </SelectItem>
                             </SelectContent>
                         </Select>
@@ -203,7 +213,19 @@ export function ImgGenSettings({
 
                 {/* Model */}
                 <div className="space-y-2">
-                    <Label>Model</Label>
+                    <div className="flex items-center justify-between">
+                        <Label>Model</Label>
+                        {onRefreshModels && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={onRefreshModels}
+                                disabled={modelsLoading}
+                            >
+                                {modelsLoading ? "Refreshing..." : "Refresh models"}
+                            </Button>
+                        )}
+                    </div>
                     <Select value={model} onValueChange={setModel} disabled={isChutes}>
                         <SelectTrigger>
                             <SelectValue placeholder="Select a model" />
@@ -219,6 +241,9 @@ export function ImgGenSettings({
                     <p className="text-xs text-muted-foreground">
                         {isChutes ? "Fixed model." : "Select a model."}
                     </p>
+                    {modelsError ? (
+                        <p className="text-xs text-destructive">{modelsError}</p>
+                    ) : null}
                 </div>
 
                 {/* Dynamic Options */}
@@ -304,6 +329,52 @@ export function ImgGenSettings({
                     </div>
                 )}
 
+                {mode === "tts" && (
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Voice</Label>
+                            <Select value={ttsVoice} onValueChange={setTtsVoice}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {TTS_VOICES.map((voice) => (
+                                        <SelectItem key={voice} value={voice}>
+                                            {voice}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Format</Label>
+                            <Select value={ttsFormat} onValueChange={setTtsFormat}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {TTS_FORMATS.map((format) => (
+                                        <SelectItem key={format} value={format}>
+                                            {format}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Speed</Label>
+                            <Input
+                                type="number"
+                                min="0.25"
+                                max="4"
+                                step="0.05"
+                                value={ttsSpeed}
+                                onChange={(e) => setTtsSpeed(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                )}
+
                 {/* Gallery Save Toggle */}
                 <div className="flex items-center gap-2 pt-2">
                     <input
@@ -311,9 +382,15 @@ export function ImgGenSettings({
                         id="saveToGallery"
                         checked={saveToGallery}
                         onChange={(e) => setSaveToGallery(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        disabled={galleryDisabled}
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
                     />
-                    <Label htmlFor="saveToGallery" className="font-normal cursor-pointer">Save to local gallery</Label>
+                    <Label
+                        htmlFor="saveToGallery"
+                        className="font-normal cursor-pointer"
+                    >
+                        Save to local gallery
+                    </Label>
                 </div>
             </CardContent>
         </Card>
