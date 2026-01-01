@@ -168,6 +168,11 @@ textarea {
   font-weight: 600;
 }
 
+.seg:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .fields {
   display: grid;
   gap: 16px;

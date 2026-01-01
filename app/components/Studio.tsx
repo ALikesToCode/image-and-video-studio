@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Provider = "gemini" | "navy";
+type Provider = "gemini" | "navy" | "chutes" | "openrouter";
 
 type Mode = "image" | "video";
 
@@ -26,6 +26,8 @@ const STORAGE_KEYS = {
   mode: "studio_mode",
   keyGemini: "studio_api_key_gemini",
   keyNavy: "studio_api_key_navy",
+  keyChutes: "studio_api_key_chutes",
+  keyOpenRouter: "studio_api_key_openrouter",
   images: "studio_saved_images",
 };
 
@@ -83,6 +85,32 @@ const NAVY_VIDEO_MODELS = [
   },
 ];
 
+const CHUTES_IMAGE_MODELS = [
+  {
+    id: "z-image-turbo",
+    label: "Chutes Z Image Turbo",
+  },
+];
+
+const OPENROUTER_IMAGE_MODELS = [
+  {
+    id: "google/gemini-2.5-flash-image-preview",
+    label: "Gemini 2.5 Flash Image Preview",
+  },
+  {
+    id: "black-forest-labs/flux.2-pro",
+    label: "Flux 2 Pro",
+  },
+  {
+    id: "black-forest-labs/flux.2-flex",
+    label: "Flux 2 Flex",
+  },
+  {
+    id: "sourceful/riverflow-v2-standard-preview",
+    label: "Riverflow V2 Standard Preview",
+  },
+];
+
 const IMAGE_ASPECTS = ["1:1", "3:4", "4:3", "9:16", "16:9"];
 const IMAGE_SIZES = ["1K", "2K", "4K"];
 const IMAGEN_SIZES = ["1K", "2K"];
@@ -99,10 +127,22 @@ const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
     image: NAVY_IMAGE_MODELS[0].id,
     video: NAVY_VIDEO_MODELS[0].id,
   },
+  chutes: {
+    image: CHUTES_IMAGE_MODELS[0].id,
+    video: CHUTES_IMAGE_MODELS[0].id,
+  },
+  openrouter: {
+    image: OPENROUTER_IMAGE_MODELS[0].id,
+    video: OPENROUTER_IMAGE_MODELS[0].id,
+  },
 };
 
-const getKeyStorage = (provider: Provider) =>
-  provider === "gemini" ? STORAGE_KEYS.keyGemini : STORAGE_KEYS.keyNavy;
+const getKeyStorage = (provider: Provider) => {
+  if (provider === "gemini") return STORAGE_KEYS.keyGemini;
+  if (provider === "navy") return STORAGE_KEYS.keyNavy;
+  if (provider === "openrouter") return STORAGE_KEYS.keyOpenRouter;
+  return STORAGE_KEYS.keyChutes;
+};
 
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -176,16 +216,26 @@ export default function Studio() {
     if (provider === "gemini") {
       return mode === "image" ? GEMINI_IMAGE_MODELS : GEMINI_VIDEO_MODELS;
     }
+    if (provider === "chutes") {
+      return CHUTES_IMAGE_MODELS;
+    }
+    if (provider === "openrouter") {
+      return OPENROUTER_IMAGE_MODELS;
+    }
     return mode === "image" ? NAVY_IMAGE_MODELS : NAVY_VIDEO_MODELS;
   }, [provider, mode]);
 
+  const isChutesProvider = provider === "chutes";
+  const isOpenRouterProvider = provider === "openrouter";
+  const supportsVideo = provider === "gemini" || provider === "navy";
   const isImagenModel = model.startsWith("imagen-");
+  const isOpenRouterGemini = isOpenRouterProvider && model.includes("gemini");
   const showImageCount = provider === "navy" || isImagenModel;
   const showImageSize =
     provider === "gemini"
       ? model.includes("gemini-3-pro") || isImagenModel
-      : true;
-  const showImageAspect = provider === "gemini";
+      : provider === "navy" || (isOpenRouterProvider && isOpenRouterGemini);
+  const showImageAspect = provider === "gemini" || isOpenRouterGemini;
   const sizeOptions = isImagenModel ? IMAGEN_SIZES : IMAGE_SIZES;
 
   useEffect(() => {
@@ -193,6 +243,12 @@ export default function Studio() {
       setImageSize("2K");
     }
   }, [isImagenModel, imageSize]);
+
+  useEffect(() => {
+    if (!supportsVideo && mode === "video") {
+      setMode("image");
+    }
+  }, [supportsVideo, mode]);
 
   useEffect(() => {
     setHydrated(true);
@@ -340,7 +396,7 @@ export default function Studio() {
         );
         setGeneratedImages(images);
         addImagesToGallery(images);
-      } else {
+      } else if (provider === "navy") {
         const response = await fetch("/api/navy/image", {
           method: "POST",
           headers: {
@@ -366,6 +422,57 @@ export default function Studio() {
           const dataUrl = await fetchAsDataUrl(url);
           images.push({ id: createId(), dataUrl, mimeType: "image/png" });
         }
+        setGeneratedImages(images);
+        addImagesToGallery(images);
+      } else if (provider === "openrouter") {
+        const response = await fetch("/api/openrouter/image", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            apiKey,
+            model,
+            prompt,
+            aspectRatio: showImageAspect ? imageAspect : undefined,
+            imageSize: showImageSize ? imageSize : undefined,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Image generation failed.");
+        }
+        const images: GeneratedImage[] = payload.images.map(
+          (image: { data: string; mimeType: string }) => ({
+            id: createId(),
+            dataUrl: dataUrlFromBase64(image.data, image.mimeType),
+            mimeType: image.mimeType,
+          })
+        );
+        setGeneratedImages(images);
+        addImagesToGallery(images);
+      } else {
+        const response = await fetch("/api/chutes/image", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            apiKey,
+            prompt,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Image generation failed.");
+        }
+        const images: GeneratedImage[] = payload.images.map(
+          (image: { data: string; mimeType: string }) => ({
+            id: createId(),
+            dataUrl: dataUrlFromBase64(image.data, image.mimeType),
+            mimeType: image.mimeType,
+          })
+        );
         setGeneratedImages(images);
         addImagesToGallery(images);
       }
@@ -534,7 +641,11 @@ export default function Studio() {
       await generateGeminiVideo();
       return;
     }
-    await generateNavyVideo();
+    if (provider === "navy") {
+      await generateNavyVideo();
+      return;
+    }
+    setErrorMessage("Video generation is not available for this provider.");
   };
 
   return (
@@ -544,9 +655,9 @@ export default function Studio() {
           <p className="eyebrow">Local-first studio</p>
           <h1>Image & Video Studio</h1>
           <p className="lead">
-            Generate polished images and cinematic clips with Gemini or NavyAI.
-            Bring your own API key, keep assets in local storage, and ship on
-            Cloudflare Workers.
+            Generate polished images and cinematic clips with Gemini, NavyAI,
+            OpenRouter, or Chutes. Bring your own API key, keep assets in local
+            storage, and ship on Cloudflare Workers.
           </p>
         </div>
         <div className="heroCard">
@@ -560,7 +671,7 @@ export default function Studio() {
           </div>
           <div>
             <span>Providers</span>
-            <strong>Gemini + Navy</strong>
+            <strong>Gemini + Navy + OpenRouter + Chutes</strong>
           </div>
         </div>
       </header>
@@ -584,6 +695,7 @@ export default function Studio() {
                 className={mode === "video" ? "seg active" : "seg"}
                 onClick={() => setMode("video")}
                 type="button"
+                disabled={!supportsVideo}
               >
                 Video
               </button>
@@ -601,8 +713,21 @@ export default function Studio() {
               >
                 <option value="gemini">Google Gemini</option>
                 <option value="navy">NavyAI</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="chutes">Chutes</option>
               </select>
             </label>
+            {isChutesProvider && (
+              <div className="helperCard">
+                Chutes runs image-only generation with a fixed model.
+              </div>
+            )}
+            {isOpenRouterProvider && (
+              <div className="helperCard">
+                OpenRouter requires a model that supports image output modalities.
+                Video generation is disabled here.
+              </div>
+            )}
 
             <label className="field">
               <span>API key</span>
@@ -614,7 +739,11 @@ export default function Studio() {
                   placeholder={
                     provider === "gemini"
                       ? "Paste Gemini API key"
-                      : "Paste NavyAI API key"
+                      : provider === "navy"
+                      ? "Paste NavyAI API key"
+                      : provider === "openrouter"
+                      ? "Paste OpenRouter API key"
+                      : "Paste Chutes API token"
                   }
                 />
                 <button
@@ -651,6 +780,7 @@ export default function Studio() {
                 value={model}
                 onChange={(event) => setModel(event.target.value)}
                 placeholder="Model id"
+                disabled={isChutesProvider}
               />
               <datalist id="model-options">
                 {modelSuggestions.map((item) => (
@@ -660,7 +790,9 @@ export default function Studio() {
                 ))}
               </datalist>
               <span className="helper">
-                You can paste any model id supported by your provider.
+                {isChutesProvider
+                  ? "Chutes uses the Z Image Turbo endpoint."
+                  : "You can paste any model id supported by your provider."}
               </span>
             </label>
 
@@ -696,7 +828,8 @@ export default function Studio() {
                   </label>
                 )}
 
-                {showImageSize && provider === "gemini" && (
+                {showImageSize &&
+                  (provider === "gemini" || provider === "openrouter") && (
                   <label className="field">
                     <span>Image size</span>
                     <select
@@ -709,6 +842,11 @@ export default function Studio() {
                         </option>
                       ))}
                     </select>
+                    {provider === "openrouter" && (
+                      <span className="helper">
+                        Image size is honored by Gemini-based models.
+                      </span>
+                    )}
                   </label>
                 )}
 
@@ -801,6 +939,11 @@ export default function Studio() {
                 {provider === "navy" && (
                   <div className="helperCard">
                     Navy video jobs run async. We poll until the video is ready.
+                  </div>
+                )}
+                {provider === "chutes" && (
+                  <div className="helperCard">
+                    Chutes only supports image generation right now.
                   </div>
                 )}
               </>
