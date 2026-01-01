@@ -100,9 +100,9 @@ export function GalleryGrid({ images, onClear }: GalleryGridProps) {
                 open={!!activeImage}
                 onOpenChange={closeViewer}
                 imageUrl={activeImage?.dataUrl ?? null}
-                prompt={activeImage?.prompt ?? \"\"}
-                model={activeImage?.model ?? \"\"}
-                provider={activeImage?.provider ?? \"\"}
+                prompt={activeImage?.prompt ?? ""}
+                model={activeImage?.model ?? ""}
+                provider={activeImage?.provider ?? ""}
             />
         </div>
     );
