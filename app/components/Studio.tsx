@@ -28,9 +28,10 @@ import { Header } from "./Header";
 import { ImgGenSettings } from "./img-gen-settings";
 import { PromptInput } from "./prompt-input";
 import { GalleryGrid } from "./gallery-grid";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, Maximize2 } from "lucide-react";
+import { ImageViewer } from "./image-viewer";
 
 const STORAGE_KEYS = {
   provider: "studio_provider",
@@ -113,6 +114,15 @@ export default function Studio() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [lastPrompt, setLastPrompt] = useState("");
+  const [lastModel, setLastModel] = useState("");
+  const [lastProvider, setLastProvider] = useState<Provider>("gemini");
+  const [viewerImage, setViewerImage] = useState<{
+    dataUrl: string;
+    prompt: string;
+    model: string;
+    provider: Provider;
+  } | null>(null);
 
   const activeVideoUrl = useRef<string | null>(null);
 
@@ -257,6 +267,12 @@ export default function Studio() {
   const clearAudioUrl = () => {
     setAudioUrl(null);
     setAudioMimeType(null);
+  };
+
+  const closeViewer = (open: boolean) => {
+    if (!open) {
+      setViewerImage(null);
+    }
   };
 
   const addImagesToGallery = (newImages: GeneratedImage[]) => {
@@ -442,6 +458,9 @@ export default function Studio() {
 
       setGeneratedImages(images);
       addImagesToGallery(images);
+      setLastPrompt(prompt);
+      setLastModel(model);
+      setLastProvider(provider);
       setStatusMessage("Ready.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Image generation failed.");
@@ -707,6 +726,21 @@ export default function Studio() {
                     <div key={img.id} className="relative rounded-xl overflow-hidden border shadow-lg group">
                       <img src={img.dataUrl} alt="Generated" className="w-full h-auto object-cover" />
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewerImage({
+                              dataUrl: img.dataUrl,
+                              prompt: lastPrompt || prompt,
+                              model: lastModel || model,
+                              provider: lastProvider || provider,
+                            })
+                          }
+                          className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform"
+                          aria-label="View full screen"
+                        >
+                          <Maximize2 className="h-5 w-5" />
+                        </button>
                         <a href={img.dataUrl} download={`generated-${img.id}.png`} className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform">
                           <Download className="h-5 w-5" />
                         </a>
@@ -762,6 +796,14 @@ export default function Studio() {
 
       {/* Gallery Section */}
       <GalleryGrid images={savedImages} onClear={clearGallery} />
+      <ImageViewer
+        open={!!viewerImage}
+        onOpenChange={closeViewer}
+        imageUrl={viewerImage?.dataUrl ?? null}
+        prompt={viewerImage?.prompt ?? ""}
+        model={viewerImage?.model ?? ""}
+        provider={viewerImage?.provider ?? ""}
+      />
 
     </div>
   );

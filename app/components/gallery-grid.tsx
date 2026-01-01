@@ -1,8 +1,12 @@
+"use client";
+
+import { useState } from "react";
 import { StoredImage } from "@/lib/types";
-import { Download, Trash2 } from "lucide-react";
+import { Download, Maximize2, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
-import { Card, CardContent } from "./ui/card";
+import { Card } from "./ui/card";
 import { motion, AnimatePresence } from "framer-motion";
+import { ImageViewer } from "./image-viewer";
 
 interface GalleryGridProps {
     images: StoredImage[];
@@ -10,6 +14,8 @@ interface GalleryGridProps {
 }
 
 export function GalleryGrid({ images, onClear }: GalleryGridProps) {
+    const [activeImage, setActiveImage] = useState<StoredImage | null>(null);
+
     const handleDownload = (dataUrl: string, id: string) => {
         const link = document.createElement("a");
         link.href = dataUrl;
@@ -17,6 +23,12 @@ export function GalleryGrid({ images, onClear }: GalleryGridProps) {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    };
+
+    const closeViewer = (open: boolean) => {
+        if (!open) {
+            setActiveImage(null);
+        }
     };
 
     if (images.length === 0) {
@@ -61,6 +73,14 @@ export function GalleryGrid({ images, onClear }: GalleryGridProps) {
                                         <Button
                                             size="icon"
                                             variant="secondary"
+                                            onClick={() => setActiveImage(img)}
+                                            className="h-8 w-8 rounded-full"
+                                        >
+                                            <Maximize2 className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            size="icon"
+                                            variant="secondary"
                                             onClick={() => handleDownload(img.dataUrl, img.id)}
                                             className="h-8 w-8 rounded-full"
                                         >
@@ -76,6 +96,14 @@ export function GalleryGrid({ images, onClear }: GalleryGridProps) {
                     ))}
                 </AnimatePresence>
             </div>
+            <ImageViewer
+                open={!!activeImage}
+                onOpenChange={closeViewer}
+                imageUrl={activeImage?.dataUrl ?? null}
+                prompt={activeImage?.prompt ?? \"\"}
+                model={activeImage?.model ?? \"\"}
+                provider={activeImage?.provider ?? \"\"}
+            />
         </div>
     );
 }
