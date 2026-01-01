@@ -1,4 +1,5 @@
 import { Palette } from "lucide-react";
+import { ModeToggle } from "./mode-toggle";
 
 export function Header() {
     return (
@@ -24,10 +25,13 @@ export function Header() {
                     <span className="text-muted-foreground">Runtime</span>
                     <span className="font-semibold">Edge-first</span>
                 </div>
-                <div className="h-full w-px bg-border" />
-                <div className="flex flex-col gap-1">
-                    <span className="text-muted-foreground">Storage</span>
-                    <span className="font-semibold">Local only</span>
+                <div className="flex items-center gap-4">
+                    <ModeToggle />
+                    <div className="h-full w-px bg-border" />
+                    <div className="flex flex-col gap-1">
+                        <span className="text-muted-foreground">Storage</span>
+                        <span className="font-semibold">Local only</span>
+                    </div>
                 </div>
             </div>
         </header>

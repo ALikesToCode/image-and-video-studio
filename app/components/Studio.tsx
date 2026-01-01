@@ -41,9 +41,14 @@ const STORAGE_KEYS = {
   keyChutes: "studio_api_key_chutes",
   keyOpenRouter: "studio_api_key_openrouter",
   images: "studio_saved_images",
+  openRouterModels: "studio_openrouter_models",
+  navyImageModels: "studio_navy_image_models",
+  navyVideoModels: "studio_navy_video_models",
+  navyTtsModels: "studio_navy_tts_models",
 };
 
 const MAX_SAVED_IMAGES = 12;
+const MAX_CACHED_MODELS = 200;
 
 const getKeyStorage = (provider: Provider) => {
   if (provider === "gemini") return STORAGE_KEYS.keyGemini;
@@ -73,6 +78,130 @@ const readLocalStorage = <T,>(key: string, fallback: T): T => {
 const writeLocalStorage = (key: string, value: string) => {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(key, value);
+};
+
+const sanitizeModelOptions = (models: unknown): ModelOption[] => {
+  if (!Array.isArray(models)) return [];
+  return models
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id : "";
+      const label = typeof record.label === "string" ? record.label : id;
+      if (!id) return null;
+      return { id, label };
+    })
+    .filter((item): item is ModelOption => !!item)
+    .slice(0, MAX_CACHED_MODELS);
+};
+
+const normalizeStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string").map((item) => item.toLowerCase());
+  }
+  if (typeof value === "string") return [value.toLowerCase()];
+  return [];
+};
+
+const extractNavyModelTokens = (item: Record<string, unknown>) => {
+  const tokens: string[] = [];
+  const pushTokens = (value: unknown) => {
+    if (typeof value === "string") {
+      tokens.push(value.toLowerCase());
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry) => pushTokens(entry));
+      return;
+    }
+    if (value && typeof value === "object") {
+      const obj = value as Record<string, unknown>;
+      if (typeof obj.name === "string") {
+        tokens.push(obj.name.toLowerCase());
+      }
+      if (typeof obj.id === "string") {
+        tokens.push(obj.id.toLowerCase());
+      }
+    }
+  };
+
+  pushTokens(item.id);
+  pushTokens(item.model);
+  pushTokens(item.name);
+  pushTokens(item.type);
+  pushTokens(item.task);
+  pushTokens(item.category);
+  pushTokens(item.modality);
+  pushTokens(item.modality_type);
+  pushTokens(item.modalities);
+  pushTokens(item.input_modalities);
+  pushTokens(item.output_modalities);
+  pushTokens(item.inputModalities);
+  pushTokens(item.outputModalities);
+  pushTokens(item.capabilities);
+  pushTokens(item.tasks);
+  return tokens;
+};
+
+const getNavyModalities = (item: Record<string, unknown>) => {
+  const input = normalizeStringArray(
+    item.input_modalities ?? item.inputModalities ?? item.inputs ?? item.input
+  );
+  const output = normalizeStringArray(
+    item.output_modalities ?? item.outputModalities ?? item.outputs ?? item.output
+  );
+  return { input, output };
+};
+
+const navyModeTags: Record<Mode, string[]> = {
+  image: ["image", "img", "flux", "dall", "diffusion", "schnell", "stable", "sd", "pixart"],
+  video: ["video", "veo", "cogvideo", "cogvideox", "kling", "luma"],
+  tts: ["tts", "speech", "voice"],
+};
+
+const isNavyModelForMode = (item: Record<string, unknown>, mode: Mode) => {
+  const { input, output } = getNavyModalities(item);
+  const tokens = extractNavyModelTokens(item);
+  const matchesTags = navyModeTags[mode].some((tag) =>
+    tokens.some((token) => token.includes(tag))
+  );
+
+  if (mode === "tts") {
+    const hasTtsModalities = output.includes("audio") && input.includes("text");
+    return hasTtsModalities || matchesTags;
+  }
+  if (mode === "video") {
+    return output.includes("video") || matchesTags;
+  }
+  return output.includes("image") || matchesTags;
+};
+
+const getOpenRouterModalities = (item: Record<string, unknown>) => {
+  const architecture =
+    (item.architecture as Record<string, unknown> | undefined) ?? {};
+  const input = normalizeStringArray(
+    architecture.input_modalities ?? architecture.inputModalities
+  );
+  const output = normalizeStringArray(
+    architecture.output_modalities ?? architecture.outputModalities
+  );
+  const modality = normalizeStringArray(architecture.modality);
+  return { input, output, modality };
+};
+
+const isOpenRouterModelForMode = (
+  item: Record<string, unknown>,
+  mode: Mode
+) => {
+  const { input, output, modality } = getOpenRouterModalities(item);
+
+  if (mode === "tts") {
+    return output.includes("audio") && input.includes("text");
+  }
+  if (mode === "video") {
+    return output.includes("video") || modality.includes("video");
+  }
+  return output.includes("image") || modality.includes("image");
 };
 
 export default function Studio() {
@@ -171,6 +300,22 @@ export default function Studio() {
     const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
     const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
     const storedImages = readLocalStorage<StoredImage[]>(STORAGE_KEYS.images, []);
+    const storedOpenRouterModels = readLocalStorage<ModelOption[]>(
+      STORAGE_KEYS.openRouterModels,
+      []
+    );
+    const storedNavyImageModels = readLocalStorage<ModelOption[]>(
+      STORAGE_KEYS.navyImageModels,
+      []
+    );
+    const storedNavyVideoModels = readLocalStorage<ModelOption[]>(
+      STORAGE_KEYS.navyVideoModels,
+      []
+    );
+    const storedNavyTtsModels = readLocalStorage<ModelOption[]>(
+      STORAGE_KEYS.navyTtsModels,
+      []
+    );
 
     if (storedProvider) {
       setProvider(storedProvider);
@@ -179,6 +324,18 @@ export default function Studio() {
     }
     if (storedMode) {
       setMode(storedMode);
+    }
+    if (storedOpenRouterModels.length) {
+      setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
+    }
+    if (storedNavyImageModels.length) {
+      setNavyImageModels(sanitizeModelOptions(storedNavyImageModels));
+    }
+    if (storedNavyVideoModels.length) {
+      setNavyVideoModels(sanitizeModelOptions(storedNavyVideoModels));
+    }
+    if (storedNavyTtsModels.length) {
+      setNavyTtsModels(sanitizeModelOptions(storedNavyTtsModels));
     }
     setSavedImages(storedImages);
   }, []);
@@ -239,6 +396,38 @@ export default function Studio() {
       setErrorMessage("Local storage is full. Clear some saved images.");
     }
   }, [savedImages, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !openRouterImageModels.length) return;
+    writeLocalStorage(
+      STORAGE_KEYS.openRouterModels,
+      JSON.stringify(sanitizeModelOptions(openRouterImageModels))
+    );
+  }, [openRouterImageModels, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !navyImageModels.length) return;
+    writeLocalStorage(
+      STORAGE_KEYS.navyImageModels,
+      JSON.stringify(sanitizeModelOptions(navyImageModels))
+    );
+  }, [navyImageModels, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !navyVideoModels.length) return;
+    writeLocalStorage(
+      STORAGE_KEYS.navyVideoModels,
+      JSON.stringify(sanitizeModelOptions(navyVideoModels))
+    );
+  }, [navyVideoModels, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !navyTtsModels.length) return;
+    writeLocalStorage(
+      STORAGE_KEYS.navyTtsModels,
+      JSON.stringify(sanitizeModelOptions(navyTtsModels))
+    );
+  }, [navyTtsModels, hydrated]);
 
   useEffect(() => {
     return () => {
@@ -317,18 +506,34 @@ export default function Studio() {
         if (!response.ok) {
           throw new Error(payload?.error ?? "Unable to fetch OpenRouter models.");
         }
-        const models = (payload?.data ?? [])
-          .filter((item: any) =>
-            item?.architecture?.output_modalities?.includes("image")
-          )
-          .map((item: any) => ({
-            id: item.id,
-            label: item.name ?? item.id,
-          }))
-          .filter((item: ModelOption) => !!item.id);
-        if (!models.length) {
-          throw new Error("No image models returned by OpenRouter.");
+        const rawModels = Array.isArray(payload?.data) ? payload.data : [];
+        if (!rawModels.length) {
+          throw new Error("No models returned by OpenRouter.");
         }
+
+        const normalizedModels = rawModels
+          .map((item: any) => ({
+            id: item?.id,
+            label: item?.name ?? item?.id,
+            raw: item,
+          }))
+          .filter((item: any) => typeof item.id === "string" && item.id.length > 0);
+
+        const filtered = normalizedModels.filter((item: any) =>
+          isOpenRouterModelForMode(item.raw as Record<string, unknown>, mode)
+        );
+        const fallbackModels = OPENROUTER_IMAGE_MODELS;
+        const models = (filtered.length ? filtered : fallbackModels).map(
+          (item: any) => ({
+            id: item.id,
+            label: item.label ?? item.id,
+          })
+        );
+
+        if (!filtered.length) {
+          setModelsError("No OpenRouter image models detected. Showing defaults.");
+        }
+
         setOpenRouterImageModels(models);
         if (!models.some((m: ModelOption) => m.id === model)) {
           setModel(models[0].id);
@@ -344,15 +549,39 @@ export default function Studio() {
         if (!response.ok) {
           throw new Error(payload?.error ?? "Unable to fetch NavyAI models.");
         }
-        const models = (payload?.data ?? [])
-          .map((item: any) => ({
-            id: item.id ?? item?.model ?? item?.name,
-            label: item.name ?? item.id ?? item?.model ?? "Unknown",
-          }))
-          .filter((item: ModelOption) => !!item.id);
-        if (!models.length) {
+        const rawModels = Array.isArray(payload?.data) ? payload.data : [];
+        if (!rawModels.length) {
           throw new Error("No models returned by NavyAI.");
         }
+
+        const normalizedModels = rawModels
+          .map((item: any) => {
+            const id = item?.id ?? item?.model ?? item?.name;
+            const label = item?.name ?? item?.id ?? item?.model ?? "Unknown";
+            return { id, label, raw: item };
+          })
+          .filter((item: any) => typeof item.id === "string" && item.id.length > 0);
+
+        const filtered = normalizedModels.filter((item: any) =>
+          isNavyModelForMode(item.raw as Record<string, unknown>, mode)
+        );
+        const fallbackModels =
+          mode === "video"
+            ? NAVY_VIDEO_MODELS
+            : mode === "tts"
+              ? NAVY_TTS_MODELS
+              : NAVY_IMAGE_MODELS;
+        const models = (filtered.length ? filtered : fallbackModels).map(
+          (item: any) => ({
+            id: item.id,
+            label: item.label ?? item.id,
+          })
+        );
+
+        if (!filtered.length) {
+          setModelsError("Unable to detect model types. Showing defaults.");
+        }
+
         if (mode === "video") {
           setNavyVideoModels(models);
         } else if (mode === "tts") {
@@ -360,6 +589,7 @@ export default function Studio() {
         } else {
           setNavyImageModels(models);
         }
+
         if (!models.some((m: ModelOption) => m.id === model)) {
           setModel(models[0].id);
         }

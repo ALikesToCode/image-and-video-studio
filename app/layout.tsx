@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
-import { Inter, Playfair_Display } from "next/font/google";
+import { DM_Serif_Display, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "./components/theme-provider";
 import { cn } from "@/lib/utils";
 
-const inter = Inter({
+const display = DM_Serif_Display({
   subsets: ["latin"],
-  variable: "--font-sans",
+  variable: "--font-display",
+  weight: "400",
   display: "swap",
 });
 
-const playfair = Playfair_Display({
+const text = IBM_Plex_Sans({
   subsets: ["latin"],
-  variable: "--font-serif",
+  variable: "--font-text",
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -31,11 +34,18 @@ export default function RootLayout({
       <body
         className={cn(
           "min-h-screen bg-background font-sans antialiased",
-          inter.variable,
-          playfair.variable
+          display.variable,
+          text.variable
         )}
       >
-        {children}
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
