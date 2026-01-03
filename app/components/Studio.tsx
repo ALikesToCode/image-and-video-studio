@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_MODELS,
   GEMINI_IMAGE_MODELS,
@@ -79,6 +79,36 @@ type OutputMeta = {
 
 type StoredImageRecord = Omit<StoredImage, "dataUrl"> & { dataUrl?: string };
 
+type StorageSnapshot = {
+  usage: number;
+  quota: number;
+  persistent: boolean | null;
+};
+
+type NavyUsageResponse = {
+  plan: string;
+  limits: {
+    tokens_per_day: number;
+    rpm: number;
+  };
+  usage: {
+    tokens_used_today: number;
+    tokens_remaining_today: number;
+    percent_used: number;
+    resets_at_utc: string;
+    resets_in_ms: number;
+  };
+  rate_limits: {
+    per_minute: {
+      limit: number;
+      used: number;
+      remaining: number;
+      resets_in_ms: number;
+    };
+  };
+  server_time_utc: string;
+};
+
 const STORAGE_KEYS = {
   provider: "studio_provider",
   mode: "studio_mode",
@@ -150,6 +180,19 @@ const ensureModelOption = (models: ModelOption[], id: string) => {
   if (!id) return models;
   if (models.some((item) => item.id === id)) return models;
   return [{ id, label: id }, ...models];
+};
+
+const formatBytes = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let index = 0;
+  let size = value;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  const digits = index === 0 ? 0 : size >= 10 ? 1 : 2;
+  return `${size.toFixed(digits)} ${units[index]}`;
 };
 
 const normalizeStringArray = (value: unknown): string[] => {
@@ -301,6 +344,15 @@ export default function Studio() {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [lastOutput, setLastOutput] = useState<OutputMeta | null>(null);
+  const [storageSnapshot, setStorageSnapshot] =
+    useState<StorageSnapshot | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [navyUsage, setNavyUsage] = useState<NavyUsageResponse | null>(null);
+  const [navyUsageError, setNavyUsageError] = useState<string | null>(null);
+  const [navyUsageLoading, setNavyUsageLoading] = useState(false);
+  const [navyUsageUpdatedAt, setNavyUsageUpdatedAt] = useState<string | null>(
+    null
+  );
   const [viewerImage, setViewerImage] = useState<{
     dataUrl: string;
     prompt: string;
@@ -325,6 +377,30 @@ export default function Studio() {
       : provider === "navy" || (isOpenRouterProvider && isOpenRouterGemini);
   const showImageAspect = provider === "gemini" || isOpenRouterGemini;
   const idbAvailable = useMemo(() => isIndexedDbAvailable(), []);
+
+  const refreshStorageEstimate = useCallback(async () => {
+    if (typeof navigator === "undefined") return;
+    if (!navigator.storage?.estimate) {
+      setStorageError("Storage usage isn't available in this browser.");
+      return;
+    }
+    try {
+      const estimate = await navigator.storage.estimate();
+      const persistent = navigator.storage.persisted
+        ? await navigator.storage.persisted()
+        : null;
+      setStorageSnapshot({
+        usage: estimate.usage ?? 0,
+        quota: estimate.quota ?? 0,
+        persistent,
+      });
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(
+        error instanceof Error ? error.message : "Unable to read storage usage."
+      );
+    }
+  }, []);
 
   const modelSuggestions = useMemo(() => {
     if (provider === "gemini") {
@@ -497,6 +573,11 @@ export default function Studio() {
     const storedKey = readLocalStorage<string>(getKeyStorage(provider), "");
     setApiKey(storedKey);
   }, [provider, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void refreshStorageEstimate();
+  }, [hydrated, savedImages, refreshStorageEstimate]);
 
   useEffect(() => {
     setModelsError(null);
@@ -1415,6 +1496,43 @@ export default function Studio() {
       <div className="my-12 h-px bg-border/50" />
 
       {/* Gallery Section */}
+      <div className="rounded-xl border bg-card/50 p-4 text-sm">
+        <div className="flex items-center justify-between gap-4">
+          <span className="font-semibold">Storage usage</span>
+          <Button variant="ghost" size="sm" onClick={refreshStorageEstimate}>
+            Refresh
+          </Button>
+        </div>
+        {storageError ? (
+          <p className="mt-2 text-xs text-destructive">{storageError}</p>
+        ) : storageSnapshot ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              {formatBytes(storageSnapshot.usage)} of{" "}
+              {formatBytes(storageSnapshot.quota)} used
+            </span>
+            {storageSnapshot.quota > 0 && (
+              <span>
+                ({Math.min(
+                  100,
+                  Math.round(
+                    (storageSnapshot.usage / storageSnapshot.quota) * 100
+                  )
+                )}
+                %)
+              </span>
+            )}
+            {storageSnapshot.persistent !== null && (
+              <span>
+                Persistence: {storageSnapshot.persistent ? "granted" : "not granted"}
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">Checking storage...</p>
+        )}
+      </div>
+
       <GalleryGrid images={savedImages} onClear={clearGallery} />
       <ImageViewer
         open={!!viewerImage}
