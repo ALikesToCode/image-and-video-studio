@@ -30,6 +30,7 @@ import {
     VIDEO_RESOLUTIONS,
 } from "@/lib/constants";
 import { useState } from "react";
+import { NavyUsageResponse } from "@/lib/types";
 
 interface ImgGenSettingsProps {
     provider: Provider;
@@ -67,6 +68,11 @@ interface ImgGenSettingsProps {
     onRefreshModels?: () => void;
     modelsLoading?: boolean;
     modelsError?: string | null;
+    navyUsage?: NavyUsageResponse | null;
+    navyUsageError?: string | null;
+    navyUsageLoading?: boolean;
+    navyUsageUpdatedAt?: string | null;
+    onRefreshUsage?: () => void;
 }
 
 export function ImgGenSettings({
@@ -105,6 +111,11 @@ export function ImgGenSettings({
     onRefreshModels,
     modelsLoading,
     modelsError,
+    navyUsage,
+    navyUsageError,
+    navyUsageLoading,
+    navyUsageUpdatedAt,
+    onRefreshUsage,
 }: ImgGenSettingsProps) {
     const [showKey, setShowKey] = useState(false);
 
@@ -121,6 +132,26 @@ export function ImgGenSettings({
     const showImageAspect = provider === "gemini" || isOpenRouterGemini;
     const availableImageSizes = isImagenModel ? IMAGEN_SIZES : IMAGE_SIZES;
     const galleryDisabled = mode !== "image";
+    const usagePercent =
+        typeof navyUsage?.usage?.percent_used === "number"
+            ? navyUsage.usage.percent_used
+            : null;
+    const usageUpdatedLabel = navyUsageUpdatedAt
+        ? new Date(navyUsageUpdatedAt).toLocaleTimeString()
+        : null;
+
+    const formatCount = (value?: number) =>
+        typeof value === "number" ? value.toLocaleString() : "-";
+    const formatDuration = (ms?: number) => {
+        if (!ms || !Number.isFinite(ms)) return "-";
+        const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        if (minutes > 0) return `${minutes}m ${seconds}s`;
+        return `${seconds}s`;
+    };
 
     return (
         <Card className="h-fit">
@@ -392,6 +423,88 @@ export function ImgGenSettings({
                         Save to local gallery
                     </Label>
                 </div>
+
+                {provider === "navy" ? (
+                    <div className="rounded-lg border bg-muted/30 p-3 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">NavyAI usage</span>
+                            {onRefreshUsage && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={onRefreshUsage}
+                                    disabled={navyUsageLoading}
+                                >
+                                    {navyUsageLoading ? "Refreshing..." : "Refresh"}
+                                </Button>
+                            )}
+                        </div>
+                        {navyUsageError ? (
+                            <p className="mt-2 text-destructive">{navyUsageError}</p>
+                        ) : navyUsage ? (
+                            <div className="mt-2 grid grid-cols-2 gap-3 text-muted-foreground">
+                                <div>
+                                    <div className="text-[10px] uppercase tracking-wide">Plan</div>
+                                    <div className="text-foreground">{navyUsage.plan}</div>
+                                </div>
+                                <div>
+                                    <div className="text-[10px] uppercase tracking-wide">RPM Limit</div>
+                                    <div className="text-foreground">{formatCount(navyUsage.limits.rpm)}</div>
+                                </div>
+                                <div>
+                                    <div className="text-[10px] uppercase tracking-wide">Tokens Used</div>
+                                    <div className="text-foreground">
+                                        {formatCount(navyUsage.usage.tokens_used_today)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-[10px] uppercase tracking-wide">Tokens Remaining</div>
+                                    <div className="text-foreground">
+                                        {formatCount(navyUsage.usage.tokens_remaining_today)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-[10px] uppercase tracking-wide">Percent Used</div>
+                                    <div className="text-foreground">
+                                        {usagePercent !== null ? `${usagePercent.toFixed(1)}%` : "-"}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-[10px] uppercase tracking-wide">Resets In</div>
+                                    <div className="text-foreground">
+                                        {formatDuration(navyUsage.usage.resets_in_ms)}
+                                    </div>
+                                </div>
+                                <div className="col-span-2">
+                                    <div className="text-[10px] uppercase tracking-wide">Rate Limit (per minute)</div>
+                                    <div className="text-foreground">
+                                        {formatCount(navyUsage.rate_limits.per_minute.used)}/
+                                        {formatCount(navyUsage.rate_limits.per_minute.limit)} used ·{" "}
+                                        {formatCount(navyUsage.rate_limits.per_minute.remaining)} remaining
+                                    </div>
+                                </div>
+                                <div className="col-span-2 text-[10px] uppercase tracking-wide">
+                                    Resets at (UTC):{" "}
+                                    <span className="normal-case text-foreground">
+                                        {new Date(navyUsage.usage.resets_at_utc).toUTCString()}
+                                    </span>
+                                </div>
+                                {usageUpdatedLabel ? (
+                                    <div className="col-span-2 text-[10px] uppercase tracking-wide">
+                                        Updated:{" "}
+                                        <span className="normal-case text-foreground">
+                                            {usageUpdatedLabel}
+                                        </span>
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <p className="mt-2 text-muted-foreground">
+                                Add a NavyAI API key to see usage stats.
+                            </p>
+                        )}
+                    </div>
+                ) : null}
             </CardContent>
         </Card>
     );

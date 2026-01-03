@@ -22,7 +22,11 @@ import {
   type Mode,
   type ModelOption,
 } from "@/lib/constants";
-import { type GeneratedImage, type StoredImage } from "@/lib/types";
+import {
+  type GeneratedImage,
+  type NavyUsageResponse,
+  type StoredImage,
+} from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
 import {
   clearGalleryStore,
@@ -85,29 +89,6 @@ type StorageSnapshot = {
   persistent: boolean | null;
 };
 
-type NavyUsageResponse = {
-  plan: string;
-  limits: {
-    tokens_per_day: number;
-    rpm: number;
-  };
-  usage: {
-    tokens_used_today: number;
-    tokens_remaining_today: number;
-    percent_used: number;
-    resets_at_utc: string;
-    resets_in_ms: number;
-  };
-  rate_limits: {
-    per_minute: {
-      limit: number;
-      used: number;
-      remaining: number;
-      resets_in_ms: number;
-    };
-  };
-  server_time_utc: string;
-};
 
 const STORAGE_KEYS = {
   provider: "studio_provider",
@@ -364,6 +345,7 @@ export default function Studio() {
   const processingRef = useRef(false);
   const galleryUrlsRef = useRef(new Map<string, string>());
   const prevSavedImagesRef = useRef<StoredImage[]>([]);
+  const navyUsageLoadingRef = useRef(false);
 
   const isOpenRouterProvider = provider === "openrouter";
   const supportsVideo = provider === "gemini" || provider === "navy";
@@ -401,6 +383,39 @@ export default function Studio() {
       );
     }
   }, []);
+
+  const refreshNavyUsage = useCallback(async () => {
+    if (provider !== "navy") return;
+    const trimmedKey = apiKey.trim();
+    if (!trimmedKey) {
+      setNavyUsage(null);
+      setNavyUsageError(null);
+      setNavyUsageUpdatedAt(null);
+      return;
+    }
+    if (navyUsageLoadingRef.current) return;
+    navyUsageLoadingRef.current = true;
+    setNavyUsageLoading(true);
+    try {
+      const response = await fetch("/api/navy/usage", {
+        headers: { "x-user-api-key": trimmedKey },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Unable to fetch usage.");
+      }
+      setNavyUsage(payload as NavyUsageResponse);
+      setNavyUsageError(null);
+      setNavyUsageUpdatedAt(new Date().toISOString());
+    } catch (error) {
+      setNavyUsageError(
+        error instanceof Error ? error.message : "Unable to fetch usage."
+      );
+    } finally {
+      navyUsageLoadingRef.current = false;
+      setNavyUsageLoading(false);
+    }
+  }, [apiKey, provider]);
 
   const modelSuggestions = useMemo(() => {
     if (provider === "gemini") {
@@ -578,6 +593,27 @@ export default function Studio() {
     if (!hydrated) return;
     void refreshStorageEstimate();
   }, [hydrated, savedImages, refreshStorageEstimate]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (provider !== "navy") {
+      setNavyUsage(null);
+      setNavyUsageError(null);
+      setNavyUsageUpdatedAt(null);
+      return;
+    }
+    if (!apiKey.trim()) {
+      setNavyUsage(null);
+      setNavyUsageError(null);
+      setNavyUsageUpdatedAt(null);
+      return;
+    }
+    void refreshNavyUsage();
+    const interval = window.setInterval(() => {
+      void refreshNavyUsage();
+    }, 60000);
+    return () => window.clearInterval(interval);
+  }, [provider, apiKey, hydrated, refreshNavyUsage]);
 
   useEffect(() => {
     setModelsError(null);
@@ -1344,6 +1380,11 @@ export default function Studio() {
             }
             modelsLoading={modelsLoading}
             modelsError={modelsError}
+            navyUsage={navyUsage}
+            navyUsageError={navyUsageError}
+            navyUsageLoading={navyUsageLoading}
+            navyUsageUpdatedAt={navyUsageUpdatedAt}
+            onRefreshUsage={provider === "navy" ? refreshNavyUsage : undefined}
           />
         </div>
 
