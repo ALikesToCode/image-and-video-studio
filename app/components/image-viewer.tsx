@@ -15,6 +15,8 @@ type ImageViewerProps = {
     prompt: string;
     model: string;
     provider?: string;
+    kind?: "image" | "video" | "audio";
+    mimeType?: string | null;
 };
 
 export function ImageViewer({
@@ -24,6 +26,8 @@ export function ImageViewer({
     prompt,
     model,
     provider,
+    kind = "image",
+    mimeType,
 }: ImageViewerProps) {
     if (!imageUrl) return null;
 
@@ -31,16 +35,34 @@ export function ImageViewer({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-none w-[96vw] h-[92vh] p-0 overflow-hidden">
                 <DialogHeader className="sr-only">
-                    <DialogTitle>Image preview</DialogTitle>
-                    <DialogDescription>Full screen image preview.</DialogDescription>
+                    <DialogTitle>
+                        {kind === "video"
+                            ? "Video preview"
+                            : kind === "audio"
+                                ? "Audio preview"
+                                : "Image preview"}
+                    </DialogTitle>
+                    <DialogDescription>
+                        Full screen {kind === "audio" ? "audio" : kind} preview.
+                    </DialogDescription>
                 </DialogHeader>
                 <div className="flex h-full flex-col lg:flex-row">
                     <div className="flex-1 bg-black/90 flex items-center justify-center p-4">
-                        <img
-                            src={imageUrl}
-                            alt={prompt || "Generated image"}
-                            className="max-h-full max-w-full object-contain"
-                        />
+                        {kind === "video" ? (
+                            <video
+                                src={imageUrl}
+                                controls
+                                className="max-h-full max-w-full"
+                            />
+                        ) : kind === "audio" ? (
+                            <audio src={imageUrl} controls className="w-full" />
+                        ) : (
+                            <img
+                                src={imageUrl}
+                                alt={prompt || "Generated image"}
+                                className="max-h-full max-w-full object-contain"
+                            />
+                        )}
                     </div>
                     <div className="w-full lg:w-[360px] border-t lg:border-t-0 lg:border-l bg-card p-6 overflow-y-auto">
                         <div className="space-y-4">
@@ -60,6 +82,14 @@ export function ImageViewer({
                                     {model || "Unknown"}
                                 </p>
                             </div>
+                            {mimeType ? (
+                                <div>
+                                    <p className="text-xs uppercase tracking-widest text-muted-foreground">
+                                        Format
+                                    </p>
+                                    <p className="mt-2 text-sm text-foreground">{mimeType}</p>
+                                </div>
+                            ) : null}
                             {provider ? (
                                 <div>
                                     <p className="text-xs uppercase tracking-widest text-muted-foreground">

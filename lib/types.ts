@@ -1,13 +1,17 @@
 import { Provider } from "./constants";
 
-export type StoredImage = {
+export type StoredMedia = {
     id: string;
     dataUrl: string;
     prompt: string;
     model: string;
     provider: Provider;
     createdAt: string;
+    kind: "image" | "video" | "audio";
+    mimeType?: string;
 };
+
+export type StoredImage = StoredMedia;
 
 export type GeneratedImage = {
     id: string;

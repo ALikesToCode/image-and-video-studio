@@ -48,6 +48,14 @@ interface ImgGenSettingsProps {
     setImageSize: (s: string) => void;
     imageCount: number;
     setImageCount: (c: number) => void;
+    chutesGuidanceScale: string;
+    setChutesGuidanceScale: (v: string) => void;
+    chutesWidth: string;
+    setChutesWidth: (v: string) => void;
+    chutesHeight: string;
+    setChutesHeight: (v: string) => void;
+    chutesSteps: string;
+    setChutesSteps: (v: string) => void;
     videoAspect: string;
     setVideoAspect: (a: string) => void;
     videoResolution: string;
@@ -91,6 +99,14 @@ export function ImgGenSettings({
     setImageSize,
     imageCount,
     setImageCount,
+    chutesGuidanceScale,
+    setChutesGuidanceScale,
+    chutesWidth,
+    setChutesWidth,
+    chutesHeight,
+    setChutesHeight,
+    chutesSteps,
+    setChutesSteps,
     videoAspect,
     setVideoAspect,
     videoResolution,
@@ -119,7 +135,6 @@ export function ImgGenSettings({
 }: ImgGenSettingsProps) {
     const [showKey, setShowKey] = useState(false);
 
-    const isChutes = provider === "chutes";
     const isOpenRouter = provider === "openrouter";
     const isImagenModel = model.startsWith("imagen-");
     const isOpenRouterGemini = isOpenRouter && model.includes("gemini");
@@ -131,7 +146,7 @@ export function ImgGenSettings({
             : provider === "navy" || (isOpenRouter && isOpenRouterGemini);
     const showImageAspect = provider === "gemini" || isOpenRouterGemini;
     const availableImageSizes = isImagenModel ? IMAGEN_SIZES : IMAGE_SIZES;
-    const galleryDisabled = mode !== "image";
+    const galleryDisabled = false;
     const usagePercent =
         typeof navyUsage?.usage?.percent_used === "number"
             ? navyUsage.usage.percent_used
@@ -257,7 +272,7 @@ export function ImgGenSettings({
                             </Button>
                         )}
                     </div>
-                    <Select value={model} onValueChange={setModel} disabled={isChutes}>
+                    <Select value={model} onValueChange={setModel}>
                         <SelectTrigger>
                             <SelectValue placeholder="Select a model" />
                         </SelectTrigger>
@@ -269,9 +284,7 @@ export function ImgGenSettings({
                             ))}
                         </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">
-                        {isChutes ? "Fixed model." : "Select a model."}
-                    </p>
+                    <p className="text-xs text-muted-foreground">Select a model.</p>
                     {modelsError ? (
                         <p className="text-xs text-destructive">{modelsError}</p>
                     ) : null}
@@ -319,6 +332,51 @@ export function ImgGenSettings({
                                 </Select>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {mode === "image" && provider === "chutes" && (
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Guidance Scale</Label>
+                            <Input
+                                type="number"
+                                min="0"
+                                step="0.1"
+                                value={chutesGuidanceScale}
+                                onChange={(e) => setChutesGuidanceScale(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Steps</Label>
+                            <Input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={chutesSteps}
+                                onChange={(e) => setChutesSteps(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Width</Label>
+                            <Input
+                                type="number"
+                                min="64"
+                                step="64"
+                                value={chutesWidth}
+                                onChange={(e) => setChutesWidth(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Height</Label>
+                            <Input
+                                type="number"
+                                min="64"
+                                step="64"
+                                value={chutesHeight}
+                                onChange={(e) => setChutesHeight(e.target.value)}
+                            />
+                        </div>
                     </div>
                 )}
 

@@ -3,6 +3,12 @@ export const runtime = "edge";
 type ImageRequest = {
   apiKey: string;
   prompt: string;
+  model?: string;
+  negativePrompt?: string;
+  guidanceScale?: number;
+  width?: number;
+  height?: number;
+  numInferenceSteps?: number;
 };
 
 type ImagePayload = {
@@ -99,13 +105,31 @@ export async function POST(req: Request) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
-  const response = await fetch("https://chutes-z-image-turbo.chutes.ai/generate", {
+  const model = body.model ?? "z-image-turbo";
+  const useNewEndpoint = model !== "z-image-turbo";
+  const url = useNewEndpoint
+    ? "https://image.chutes.ai/generate"
+    : "https://chutes-z-image-turbo.chutes.ai/generate";
+
+  const payload = useNewEndpoint
+    ? {
+        model,
+        prompt,
+        negative_prompt: body.negativePrompt,
+        guidance_scale: body.guidanceScale,
+        width: body.width,
+        height: body.height,
+        num_inference_steps: body.numInferenceSteps,
+      }
+    : { prompt };
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify(payload),
   });
 
   const contentType = response.headers.get("content-type") ?? "";

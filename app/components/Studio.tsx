@@ -25,7 +25,7 @@ import {
 import {
   type GeneratedImage,
   type NavyUsageResponse,
-  type StoredImage,
+  type StoredMedia,
 } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
 import {
@@ -64,6 +64,10 @@ type GenerationJob = {
   imageAspect: string;
   imageSize: string;
   navyImageSize: string;
+  chutesGuidanceScale: string;
+  chutesWidth: string;
+  chutesHeight: string;
+  chutesSteps: string;
   videoAspect: string;
   videoResolution: string;
   videoDuration: string;
@@ -81,7 +85,11 @@ type OutputMeta = {
   ttsVoice?: string;
 };
 
-type StoredImageRecord = Omit<StoredImage, "dataUrl"> & { dataUrl?: string };
+type StoredMediaRecord = Omit<StoredMedia, "dataUrl" | "kind"> & {
+  dataUrl?: string;
+  kind?: StoredMedia["kind"];
+  mimeType?: string;
+};
 
 type StorageSnapshot = {
   usage: number;
@@ -105,7 +113,7 @@ const STORAGE_KEYS = {
   navyTtsModels: "studio_navy_tts_models",
 };
 
-const MAX_SAVED_IMAGES = 12;
+const MAX_SAVED_MEDIA = 12;
 const MAX_CACHED_MODELS = 200;
 const MAX_JOB_HISTORY = 20;
 
@@ -306,6 +314,10 @@ export default function Studio() {
   const [imageAspect, setImageAspect] = useState(IMAGE_ASPECTS[0]);
   const [imageSize, setImageSize] = useState(IMAGE_SIZES[0]);
   const [navyImageSize, setNavyImageSize] = useState("1024x1024"); // Default
+  const [chutesGuidanceScale, setChutesGuidanceScale] = useState("7.5");
+  const [chutesWidth, setChutesWidth] = useState("1024");
+  const [chutesHeight, setChutesHeight] = useState("1024");
+  const [chutesSteps, setChutesSteps] = useState("50");
   const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0]);
   const [videoResolution, setVideoResolution] = useState(VIDEO_RESOLUTIONS[0]);
   const [videoDuration, setVideoDuration] = useState(VIDEO_DURATIONS[2]);
@@ -315,7 +327,7 @@ export default function Studio() {
   const [saveToGallery, setSaveToGallery] = useState(true);
 
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [savedImages, setSavedImages] = useState<StoredImage[]>([]);
+  const [savedMedia, setSavedMedia] = useState<StoredMedia[]>([]);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioMimeType, setAudioMimeType] = useState<string | null>(null);
@@ -344,7 +356,7 @@ export default function Studio() {
   const activeVideoUrl = useRef<string | null>(null);
   const processingRef = useRef(false);
   const galleryUrlsRef = useRef(new Map<string, string>());
-  const prevSavedImagesRef = useRef<StoredImage[]>([]);
+  const prevSavedMediaRef = useRef<StoredMedia[]>([]);
   const navyUsageLoadingRef = useRef(false);
 
   const isOpenRouterProvider = provider === "openrouter";
@@ -454,7 +466,7 @@ export default function Studio() {
     setHydrated(true);
     const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
     const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
-    const storedImages = readLocalStorage<StoredImageRecord[]>(STORAGE_KEYS.images, []);
+    const storedMedia = readLocalStorage<StoredMediaRecord[]>(STORAGE_KEYS.images, []);
     const storedOpenRouterModels = readLocalStorage<ModelOption[]>(
       STORAGE_KEYS.openRouterModels,
       []
@@ -486,15 +498,15 @@ export default function Studio() {
     if (storedNavyTtsModels.length) {
       setNavyTtsModels(sanitizeModelOptions(storedNavyTtsModels));
     }
-    const loadSavedImages = async () => {
-      if (!storedImages.length) return;
+    const loadSavedMedia = async () => {
+      if (!storedMedia.length) return;
       if (!idbAvailable) {
-        const legacyEntries = storedImages.filter(
-          (item): item is StoredImageRecord & { dataUrl: string } =>
+        const legacyEntries = storedMedia.filter(
+          (item): item is StoredMediaRecord & { dataUrl: string } =>
             typeof item.dataUrl === "string" && item.dataUrl.length > 0
         );
         if (legacyEntries.length) {
-          setSavedImages(
+          setSavedMedia(
             legacyEntries.map((item) => ({
               id: item.id,
               dataUrl: item.dataUrl,
@@ -502,20 +514,22 @@ export default function Studio() {
               model: item.model,
               provider: item.provider,
               createdAt: item.createdAt,
+              kind: item.kind ?? "image",
+              mimeType: item.mimeType,
             }))
           );
         }
         setErrorMessage("IndexedDB is unavailable. Gallery saves may be limited.");
         return;
       }
-      const entries: StoredImage[] = [];
-      for (const item of storedImages) {
+      const entries: StoredMedia[] = [];
+      for (const item of storedMedia) {
         try {
           let blob = await getGalleryBlob(item.id);
           if (!blob && item.dataUrl) {
             const response = await fetch(item.dataUrl);
             if (!response.ok) {
-              throw new Error("Unable to migrate gallery image.");
+              throw new Error("Unable to migrate gallery item.");
             }
             blob = await response.blob();
             await putGalleryBlob(item.id, blob);
@@ -530,17 +544,19 @@ export default function Studio() {
             model: item.model,
             provider: item.provider,
             createdAt: item.createdAt,
+            kind: item.kind ?? "image",
+            mimeType: item.mimeType ?? blob.type,
           });
         } catch (error) {
           setErrorMessage(
-            error instanceof Error ? error.message : "Unable to load saved images."
+            error instanceof Error ? error.message : "Unable to load saved items."
           );
         }
       }
-      setSavedImages(entries);
+      setSavedMedia(entries);
     };
 
-    void loadSavedImages();
+    void loadSavedMedia();
   }, []);
 
   useEffect(() => {
@@ -592,7 +608,7 @@ export default function Studio() {
   useEffect(() => {
     if (!hydrated) return;
     void refreshStorageEstimate();
-  }, [hydrated, savedImages, refreshStorageEstimate]);
+  }, [hydrated, savedMedia, refreshStorageEstimate]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -637,23 +653,25 @@ export default function Studio() {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      const storedImages: StoredImageRecord[] = savedImages.map((image) => ({
-        id: image.id,
-        prompt: image.prompt,
-        model: image.model,
-        provider: image.provider,
-        createdAt: image.createdAt,
-        ...(idbAvailable ? {} : { dataUrl: image.dataUrl }),
+      const storedMedia: StoredMediaRecord[] = savedMedia.map((item) => ({
+        id: item.id,
+        prompt: item.prompt,
+        model: item.model,
+        provider: item.provider,
+        createdAt: item.createdAt,
+        kind: item.kind,
+        mimeType: item.mimeType,
+        ...(idbAvailable ? {} : { dataUrl: item.dataUrl }),
       }));
-      writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedImages));
+      writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedMedia));
     } catch {
-      setErrorMessage("Local storage is full. Clear some saved images.");
+      setErrorMessage("Local storage is full. Clear some saved items.");
     }
-  }, [savedImages, hydrated, idbAvailable]);
+  }, [savedMedia, hydrated, idbAvailable]);
 
   useEffect(() => {
-    const previous = prevSavedImagesRef.current;
-    const currentIds = new Set(savedImages.map((image) => image.id));
+    const previous = prevSavedMediaRef.current;
+    const currentIds = new Set(savedMedia.map((image) => image.id));
     const removed = previous.filter((image) => !currentIds.has(image.id));
     if (removed.length) {
       removed.forEach((image) => {
@@ -667,8 +685,8 @@ export default function Studio() {
         }
       });
     }
-    prevSavedImagesRef.current = savedImages;
-  }, [savedImages, idbAvailable]);
+    prevSavedMediaRef.current = savedMedia;
+  }, [savedMedia, idbAvailable]);
 
   useEffect(() => {
     if (!hydrated || !openRouterImageModels.length) return;
@@ -730,32 +748,41 @@ export default function Studio() {
     }
   };
 
-  const addImagesToGallery = async (
-    newImages: GeneratedImage[],
-    metadata: { prompt: string; model: string; provider: Provider; saveToGallery: boolean }
+  const addMediaToGallery = async (
+    items: { url: string; mimeType?: string }[],
+    metadata: {
+      prompt: string;
+      model: string;
+      provider: Provider;
+      saveToGallery: boolean;
+      kind: StoredMedia["kind"];
+    }
   ) => {
-    if (!metadata.saveToGallery) return;
+    if (!metadata.saveToGallery || items.length === 0) return;
     try {
       if (!idbAvailable) {
-        const entries: StoredImage[] = newImages.map((image) => ({
+        const entries: StoredMedia[] = items.map((item) => ({
           id: createId(),
-          dataUrl: image.dataUrl,
+          dataUrl: item.url,
           prompt: metadata.prompt,
           model: metadata.model,
           provider: metadata.provider,
           createdAt: new Date().toISOString(),
+          kind: metadata.kind,
+          mimeType: item.mimeType,
         }));
-        setSavedImages((prev) => [...entries, ...prev].slice(0, MAX_SAVED_IMAGES));
+        setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
         return;
       }
-      const entries: StoredImage[] = [];
-      for (const image of newImages) {
+      const entries: StoredMedia[] = [];
+      for (const item of items) {
         const id = createId();
-        const response = await fetch(image.dataUrl);
+        const response = await fetch(item.url);
         if (!response.ok) {
-          throw new Error("Unable to save generated image.");
+          throw new Error("Unable to save generated media.");
         }
         const blob = await response.blob();
+        const mimeType = item.mimeType ?? blob.type;
         await putGalleryBlob(id, blob);
         const url = URL.createObjectURL(blob);
         galleryUrlsRef.current.set(id, url);
@@ -766,10 +793,12 @@ export default function Studio() {
           model: metadata.model,
           provider: metadata.provider,
           createdAt: new Date().toISOString(),
+          kind: metadata.kind,
+          mimeType,
         });
       }
 
-      setSavedImages((prev) => [...entries, ...prev].slice(0, MAX_SAVED_IMAGES));
+      setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to save to local gallery."
@@ -784,13 +813,13 @@ export default function Studio() {
       }
     });
     galleryUrlsRef.current.clear();
-    prevSavedImagesRef.current = [];
-    setSavedImages([]);
+    prevSavedMediaRef.current = [];
+    setSavedMedia([]);
     window.localStorage.removeItem(STORAGE_KEYS.images);
     if (idbAvailable) {
       void clearGalleryStore().catch((error) => {
         setErrorMessage(
-          error instanceof Error ? error.message : "Unable to clear saved images."
+          error instanceof Error ? error.message : "Unable to clear saved items."
         );
       });
     }
@@ -1053,10 +1082,25 @@ export default function Studio() {
           mimeType: image.mimeType,
         }));
       } else {
+        const guidanceScale = Number(job.chutesGuidanceScale);
+        const width = Number(job.chutesWidth);
+        const height = Number(job.chutesHeight);
+        const numInferenceSteps = Number(job.chutesSteps);
         const response = await fetch("/api/chutes/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ apiKey: job.apiKey, prompt: job.prompt }),
+          body: JSON.stringify({
+            apiKey: job.apiKey,
+            model: job.model,
+            prompt: job.prompt,
+            negativePrompt: job.negativePrompt || undefined,
+            guidanceScale: Number.isFinite(guidanceScale) ? guidanceScale : undefined,
+            width: Number.isFinite(width) ? width : undefined,
+            height: Number.isFinite(height) ? height : undefined,
+            numInferenceSteps: Number.isFinite(numInferenceSteps)
+              ? numInferenceSteps
+              : undefined,
+          }),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
@@ -1068,12 +1112,16 @@ export default function Studio() {
       }
 
       setGeneratedImages(images);
-      await addImagesToGallery(images, {
-        prompt: job.prompt,
-        model: job.model,
-        provider: job.provider,
-        saveToGallery: job.saveToGallery,
-      });
+      await addMediaToGallery(
+        images.map((image) => ({ url: image.dataUrl, mimeType: image.mimeType })),
+        {
+          prompt: job.prompt,
+          model: job.model,
+          provider: job.provider,
+          saveToGallery: job.saveToGallery,
+          kind: "image",
+        }
+      );
       setLastOutput({
         mode: "image",
         prompt: job.prompt,
@@ -1137,6 +1185,16 @@ export default function Studio() {
           const blob = await download.blob();
           const url = URL.createObjectURL(blob);
           updateVideoUrl(url);
+          await addMediaToGallery(
+            [{ url, mimeType: blob.type }],
+            {
+              prompt: job.prompt,
+              model: job.model,
+              provider: job.provider,
+              saveToGallery: job.saveToGallery,
+              kind: "video",
+            }
+          );
           setLastOutput({
             mode: "video",
             prompt: job.prompt,
@@ -1186,6 +1244,16 @@ export default function Studio() {
         if (pollPayload.done) {
           if (pollPayload.error) throw new Error(pollPayload.error);
           updateVideoUrl(pollPayload.videoUrl as string);
+          await addMediaToGallery(
+            [{ url: pollPayload.videoUrl as string }],
+            {
+              prompt: job.prompt,
+              model: job.model,
+              provider: job.provider,
+              saveToGallery: job.saveToGallery,
+              kind: "video",
+            }
+          );
           setLastOutput({
             mode: "video",
             prompt: job.prompt,
@@ -1230,6 +1298,16 @@ export default function Studio() {
       const dataUrl = dataUrlFromBase64(audio.data, audio.mimeType);
       setAudioUrl(dataUrl);
       setAudioMimeType(audio.mimeType);
+      await addMediaToGallery(
+        [{ url: dataUrl, mimeType: audio.mimeType }],
+        {
+          prompt: job.prompt,
+          model: job.model,
+          provider: job.provider,
+          saveToGallery: job.saveToGallery,
+          kind: "audio",
+        }
+      );
       setLastOutput({
         mode: "tts",
         prompt: job.prompt,
@@ -1315,6 +1393,10 @@ export default function Studio() {
       imageAspect,
       imageSize,
       navyImageSize,
+      chutesGuidanceScale,
+      chutesWidth,
+      chutesHeight,
+      chutesSteps,
       videoAspect,
       videoResolution,
       videoDuration,
@@ -1356,6 +1438,14 @@ export default function Studio() {
             setImageSize={setImageSize}
             imageCount={imageCount}
             setImageCount={setImageCount}
+            chutesGuidanceScale={chutesGuidanceScale}
+            setChutesGuidanceScale={setChutesGuidanceScale}
+            chutesWidth={chutesWidth}
+            setChutesWidth={setChutesWidth}
+            chutesHeight={chutesHeight}
+            setChutesHeight={setChutesHeight}
+            chutesSteps={chutesSteps}
+            setChutesSteps={setChutesSteps}
             videoAspect={videoAspect}
             setVideoAspect={setVideoAspect}
             videoResolution={videoResolution}
@@ -1574,7 +1664,7 @@ export default function Studio() {
         )}
       </div>
 
-      <GalleryGrid images={savedImages} onClear={clearGallery} />
+      <GalleryGrid items={savedMedia} onClear={clearGallery} />
       <ImageViewer
         open={!!viewerImage}
         onOpenChange={closeViewer}

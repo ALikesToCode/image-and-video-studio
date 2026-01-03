@@ -62,6 +62,10 @@ export const CHUTES_IMAGE_MODELS: ModelOption[] = [
         id: "z-image-turbo",
         label: "Chutes Z Image Turbo",
     },
+    {
+        id: "Qwen-Image-2512",
+        label: "Qwen Image 2512",
+    },
 ];
 
 export const OPENROUTER_IMAGE_MODELS: ModelOption[] = [
