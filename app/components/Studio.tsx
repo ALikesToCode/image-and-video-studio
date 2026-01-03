@@ -33,6 +33,43 @@ import { Button } from "./ui/button";
 import { Download, Loader2, Maximize2 } from "lucide-react";
 import { ImageViewer } from "./image-viewer";
 
+type JobStatus = "queued" | "running" | "success" | "error";
+
+type GenerationJob = {
+  id: string;
+  status: JobStatus;
+  mode: Mode;
+  provider: Provider;
+  model: string;
+  prompt: string;
+  apiKey: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  progress?: string;
+  negativePrompt?: string;
+  imageCount: number;
+  imageAspect: string;
+  imageSize: string;
+  navyImageSize: string;
+  videoAspect: string;
+  videoResolution: string;
+  videoDuration: string;
+  ttsVoice: string;
+  ttsFormat: string;
+  ttsSpeed: string;
+  saveToGallery: boolean;
+};
+
+type OutputMeta = {
+  mode: Mode;
+  prompt: string;
+  model: string;
+  provider: Provider;
+  ttsVoice?: string;
+};
+
 const STORAGE_KEYS = {
   provider: "studio_provider",
   mode: "studio_mode",
@@ -49,6 +86,7 @@ const STORAGE_KEYS = {
 
 const MAX_SAVED_IMAGES = 12;
 const MAX_CACHED_MODELS = 200;
+const MAX_JOB_HISTORY = 20;
 
 const getKeyStorage = (provider: Provider) => {
   if (provider === "gemini") return STORAGE_KEYS.keyGemini;
@@ -238,14 +276,12 @@ export default function Studio() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioMimeType, setAudioMimeType] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
-  const [lastPrompt, setLastPrompt] = useState("");
-  const [lastModel, setLastModel] = useState("");
-  const [lastProvider, setLastProvider] = useState<Provider>("gemini");
+  const [lastOutput, setLastOutput] = useState<OutputMeta | null>(null);
   const [viewerImage, setViewerImage] = useState<{
     dataUrl: string;
     prompt: string;
@@ -254,6 +290,7 @@ export default function Studio() {
   } | null>(null);
 
   const activeVideoUrl = useRef<string | null>(null);
+  const processingRef = useRef(false);
 
   const isOpenRouterProvider = provider === "openrouter";
   const supportsVideo = provider === "gemini" || provider === "navy";
@@ -289,10 +326,15 @@ export default function Studio() {
     navyTtsModels,
   ]);
 
+  const runningJobs = jobs.filter((job) => job.status === "running");
+  const queuedJobs = jobs.filter((job) => job.status === "queued");
+  const hasActiveJobs = runningJobs.length > 0 || queuedJobs.length > 0;
+  const recentJobs = jobs.slice(-4).reverse();
+
   const hasOutput =
-    (mode === "image" && generatedImages.length > 0) ||
-    (mode === "video" && !!videoUrl) ||
-    (mode === "tts" && !!audioUrl);
+    (lastOutput?.mode === "image" && generatedImages.length > 0) ||
+    (lastOutput?.mode === "video" && !!videoUrl) ||
+    (lastOutput?.mode === "tts" && !!audioUrl);
 
   // Hydration & Persistence
   useEffect(() => {
@@ -445,33 +487,23 @@ export default function Studio() {
     setVideoUrl(url);
   };
 
-  const clearVideoUrl = () => {
-    if (activeVideoUrl.current?.startsWith("blob:")) {
-      URL.revokeObjectURL(activeVideoUrl.current);
-    }
-    activeVideoUrl.current = null;
-    setVideoUrl(null);
-  };
-
-  const clearAudioUrl = () => {
-    setAudioUrl(null);
-    setAudioMimeType(null);
-  };
-
   const closeViewer = (open: boolean) => {
     if (!open) {
       setViewerImage(null);
     }
   };
 
-  const addImagesToGallery = (newImages: GeneratedImage[]) => {
-    if (!saveToGallery) return;
+  const addImagesToGallery = (
+    newImages: GeneratedImage[],
+    metadata: { prompt: string; model: string; provider: Provider; saveToGallery: boolean }
+  ) => {
+    if (!metadata.saveToGallery) return;
     const entries: StoredImage[] = newImages.map((image) => ({
       id: createId(),
       dataUrl: image.dataUrl,
-      prompt,
-      model,
-      provider,
+      prompt: metadata.prompt,
+      model: metadata.model,
+      provider: metadata.provider,
       createdAt: new Date().toISOString(),
     }));
     setSavedImages((prev) => [...entries, ...prev].slice(0, MAX_SAVED_IMAGES));
@@ -483,11 +515,6 @@ export default function Studio() {
   };
 
   const clearKey = () => setApiKey("");
-
-  const resetStatus = () => {
-    setErrorMessage(null);
-    setStatusMessage("");
-  };
 
   const refreshModels = async () => {
     if (modelsLoading) return;
@@ -603,27 +630,100 @@ export default function Studio() {
     }
   };
 
+  const trimJobHistory = (items: GenerationJob[]) => {
+    const completedCount = items.filter(
+      (job) => job.status === "success" || job.status === "error"
+    ).length;
+    const overflow = completedCount - MAX_JOB_HISTORY;
+    if (overflow <= 0) return items;
+    let removed = 0;
+    return items.filter((job) => {
+      if (job.status === "success" || job.status === "error") {
+        if (removed < overflow) {
+          removed += 1;
+          return false;
+        }
+      }
+      return true;
+    });
+  };
+
+  const updateJobs = (updater: (prev: GenerationJob[]) => GenerationJob[]) => {
+    setJobs((prev) => trimJobHistory(updater(prev)));
+  };
+
+  const updateJob = (id: string, updates: Partial<GenerationJob>) => {
+    updateJobs((prev) =>
+      prev.map((job) => (job.id === id ? { ...job, ...updates } : job))
+    );
+  };
+
+  const startJob = (job: GenerationJob, message: string) => {
+    updateJob(job.id, {
+      status: "running",
+      startedAt: new Date().toISOString(),
+      progress: message,
+    });
+    setStatusMessage(message);
+    setErrorMessage(null);
+  };
+
+  const setJobProgress = (jobId: string, message: string) => {
+    updateJob(jobId, { progress: message });
+    setStatusMessage(message);
+  };
+
+  const completeJob = (jobId: string, message = "Ready.") => {
+    updateJob(jobId, {
+      status: "success",
+      finishedAt: new Date().toISOString(),
+      progress: "Completed",
+    });
+    setStatusMessage(message);
+  };
+
+  const failJob = (jobId: string, message: string) => {
+    updateJob(jobId, {
+      status: "error",
+      finishedAt: new Date().toISOString(),
+      error: message,
+      progress: "Failed",
+    });
+    setErrorMessage(message);
+    setStatusMessage("");
+  };
+
+  const getImageRequestFlags = (job: GenerationJob) => {
+    const isImagenModel = job.model.startsWith("imagen-");
+    const isOpenRouterGemini =
+      job.provider === "openrouter" && job.model.includes("gemini");
+    const allowCount = job.provider === "navy" || isImagenModel;
+    const allowSize =
+      job.provider === "gemini"
+        ? job.model.includes("gemini-3-pro") || isImagenModel
+        : job.provider === "navy" || isOpenRouterGemini;
+    const allowAspect = job.provider === "gemini" || isOpenRouterGemini;
+    return { allowCount, allowSize, allowAspect };
+  };
+
   // Generation Functions
-  const generateImages = async () => {
-    resetStatus();
-    setBusy(true);
-    setGeneratedImages([]);
-    clearVideoUrl();
-    clearAudioUrl();
+  const generateImages = async (job: GenerationJob) => {
+    startJob(job, "Generating images...");
     try {
       let images: GeneratedImage[] = [];
+      const { allowAspect, allowSize, allowCount } = getImageRequestFlags(job);
 
-      if (provider === "gemini") {
+      if (job.provider === "gemini") {
         const response = await fetch("/api/gemini/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            apiKey,
-            model,
-            prompt,
-            aspectRatio: showImageAspect ? imageAspect : undefined,
-            imageSize: showImageSize ? imageSize : undefined,
-            numberOfImages: showImageCount ? imageCount : undefined,
+            apiKey: job.apiKey,
+            model: job.model,
+            prompt: job.prompt,
+            aspectRatio: allowAspect ? job.imageAspect : undefined,
+            imageSize: allowSize ? job.imageSize : undefined,
+            numberOfImages: allowCount ? job.imageCount : undefined,
           }),
         });
         const payload = await response.json();
@@ -633,16 +733,16 @@ export default function Studio() {
           dataUrl: dataUrlFromBase64(image.data, image.mimeType),
           mimeType: image.mimeType,
         }));
-      } else if (provider === "navy") {
+      } else if (job.provider === "navy") {
         const response = await fetch("/api/navy/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            apiKey,
-            model,
-            prompt,
-            size: navyImageSize, // Assuming this is handled somewhere or we rely on default
-            numberOfImages: showImageCount ? imageCount : undefined,
+            apiKey: job.apiKey,
+            model: job.model,
+            prompt: job.prompt,
+            size: job.navyImageSize,
+            numberOfImages: allowCount ? job.imageCount : undefined,
           }),
         });
         const payload = await response.json();
@@ -651,16 +751,16 @@ export default function Studio() {
           const dataUrl = await fetchAsDataUrl(image.url);
           images.push({ id: createId(), dataUrl, mimeType: "image/png" });
         }
-      } else if (provider === "openrouter") {
+      } else if (job.provider === "openrouter") {
         const response = await fetch("/api/openrouter/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            apiKey,
-            model,
-            prompt,
-            aspectRatio: showImageAspect ? imageAspect : undefined,
-            imageSize: showImageSize ? imageSize : undefined,
+            apiKey: job.apiKey,
+            model: job.model,
+            prompt: job.prompt,
+            aspectRatio: allowAspect ? job.imageAspect : undefined,
+            imageSize: allowSize ? job.imageSize : undefined,
           }),
         });
         const payload = await response.json();
@@ -671,11 +771,10 @@ export default function Studio() {
           mimeType: image.mimeType,
         }));
       } else {
-        // Chutes
         const response = await fetch("/api/chutes/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ apiKey, prompt }),
+          body: JSON.stringify({ apiKey: job.apiKey, prompt: job.prompt }),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
@@ -687,36 +786,41 @@ export default function Studio() {
       }
 
       setGeneratedImages(images);
-      addImagesToGallery(images);
-      setLastPrompt(prompt);
-      setLastModel(model);
-      setLastProvider(provider);
-      setStatusMessage("Ready.");
+      addImagesToGallery(images, {
+        prompt: job.prompt,
+        model: job.model,
+        provider: job.provider,
+        saveToGallery: job.saveToGallery,
+      });
+      setLastOutput({
+        mode: "image",
+        prompt: job.prompt,
+        model: job.model,
+        provider: job.provider,
+      });
+      completeJob(job.id);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Image generation failed.");
-    } finally {
-      setBusy(false);
+      failJob(
+        job.id,
+        error instanceof Error ? error.message : "Image generation failed."
+      );
     }
   };
 
-  const generateGeminiVideo = async () => {
-    resetStatus();
-    setBusy(true);
-    clearVideoUrl();
-    clearAudioUrl();
-    setStatusMessage("Starting video generation...");
+  const generateGeminiVideo = async (job: GenerationJob) => {
+    startJob(job, "Starting video generation...");
     try {
       const response = await fetch("/api/gemini/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          apiKey,
-          model,
-          prompt,
-          aspectRatio: videoAspect,
-          resolution: videoResolution,
-          durationSeconds: videoDuration,
-          negativePrompt: negativePrompt || undefined,
+          apiKey: job.apiKey,
+          model: job.model,
+          prompt: job.prompt,
+          aspectRatio: job.videoAspect,
+          resolution: job.videoResolution,
+          durationSeconds: job.videoDuration,
+          negativePrompt: job.negativePrompt || undefined,
         }),
       });
       const payload = await response.json();
@@ -727,11 +831,14 @@ export default function Studio() {
       while (pollCount < 120) {
         pollCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 5000));
-        setStatusMessage("Rendering on Veo... (about a minute)");
+        setJobProgress(job.id, "Rendering on Veo... (about a minute)");
 
-        const poll = await fetch(`/api/gemini/video?name=${encodeURIComponent(operationName)}`, {
-          headers: { "x-user-api-key": apiKey },
-        });
+        const poll = await fetch(
+          `/api/gemini/video?name=${encodeURIComponent(operationName)}`,
+          {
+            headers: { "x-user-api-key": job.apiKey },
+          }
+        );
         const pollPayload = await poll.json();
         if (!poll.ok) throw new Error(pollPayload.error ?? "Video generation failed.");
 
@@ -741,36 +848,39 @@ export default function Studio() {
           const download = await fetch("/api/gemini/video/download", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ apiKey, uri: pollPayload.videoUri }),
+            body: JSON.stringify({ apiKey: job.apiKey, uri: pollPayload.videoUri }),
           });
           if (!download.ok) throw new Error("Unable to download the rendered video.");
 
           const blob = await download.blob();
           const url = URL.createObjectURL(blob);
           updateVideoUrl(url);
-          setStatusMessage("Video ready.");
+          setLastOutput({
+            mode: "video",
+            prompt: job.prompt,
+            model: job.model,
+            provider: job.provider,
+          });
+          completeJob(job.id, "Video ready.");
           return;
         }
       }
       throw new Error("Video generation timed out.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Video generation failed.");
-    } finally {
-      setBusy(false);
+      failJob(
+        job.id,
+        error instanceof Error ? error.message : "Video generation failed."
+      );
     }
   };
 
-  const generateNavyVideo = async () => {
-    resetStatus();
-    setBusy(true);
-    clearVideoUrl();
-    clearAudioUrl();
-    setStatusMessage("Queueing video...");
+  const generateNavyVideo = async (job: GenerationJob) => {
+    startJob(job, "Queueing video...");
     try {
       const response = await fetch("/api/navy/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, model, prompt }),
+        body: JSON.stringify({ apiKey: job.apiKey, model: job.model, prompt: job.prompt }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Video generation failed.");
@@ -780,48 +890,53 @@ export default function Studio() {
       while (pollCount < 120) {
         pollCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 5000));
-        setStatusMessage("Rendering on NavyAI...");
+        setJobProgress(job.id, "Rendering on NavyAI...");
 
-        const poll = await fetch(`/api/navy/video?id=${encodeURIComponent(jobId)}`, {
-          headers: { "x-user-api-key": apiKey },
-        });
+        const poll = await fetch(
+          `/api/navy/video?id=${encodeURIComponent(jobId)}`,
+          {
+            headers: { "x-user-api-key": job.apiKey },
+          }
+        );
         const pollPayload = await poll.json();
         if (!poll.ok) throw new Error(pollPayload.error ?? "Video generation failed.");
 
         if (pollPayload.done) {
           if (pollPayload.error) throw new Error(pollPayload.error);
           updateVideoUrl(pollPayload.videoUrl as string);
-          setStatusMessage("Video ready.");
+          setLastOutput({
+            mode: "video",
+            prompt: job.prompt,
+            model: job.model,
+            provider: job.provider,
+          });
+          completeJob(job.id, "Video ready.");
           return;
         }
       }
       throw new Error("Video generation timed out.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Video generation failed.");
-    } finally {
-      setBusy(false);
+      failJob(
+        job.id,
+        error instanceof Error ? error.message : "Video generation failed."
+      );
     }
   };
 
-  const generateTts = async () => {
-    resetStatus();
-    setBusy(true);
-    clearVideoUrl();
-    clearAudioUrl();
-    setGeneratedImages([]);
-    setStatusMessage("Synthesizing speech...");
+  const generateTts = async (job: GenerationJob) => {
+    startJob(job, "Synthesizing speech...");
     try {
-      const speedValue = Number(ttsSpeed);
+      const speedValue = Number(job.ttsSpeed);
       const response = await fetch("/api/navy/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          apiKey,
-          model,
-          input: prompt,
-          voice: ttsVoice,
+          apiKey: job.apiKey,
+          model: job.model,
+          input: job.prompt,
+          voice: job.ttsVoice,
           speed: Number.isFinite(speedValue) ? speedValue : undefined,
-          responseFormat: ttsFormat,
+          responseFormat: job.ttsFormat,
         }),
       });
       const payload = await response.json();
@@ -833,32 +948,104 @@ export default function Studio() {
       const dataUrl = dataUrlFromBase64(audio.data, audio.mimeType);
       setAudioUrl(dataUrl);
       setAudioMimeType(audio.mimeType);
-      setStatusMessage("Audio ready.");
+      setLastOutput({
+        mode: "tts",
+        prompt: job.prompt,
+        model: job.model,
+        provider: job.provider,
+        ttsVoice: job.ttsVoice,
+      });
+      completeJob(job.id, "Audio ready.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Speech generation failed.");
-    } finally {
-      setBusy(false);
+      failJob(
+        job.id,
+        error instanceof Error ? error.message : "Speech generation failed."
+      );
     }
   };
 
-  const handleGenerate = async () => {
-    if (!apiKey.trim()) {
+  const runJob = async (job: GenerationJob) => {
+    if (job.mode === "image") {
+      await generateImages(job);
+      return;
+    }
+    if (job.mode === "video") {
+      if (job.provider === "gemini") {
+        await generateGeminiVideo(job);
+        return;
+      }
+      if (job.provider === "navy") {
+        await generateNavyVideo(job);
+        return;
+      }
+      failJob(job.id, "Video generation is not available for this provider.");
+      return;
+    }
+    if (job.provider === "navy") {
+      await generateTts(job);
+      return;
+    }
+    failJob(job.id, "Text-to-speech is only available for NavyAI.");
+  };
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (processingRef.current) return;
+    const nextJob = jobs.find((job) => job.status === "queued");
+    if (!nextJob) return;
+    processingRef.current = true;
+    runJob(nextJob).finally(() => {
+      processingRef.current = false;
+    });
+  }, [jobs, hydrated, runJob]);
+
+  const handleGenerate = () => {
+    const trimmedKey = apiKey.trim();
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedKey) {
       setErrorMessage("Add your API key to start generating.");
       return;
     }
-    if (!prompt.trim()) {
+    if (!trimmedPrompt) {
       setErrorMessage("Write a prompt first.");
       return;
     }
-    if (mode === "image") {
-      await generateImages();
-    } else if (mode === "video") {
-      if (provider === "gemini") await generateGeminiVideo();
-      else if (provider === "navy") await generateNavyVideo();
-      else setErrorMessage("Video generation is not available for this provider.");
-    } else {
-      if (provider === "navy") await generateTts();
-      else setErrorMessage("Text-to-speech is only available for NavyAI.");
+    if (mode === "video" && !supportsVideo) {
+      setErrorMessage("Video generation is not available for this provider.");
+      return;
+    }
+    if (mode === "tts" && !supportsTts) {
+      setErrorMessage("Text-to-speech is only available for NavyAI.");
+      return;
+    }
+
+    const job: GenerationJob = {
+      id: createId(),
+      status: "queued",
+      mode,
+      provider,
+      model,
+      prompt: trimmedPrompt,
+      apiKey: trimmedKey,
+      createdAt: new Date().toISOString(),
+      negativePrompt: negativePrompt.trim() || undefined,
+      imageCount,
+      imageAspect,
+      imageSize,
+      navyImageSize,
+      videoAspect,
+      videoResolution,
+      videoDuration,
+      ttsVoice,
+      ttsFormat,
+      ttsSpeed,
+      saveToGallery,
+    };
+
+    updateJobs((prev) => [...prev, job]);
+    setErrorMessage(null);
+    if (runningJobs.length === 0) {
+      setStatusMessage(`Queued ${mode} generation.`);
     }
   };
 
@@ -924,7 +1111,7 @@ export default function Studio() {
                 negativePrompt={negativePrompt}
                 setNegativePrompt={setNegativePrompt}
                 onGenerate={handleGenerate}
-                busy={busy}
+                busy={hasActiveJobs}
                 mode={mode}
                 showNegativePrompt={mode !== "tts"}
               />
@@ -935,11 +1122,47 @@ export default function Studio() {
                   <p className="text-sm font-semibold text-destructive animate-in fade-in">{errorMessage}</p>
                 ) : statusMessage ? (
                   <p className="text-sm text-muted-foreground animate-in fade-in flex items-center justify-center gap-2">
-                    {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+                    {hasActiveJobs && <Loader2 className="h-3 w-3 animate-spin" />}
                     {statusMessage}
                   </p>
                 ) : null}
               </div>
+
+              {jobs.length > 0 && (
+                <div className="rounded-lg border bg-muted/30 p-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold">Background queue</span>
+                    <span className="text-muted-foreground">
+                      {runningJobs.length} running · {queuedJobs.length} queued
+                    </span>
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    {recentJobs.map((job) => {
+                      const statusLabel =
+                        job.status === "running"
+                          ? job.progress ?? "Running"
+                          : job.status === "queued"
+                            ? "Queued"
+                            : job.status === "success"
+                              ? "Completed"
+                              : "Failed";
+                      return (
+                        <div key={job.id} className="flex items-center justify-between gap-3">
+                          <span className="truncate">
+                            {job.mode.toUpperCase()} · {job.provider} · {job.prompt}
+                          </span>
+                          <span
+                            className="text-muted-foreground"
+                            title={job.status === "error" ? job.error : undefined}
+                          >
+                            {statusLabel}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -950,7 +1173,7 @@ export default function Studio() {
                 <h2 className="text-xl font-semibold tracking-tight">Latest Generation</h2>
               </div>
 
-              {mode === "image" && generatedImages.length > 0 ? (
+              {lastOutput?.mode === "image" && generatedImages.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {generatedImages.map((img) => (
                     <div key={img.id} className="relative rounded-xl overflow-hidden border shadow-lg group">
@@ -961,9 +1184,9 @@ export default function Studio() {
                           onClick={() =>
                             setViewerImage({
                               dataUrl: img.dataUrl,
-                              prompt: lastPrompt || prompt,
-                              model: lastModel || model,
-                              provider: lastProvider || provider,
+                              prompt: lastOutput?.prompt ?? "",
+                              model: lastOutput?.model ?? "",
+                              provider: lastOutput?.provider ?? provider,
                             })
                           }
                           className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform"
@@ -978,11 +1201,13 @@ export default function Studio() {
                     </div>
                   ))}
                 </div>
-              ) : mode === "video" && videoUrl ? (
+              ) : lastOutput?.mode === "video" && videoUrl ? (
                 <div className="rounded-xl overflow-hidden border shadow-lg bg-black">
                   <video src={videoUrl} controls className="w-full aspect-video" />
                   <div className="p-4 bg-card flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground font-mono">{model}</span>
+                    <span className="text-sm text-muted-foreground font-mono">
+                      {lastOutput?.model ?? model}
+                    </span>
                     <Button variant="outline" size="sm" asChild>
                       <a href={videoUrl} download="generated-video.mp4">
                         <Download className="mr-2 h-4 w-4" /> Download
@@ -990,14 +1215,14 @@ export default function Studio() {
                     </Button>
                   </div>
                 </div>
-              ) : mode === "tts" && audioUrl ? (
+              ) : lastOutput?.mode === "tts" && audioUrl ? (
                 <div className="rounded-xl overflow-hidden border shadow-lg bg-card">
                   <div className="p-4">
                     <audio src={audioUrl} controls className="w-full" />
                   </div>
                   <div className="p-4 border-t flex justify-between items-center">
                     <span className="text-sm text-muted-foreground font-mono">
-                      {model} · {ttsVoice}
+                      {lastOutput?.model ?? model} · {lastOutput?.ttsVoice ?? ttsVoice}
                     </span>
                     <Button variant="outline" size="sm" asChild>
                       <a

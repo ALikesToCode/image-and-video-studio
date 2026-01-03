@@ -70,12 +70,12 @@ export function PromptInput({
                 size="lg"
                 className="w-full bg-gradient-to-r from-primary to-primary/80 transition-all hover:scale-[1.01] hover:shadow-lg"
                 onClick={onGenerate}
-                disabled={busy || !prompt.trim()}
+                disabled={!prompt.trim()}
             >
                 {busy ? (
                     <>
                         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        Generating...
+                        Queue Generation
                     </>
                 ) : (
                     <>
