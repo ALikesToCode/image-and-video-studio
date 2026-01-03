@@ -24,6 +24,13 @@ import {
 } from "@/lib/constants";
 import { type GeneratedImage, type StoredImage } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
+import {
+  clearGalleryStore,
+  deleteGalleryBlob,
+  getGalleryBlob,
+  isIndexedDbAvailable,
+  putGalleryBlob,
+} from "@/lib/gallery-db";
 import { Header } from "./Header";
 import { ImgGenSettings } from "./img-gen-settings";
 import { PromptInput } from "./prompt-input";
@@ -70,9 +77,12 @@ type OutputMeta = {
   ttsVoice?: string;
 };
 
+type StoredImageRecord = Omit<StoredImage, "dataUrl"> & { dataUrl?: string };
+
 const STORAGE_KEYS = {
   provider: "studio_provider",
   mode: "studio_mode",
+  model: "studio_model",
   keyGemini: "studio_api_key_gemini",
   keyNavy: "studio_api_key_navy",
   keyChutes: "studio_api_key_chutes",
@@ -94,6 +104,9 @@ const getKeyStorage = (provider: Provider) => {
   if (provider === "openrouter") return STORAGE_KEYS.keyOpenRouter;
   return STORAGE_KEYS.keyChutes;
 };
+
+const getModelStorageKey = (provider: Provider, mode: Mode) =>
+  `${STORAGE_KEYS.model}_${provider}_${mode}`;
 
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -131,6 +144,12 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
     })
     .filter((item): item is ModelOption => !!item)
     .slice(0, MAX_CACHED_MODELS);
+};
+
+const ensureModelOption = (models: ModelOption[], id: string) => {
+  if (!id) return models;
+  if (models.some((item) => item.id === id)) return models;
+  return [{ id, label: id }, ...models];
 };
 
 const normalizeStringArray = (value: unknown): string[] => {
@@ -291,6 +310,8 @@ export default function Studio() {
 
   const activeVideoUrl = useRef<string | null>(null);
   const processingRef = useRef(false);
+  const galleryUrlsRef = useRef(new Map<string, string>());
+  const prevSavedImagesRef = useRef<StoredImage[]>([]);
 
   const isOpenRouterProvider = provider === "openrouter";
   const supportsVideo = provider === "gemini" || provider === "navy";
@@ -303,6 +324,7 @@ export default function Studio() {
       ? model.includes("gemini-3-pro") || isImagenModel
       : provider === "navy" || (isOpenRouterProvider && isOpenRouterGemini);
   const showImageAspect = provider === "gemini" || isOpenRouterGemini;
+  const idbAvailable = useMemo(() => isIndexedDbAvailable(), []);
 
   const modelSuggestions = useMemo(() => {
     if (provider === "gemini") {
@@ -341,7 +363,7 @@ export default function Studio() {
     setHydrated(true);
     const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
     const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
-    const storedImages = readLocalStorage<StoredImage[]>(STORAGE_KEYS.images, []);
+    const storedImages = readLocalStorage<StoredImageRecord[]>(STORAGE_KEYS.images, []);
     const storedOpenRouterModels = readLocalStorage<ModelOption[]>(
       STORAGE_KEYS.openRouterModels,
       []
@@ -359,14 +381,8 @@ export default function Studio() {
       []
     );
 
-    if (storedProvider) {
-      setProvider(storedProvider);
-      // Ensure model is valid for the provider/mode
-      setModel(DEFAULT_MODELS[storedProvider][storedMode ?? "image"]);
-    }
-    if (storedMode) {
-      setMode(storedMode);
-    }
+    if (storedProvider) setProvider(storedProvider);
+    if (storedMode) setMode(storedMode);
     if (storedOpenRouterModels.length) {
       setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
     }
@@ -379,7 +395,61 @@ export default function Studio() {
     if (storedNavyTtsModels.length) {
       setNavyTtsModels(sanitizeModelOptions(storedNavyTtsModels));
     }
-    setSavedImages(storedImages);
+    const loadSavedImages = async () => {
+      if (!storedImages.length) return;
+      if (!idbAvailable) {
+        const legacyEntries = storedImages.filter(
+          (item): item is StoredImageRecord & { dataUrl: string } =>
+            typeof item.dataUrl === "string" && item.dataUrl.length > 0
+        );
+        if (legacyEntries.length) {
+          setSavedImages(
+            legacyEntries.map((item) => ({
+              id: item.id,
+              dataUrl: item.dataUrl,
+              prompt: item.prompt,
+              model: item.model,
+              provider: item.provider,
+              createdAt: item.createdAt,
+            }))
+          );
+        }
+        setErrorMessage("IndexedDB is unavailable. Gallery saves may be limited.");
+        return;
+      }
+      const entries: StoredImage[] = [];
+      for (const item of storedImages) {
+        try {
+          let blob = await getGalleryBlob(item.id);
+          if (!blob && item.dataUrl) {
+            const response = await fetch(item.dataUrl);
+            if (!response.ok) {
+              throw new Error("Unable to migrate gallery image.");
+            }
+            blob = await response.blob();
+            await putGalleryBlob(item.id, blob);
+          }
+          if (!blob) continue;
+          const url = URL.createObjectURL(blob);
+          galleryUrlsRef.current.set(item.id, url);
+          entries.push({
+            id: item.id,
+            dataUrl: url,
+            prompt: item.prompt,
+            model: item.model,
+            provider: item.provider,
+            createdAt: item.createdAt,
+          });
+        } catch (error) {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Unable to load saved images."
+          );
+        }
+      }
+      setSavedImages(entries);
+    };
+
+    void loadSavedImages();
   }, []);
 
   useEffect(() => {
@@ -390,16 +460,28 @@ export default function Studio() {
   useEffect(() => {
     if (!hydrated) return;
     writeLocalStorage(STORAGE_KEYS.mode, JSON.stringify(mode));
-    // When mode changes or provider changes, reset model to default if not set manually
-    // But here we just respect the user selection, logic below handles switch
-    if (!model) setModel(DEFAULT_MODELS[provider][mode]);
-  }, [mode, provider, hydrated, model]);
+  }, [mode, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
-    // When switching modes, ensure model is correct if needed
-    setModel(DEFAULT_MODELS[provider][mode]);
-  }, [mode, provider]);
+    const storedModel = readLocalStorage<string | null>(
+      getModelStorageKey(provider, mode),
+      null
+    );
+    const nextModel = storedModel || DEFAULT_MODELS[provider][mode];
+    if (provider === "openrouter") {
+      setOpenRouterImageModels((prev) => ensureModelOption(prev, nextModel));
+    } else if (provider === "navy") {
+      if (mode === "video") {
+        setNavyVideoModels((prev) => ensureModelOption(prev, nextModel));
+      } else if (mode === "tts") {
+        setNavyTtsModels((prev) => ensureModelOption(prev, nextModel));
+      } else {
+        setNavyImageModels((prev) => ensureModelOption(prev, nextModel));
+      }
+    }
+    setModel(nextModel);
+  }, [mode, provider, hydrated]);
 
   useEffect(() => {
     if (mode === "video" && !supportsVideo) {
@@ -432,12 +514,44 @@ export default function Studio() {
 
   useEffect(() => {
     if (!hydrated) return;
+    writeLocalStorage(getModelStorageKey(provider, mode), JSON.stringify(model));
+  }, [model, provider, mode, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
     try {
-      writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(savedImages));
+      const storedImages: StoredImageRecord[] = savedImages.map((image) => ({
+        id: image.id,
+        prompt: image.prompt,
+        model: image.model,
+        provider: image.provider,
+        createdAt: image.createdAt,
+        ...(idbAvailable ? {} : { dataUrl: image.dataUrl }),
+      }));
+      writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedImages));
     } catch {
       setErrorMessage("Local storage is full. Clear some saved images.");
     }
-  }, [savedImages, hydrated]);
+  }, [savedImages, hydrated, idbAvailable]);
+
+  useEffect(() => {
+    const previous = prevSavedImagesRef.current;
+    const currentIds = new Set(savedImages.map((image) => image.id));
+    const removed = previous.filter((image) => !currentIds.has(image.id));
+    if (removed.length) {
+      removed.forEach((image) => {
+        const url = galleryUrlsRef.current.get(image.id);
+        if (url?.startsWith("blob:")) {
+          URL.revokeObjectURL(url);
+        }
+        galleryUrlsRef.current.delete(image.id);
+        if (idbAvailable) {
+          void deleteGalleryBlob(image.id);
+        }
+      });
+    }
+    prevSavedImagesRef.current = savedImages;
+  }, [savedImages, idbAvailable]);
 
   useEffect(() => {
     if (!hydrated || !openRouterImageModels.length) return;
@@ -476,6 +590,12 @@ export default function Studio() {
       if (activeVideoUrl.current?.startsWith("blob:")) {
         URL.revokeObjectURL(activeVideoUrl.current);
       }
+      galleryUrlsRef.current.forEach((url) => {
+        if (url.startsWith("blob:")) {
+          URL.revokeObjectURL(url);
+        }
+      });
+      galleryUrlsRef.current.clear();
     };
   }, []);
 
@@ -493,25 +613,70 @@ export default function Studio() {
     }
   };
 
-  const addImagesToGallery = (
+  const addImagesToGallery = async (
     newImages: GeneratedImage[],
     metadata: { prompt: string; model: string; provider: Provider; saveToGallery: boolean }
   ) => {
     if (!metadata.saveToGallery) return;
-    const entries: StoredImage[] = newImages.map((image) => ({
-      id: createId(),
-      dataUrl: image.dataUrl,
-      prompt: metadata.prompt,
-      model: metadata.model,
-      provider: metadata.provider,
-      createdAt: new Date().toISOString(),
-    }));
-    setSavedImages((prev) => [...entries, ...prev].slice(0, MAX_SAVED_IMAGES));
+    try {
+      if (!idbAvailable) {
+        const entries: StoredImage[] = newImages.map((image) => ({
+          id: createId(),
+          dataUrl: image.dataUrl,
+          prompt: metadata.prompt,
+          model: metadata.model,
+          provider: metadata.provider,
+          createdAt: new Date().toISOString(),
+        }));
+        setSavedImages((prev) => [...entries, ...prev].slice(0, MAX_SAVED_IMAGES));
+        return;
+      }
+      const entries: StoredImage[] = [];
+      for (const image of newImages) {
+        const id = createId();
+        const response = await fetch(image.dataUrl);
+        if (!response.ok) {
+          throw new Error("Unable to save generated image.");
+        }
+        const blob = await response.blob();
+        await putGalleryBlob(id, blob);
+        const url = URL.createObjectURL(blob);
+        galleryUrlsRef.current.set(id, url);
+        entries.push({
+          id,
+          dataUrl: url,
+          prompt: metadata.prompt,
+          model: metadata.model,
+          provider: metadata.provider,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      setSavedImages((prev) => [...entries, ...prev].slice(0, MAX_SAVED_IMAGES));
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to save to local gallery."
+      );
+    }
   };
 
   const clearGallery = () => {
+    galleryUrlsRef.current.forEach((url) => {
+      if (url.startsWith("blob:")) {
+        URL.revokeObjectURL(url);
+      }
+    });
+    galleryUrlsRef.current.clear();
+    prevSavedImagesRef.current = [];
     setSavedImages([]);
     window.localStorage.removeItem(STORAGE_KEYS.images);
+    if (idbAvailable) {
+      void clearGalleryStore().catch((error) => {
+        setErrorMessage(
+          error instanceof Error ? error.message : "Unable to clear saved images."
+        );
+      });
+    }
   };
 
   const clearKey = () => setApiKey("");
@@ -786,7 +951,7 @@ export default function Studio() {
       }
 
       setGeneratedImages(images);
-      addImagesToGallery(images, {
+      await addImagesToGallery(images, {
         prompt: job.prompt,
         model: job.model,
         provider: job.provider,
