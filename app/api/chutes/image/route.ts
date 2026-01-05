@@ -106,22 +106,16 @@ export async function POST(req: Request) {
   }
 
   const model = body.model ?? "z-image-turbo";
-  const useNewEndpoint = model !== "z-image-turbo";
-  const url = useNewEndpoint
-    ? "https://image.chutes.ai/generate"
-    : "https://chutes-z-image-turbo.chutes.ai/generate";
-
-  const payload = useNewEndpoint
-    ? {
-        model,
-        prompt,
-        negative_prompt: body.negativePrompt,
-        guidance_scale: body.guidanceScale,
-        width: body.width,
-        height: body.height,
-        num_inference_steps: body.numInferenceSteps,
-      }
-    : { prompt };
+  const url = "https://image.chutes.ai/generate";
+  const payload = {
+    model,
+    prompt,
+    negative_prompt: body.negativePrompt,
+    guidance_scale: body.guidanceScale,
+    width: body.width,
+    height: body.height,
+    num_inference_steps: body.numInferenceSteps,
+  };
 
   const response = await fetch(url, {
     method: "POST",

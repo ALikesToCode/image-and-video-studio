@@ -548,6 +548,19 @@ export default function Studio() {
             mimeType: item.mimeType ?? blob.type,
           });
         } catch (error) {
+          if (item.dataUrl) {
+            entries.push({
+              id: item.id,
+              dataUrl: item.dataUrl,
+              prompt: item.prompt,
+              model: item.model,
+              provider: item.provider,
+              createdAt: item.createdAt,
+              kind: item.kind ?? "image",
+              mimeType: item.mimeType,
+            });
+            continue;
+          }
           setErrorMessage(
             error instanceof Error ? error.message : "Unable to load saved items."
           );
@@ -661,7 +674,9 @@ export default function Studio() {
         createdAt: item.createdAt,
         kind: item.kind,
         mimeType: item.mimeType,
-        ...(idbAvailable ? {} : { dataUrl: item.dataUrl }),
+        ...(!idbAvailable || !item.dataUrl.startsWith("blob:")
+          ? { dataUrl: item.dataUrl }
+          : {}),
       }));
       writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedMedia));
     } catch {
@@ -749,7 +764,7 @@ export default function Studio() {
   };
 
   const addMediaToGallery = async (
-    items: { url: string; mimeType?: string }[],
+    items: { url: string; mimeType?: string; blob?: Blob }[],
     metadata: {
       prompt: string;
       model: string;
@@ -760,29 +775,49 @@ export default function Studio() {
   ) => {
     if (!metadata.saveToGallery || items.length === 0) return;
     try {
-      if (!idbAvailable) {
-        const entries: StoredMedia[] = items.map((item) => ({
-          id: createId(),
-          dataUrl: item.url,
-          prompt: metadata.prompt,
-          model: metadata.model,
-          provider: metadata.provider,
-          createdAt: new Date().toISOString(),
-          kind: metadata.kind,
-          mimeType: item.mimeType,
-        }));
-        setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
-        return;
-      }
       const entries: StoredMedia[] = [];
       for (const item of items) {
         const id = createId();
-        const response = await fetch(item.url);
-        if (!response.ok) {
-          throw new Error("Unable to save generated media.");
+        let blob = item.blob;
+        let mimeType = item.mimeType;
+
+        if (!idbAvailable) {
+          entries.push({
+            id,
+            dataUrl: item.url,
+            prompt: metadata.prompt,
+            model: metadata.model,
+            provider: metadata.provider,
+            createdAt: new Date().toISOString(),
+            kind: metadata.kind,
+            mimeType,
+          });
+          continue;
         }
-        const blob = await response.blob();
-        const mimeType = item.mimeType ?? blob.type;
+
+        if (!blob) {
+          try {
+            const response = await fetch(item.url);
+            if (!response.ok) {
+              throw new Error("Unable to save generated media.");
+            }
+            blob = await response.blob();
+            mimeType = mimeType ?? blob.type;
+          } catch {
+            entries.push({
+              id,
+              dataUrl: item.url,
+              prompt: metadata.prompt,
+              model: metadata.model,
+              provider: metadata.provider,
+              createdAt: new Date().toISOString(),
+              kind: metadata.kind,
+              mimeType,
+            });
+            continue;
+          }
+        }
+
         await putGalleryBlob(id, blob);
         const url = URL.createObjectURL(blob);
         galleryUrlsRef.current.set(id, url);
@@ -794,11 +829,13 @@ export default function Studio() {
           provider: metadata.provider,
           createdAt: new Date().toISOString(),
           kind: metadata.kind,
-          mimeType,
+          mimeType: mimeType ?? blob.type,
         });
       }
 
-      setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
+      if (entries.length) {
+        setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to save to local gallery."
@@ -1186,7 +1223,7 @@ export default function Studio() {
           const url = URL.createObjectURL(blob);
           updateVideoUrl(url);
           await addMediaToGallery(
-            [{ url, mimeType: blob.type }],
+            [{ url, mimeType: blob.type, blob }],
             {
               prompt: job.prompt,
               model: job.model,
@@ -1243,17 +1280,49 @@ export default function Studio() {
 
         if (pollPayload.done) {
           if (pollPayload.error) throw new Error(pollPayload.error);
-          updateVideoUrl(pollPayload.videoUrl as string);
-          await addMediaToGallery(
-            [{ url: pollPayload.videoUrl as string }],
-            {
-              prompt: job.prompt,
-              model: job.model,
-              provider: job.provider,
-              saveToGallery: job.saveToGallery,
-              kind: "video",
+          const remoteUrl = pollPayload.videoUrl as string;
+          if (job.saveToGallery) {
+            let blob: Blob | null = null;
+            let displayUrl = remoteUrl;
+            try {
+              const download = await fetch("/api/navy/video/download", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-user-api-key": job.apiKey,
+                },
+                body: JSON.stringify({ url: remoteUrl }),
+              });
+              if (!download.ok) {
+                throw new Error("Unable to download the rendered video.");
+              }
+              blob = await download.blob();
+              displayUrl = URL.createObjectURL(blob);
+            } catch {
+              blob = null;
+              displayUrl = remoteUrl;
             }
-          );
+
+            updateVideoUrl(displayUrl);
+            await addMediaToGallery(
+              [
+                {
+                  url: displayUrl,
+                  mimeType: blob?.type,
+                  blob: blob ?? undefined,
+                },
+              ],
+              {
+                prompt: job.prompt,
+                model: job.model,
+                provider: job.provider,
+                saveToGallery: job.saveToGallery,
+                kind: "video",
+              }
+            );
+          } else {
+            updateVideoUrl(remoteUrl);
+          }
           setLastOutput({
             mode: "video",
             prompt: job.prompt,
@@ -1296,10 +1365,11 @@ export default function Studio() {
         throw new Error("No audio data returned.");
       }
       const dataUrl = dataUrlFromBase64(audio.data, audio.mimeType);
+      const audioBlob = await fetch(dataUrl).then((response) => response.blob());
       setAudioUrl(dataUrl);
       setAudioMimeType(audio.mimeType);
       await addMediaToGallery(
-        [{ url: dataUrl, mimeType: audio.mimeType }],
+        [{ url: dataUrl, mimeType: audio.mimeType, blob: audioBlob }],
         {
           prompt: job.prompt,
           model: job.model,
