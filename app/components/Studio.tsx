@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,7 +14,6 @@ import {
   NAVY_TTS_MODELS,
   IMAGE_ASPECTS,
   IMAGE_SIZES,
-  IMAGEN_SIZES,
   VIDEO_ASPECTS,
   VIDEO_RESOLUTIONS,
   VIDEO_DURATIONS,
@@ -199,6 +199,33 @@ const normalizeStringArray = (value: unknown): string[] => {
   return [];
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const asRecordArray = (value: unknown): Record<string, unknown>[] =>
+  Array.isArray(value) ? value.filter(isRecord) : [];
+
+const getString = (value: unknown, fallback = "") =>
+  typeof value === "string" ? value : fallback;
+
+const buildGeneratedImages = (payload: unknown): GeneratedImage[] => {
+  const record = isRecord(payload) ? payload : {};
+  const rawImages = Array.isArray(record.images) ? record.images : [];
+  return rawImages
+    .map((image) => {
+      if (!isRecord(image)) return null;
+      const data = getString(image.data);
+      if (!data) return null;
+      const mimeType = getString(image.mimeType, "image/png");
+      return {
+        id: createId(),
+        dataUrl: dataUrlFromBase64(data, mimeType),
+        mimeType,
+      };
+    })
+    .filter((image): image is GeneratedImage => image !== null);
+};
+
 const extractNavyModelTokens = (item: Record<string, unknown>) => {
   const tokens: string[] = [];
   const pushTokens = (value: unknown) => {
@@ -320,7 +347,7 @@ export default function Studio() {
   const [imageCount, setImageCount] = useState(1);
   const [imageAspect, setImageAspect] = useState(IMAGE_ASPECTS[0]);
   const [imageSize, setImageSize] = useState(IMAGE_SIZES[0]);
-  const [navyImageSize, setNavyImageSize] = useState("1024x1024"); // Default
+  const [navyImageSize] = useState("1024x1024"); // Default
   const [chutesGuidanceScale, setChutesGuidanceScale] = useState("7.5");
   const [chutesWidth, setChutesWidth] = useState("1024");
   const [chutesHeight, setChutesHeight] = useState("1024");
@@ -381,17 +408,8 @@ export default function Studio() {
   const prevSavedMediaRef = useRef<StoredMedia[]>([]);
   const navyUsageLoadingRef = useRef(false);
 
-  const isOpenRouterProvider = provider === "openrouter";
   const supportsVideo = provider === "gemini" || provider === "navy";
   const supportsTts = provider === "navy";
-  const isImagenModel = model.startsWith("imagen-");
-  const isOpenRouterGemini = isOpenRouterProvider && model.includes("gemini");
-  const showImageCount = provider === "navy" || isImagenModel;
-  const showImageSize =
-    provider === "gemini"
-      ? model.includes("gemini-3-pro") || isImagenModel
-      : provider === "navy" || (isOpenRouterProvider && isOpenRouterGemini);
-  const showImageAspect = provider === "gemini" || isOpenRouterGemini;
   const idbAvailable = useMemo(() => isIndexedDbAvailable(), []);
 
   const refreshStorageEstimate = useCallback(async () => {
@@ -616,7 +634,7 @@ export default function Studio() {
     };
 
     void loadSavedMedia();
-  }, []);
+  }, [idbAvailable]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -830,16 +848,17 @@ export default function Studio() {
   }, [navyTtsModels, hydrated]);
 
   useEffect(() => {
+    const galleryUrls = galleryUrlsRef.current;
     return () => {
       if (activeVideoUrl.current?.startsWith("blob:")) {
         URL.revokeObjectURL(activeVideoUrl.current);
       }
-      galleryUrlsRef.current.forEach((url) => {
+      galleryUrls.forEach((url) => {
         if (url.startsWith("blob:")) {
           URL.revokeObjectURL(url);
         }
       });
-      galleryUrlsRef.current.clear();
+      galleryUrls.clear();
     };
   }, []);
 
@@ -971,29 +990,38 @@ export default function Studio() {
         const response = await fetch("/api/openrouter/models", {
           headers: { "x-user-api-key": apiKey },
         });
-        const payload = await response.json();
+        const payload = (await response.json()) as Record<string, unknown>;
         if (!response.ok) {
-          throw new Error(payload?.error ?? "Unable to fetch OpenRouter models.");
+          const errorMessage = isRecord(payload.error)
+            ? getString(payload.error.message, "Unable to fetch OpenRouter models.")
+            : getString(payload.error, "Unable to fetch OpenRouter models.");
+          throw new Error(errorMessage);
         }
-        const rawModels = Array.isArray(payload?.data) ? payload.data : [];
+        const rawModels = Array.isArray(payload.data) ? payload.data : [];
         if (!rawModels.length) {
           throw new Error("No models returned by OpenRouter.");
         }
 
-        const normalizedModels = rawModels
-          .map((item: any) => ({
-            id: item?.id,
-            label: item?.name ?? item?.id,
-            raw: item,
-          }))
-          .filter((item: any) => typeof item.id === "string" && item.id.length > 0);
+        const normalizedModels = asRecordArray(rawModels)
+          .map((item) => {
+            const id = getString(item.id);
+            if (!id) return null;
+            const label = getString(item.name, id);
+            return { id, label, raw: item };
+          })
+          .filter(
+            (
+              item
+            ): item is { id: string; label: string; raw: Record<string, unknown> } =>
+              item !== null
+          );
 
-        const filtered = normalizedModels.filter((item: any) =>
-          isOpenRouterModelForMode(item.raw as Record<string, unknown>, mode)
+        const filtered = normalizedModels.filter((item) =>
+          isOpenRouterModelForMode(item.raw, mode)
         );
         const fallbackModels = OPENROUTER_IMAGE_MODELS;
         const models = (filtered.length ? filtered : fallbackModels).map(
-          (item: any) => ({
+          (item) => ({
             id: item.id,
             label: item.label ?? item.id,
           })
@@ -1014,25 +1042,36 @@ export default function Studio() {
         const response = await fetch("/api/navy/models", {
           headers: { "x-user-api-key": apiKey },
         });
-        const payload = await response.json();
+        const payload = (await response.json()) as Record<string, unknown>;
         if (!response.ok) {
-          throw new Error(payload?.error ?? "Unable to fetch NavyAI models.");
+          const errorMessage = isRecord(payload.error)
+            ? getString(payload.error.message, "Unable to fetch NavyAI models.")
+            : getString(payload.error, "Unable to fetch NavyAI models.");
+          throw new Error(errorMessage);
         }
-        const rawModels = Array.isArray(payload?.data) ? payload.data : [];
+        const rawModels = Array.isArray(payload.data) ? payload.data : [];
         if (!rawModels.length) {
           throw new Error("No models returned by NavyAI.");
         }
 
-        const normalizedModels = rawModels
-          .map((item: any) => {
-            const id = item?.id ?? item?.model ?? item?.name;
-            const label = item?.name ?? item?.id ?? item?.model ?? "Unknown";
+        const normalizedModels = asRecordArray(rawModels)
+          .map((item) => {
+            const id =
+              getString(item.id) || getString(item.model) || getString(item.name);
+            if (!id) return null;
+            const label =
+              getString(item.name) || getString(item.id) || getString(item.model) || "Unknown";
             return { id, label, raw: item };
           })
-          .filter((item: any) => typeof item.id === "string" && item.id.length > 0);
+          .filter(
+            (
+              item
+            ): item is { id: string; label: string; raw: Record<string, unknown> } =>
+              item !== null
+          );
 
-        const filtered = normalizedModels.filter((item: any) =>
-          isNavyModelForMode(item.raw as Record<string, unknown>, mode)
+        const filtered = normalizedModels.filter((item) =>
+          isNavyModelForMode(item.raw, mode)
         );
         const fallbackModels =
           mode === "video"
@@ -1041,7 +1080,7 @@ export default function Studio() {
               ? NAVY_TTS_MODELS
               : NAVY_IMAGE_MODELS;
         const models = (filtered.length ? filtered : fallbackModels).map(
-          (item: any) => ({
+          (item) => ({
             id: item.id,
             label: item.label ?? item.id,
           })
@@ -1084,20 +1123,25 @@ export default function Studio() {
       const response = await fetch("/api/chutes/models", {
         headers: { "x-user-api-key": chutesChatKey },
       });
-      const payload = await response.json();
+      const payload = (await response.json()) as Record<string, unknown>;
       if (!response.ok) {
-        throw new Error(payload?.error ?? "Unable to fetch Chutes models.");
+        const errorMessage = isRecord(payload.error)
+          ? getString(payload.error.message, "Unable to fetch Chutes models.")
+          : getString(payload.error, "Unable to fetch Chutes models.");
+        throw new Error(errorMessage);
       }
-      const rawModels = Array.isArray(payload?.data) ? payload.data : [];
+      const rawModels = Array.isArray(payload.data) ? payload.data : [];
       if (!rawModels.length) {
         throw new Error("No models returned by Chutes.");
       }
-      const models = rawModels
-        .map((item: any) => ({
-          id: item?.id,
-          label: item?.id ?? item?.name ?? "Unknown",
-        }))
-        .filter((item: any) => typeof item.id === "string" && item.id.length > 0);
+      const models = asRecordArray(rawModels)
+        .map((item) => {
+          const id = getString(item.id);
+          if (!id) return null;
+          const label = getString(item.id, getString(item.name, "Unknown"));
+          return { id, label };
+        })
+        .filter((item): item is ModelOption => item !== null);
 
       setChutesChatModels(models);
       if (!models.some((entry: ModelOption) => entry.id === chutesChatModel)) {
@@ -1210,11 +1254,10 @@ export default function Studio() {
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
-        images = payload.images.map((image: any) => ({
-          id: createId(),
-          dataUrl: dataUrlFromBase64(image.data, image.mimeType),
-          mimeType: image.mimeType,
-        }));
+        images = buildGeneratedImages(payload);
+        if (!images.length) {
+          throw new Error("No images were returned by the model.");
+        }
       } else if (job.provider === "navy") {
         const response = await fetch("/api/navy/image", {
           method: "POST",
@@ -1247,11 +1290,10 @@ export default function Studio() {
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
-        images = payload.images.map((image: any) => ({
-          id: createId(),
-          dataUrl: dataUrlFromBase64(image.data, image.mimeType),
-          mimeType: image.mimeType,
-        }));
+        images = buildGeneratedImages(payload);
+        if (!images.length) {
+          throw new Error("No images were returned by the model.");
+        }
       } else {
         const guidanceScale = Number(job.chutesGuidanceScale);
         const width = Number(job.chutesWidth);
@@ -1280,11 +1322,10 @@ export default function Studio() {
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
-        images = payload.images.map((image: any) => ({
-          id: createId(),
-          dataUrl: dataUrlFromBase64(image.data, image.mimeType),
-          mimeType: image.mimeType,
-        }));
+        images = buildGeneratedImages(payload);
+        if (!images.length) {
+          throw new Error("No images were returned by the model.");
+        }
       }
 
       setGeneratedImages(images);
@@ -1566,7 +1607,8 @@ export default function Studio() {
     runJob(nextJob).finally(() => {
       processingRef.current = false;
     });
-  }, [jobs, hydrated, runJob]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs, hydrated]);
 
   const handleGenerate = () => {
     const trimmedKey = apiKey.trim();

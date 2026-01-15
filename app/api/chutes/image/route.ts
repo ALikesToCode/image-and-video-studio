@@ -34,9 +34,17 @@ const parseDataUrl = (value: string) => {
   return { mimeType: match[1], data: match[2] };
 };
 
-const extractFromJson = (data: any) => {
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+  return null;
+};
+
+const extractFromJson = (data: unknown) => {
   const images: ImagePayload[] = [];
   const urls: string[] = [];
+  const record = toRecord(data) ?? {};
   const addBase64 = (value: unknown, mimeType?: string) => {
     if (typeof value !== "string") return;
     const dataUrl = parseDataUrl(value);
@@ -50,15 +58,27 @@ const extractFromJson = (data: any) => {
     if (typeof value === "string") urls.push(value);
   };
 
-  addBase64(data?.image, data?.mime_type ?? data?.mimeType);
-  addBase64(data?.image_base64, data?.mime_type ?? data?.mimeType);
-  addBase64(data?.imageBase64, data?.mime_type ?? data?.mimeType);
-  addBase64(data?.output, data?.mime_type ?? data?.mimeType);
-  addUrl(data?.url);
-  addUrl(data?.output_url);
-  addUrl(data?.outputUrl);
+  const mimeType =
+    typeof record.mime_type === "string"
+      ? record.mime_type
+      : typeof record.mimeType === "string"
+        ? record.mimeType
+        : undefined;
+  addBase64(record.image, mimeType);
+  addBase64(record.image_base64, mimeType);
+  addBase64(record.imageBase64, mimeType);
+  addBase64(record.output, mimeType);
+  addUrl(record.url);
+  addUrl(record.output_url);
+  addUrl(record.outputUrl);
 
-  const candidates = data?.images ?? data?.data ?? data?.outputs ?? [];
+  const candidates = Array.isArray(record.images)
+    ? record.images
+    : Array.isArray(record.data)
+      ? record.data
+      : Array.isArray(record.outputs)
+        ? record.outputs
+        : [];
   if (Array.isArray(candidates)) {
     for (const item of candidates) {
       if (typeof item === "string") {
@@ -69,12 +89,19 @@ const extractFromJson = (data: any) => {
         }
         continue;
       }
-      if (!item || typeof item !== "object") continue;
+      const candidate = toRecord(item);
+      if (!candidate) continue;
+      const candidateMimeType =
+        typeof candidate.mime_type === "string"
+          ? candidate.mime_type
+          : typeof candidate.mimeType === "string"
+            ? candidate.mimeType
+            : undefined;
       addBase64(
-        item.image ?? item.base64 ?? item.b64_json ?? item.data,
-        item.mime_type ?? item.mimeType
+        candidate.image ?? candidate.base64 ?? candidate.b64_json ?? candidate.data,
+        candidateMimeType
       );
-      addUrl(item.url ?? item.output_url ?? item.outputUrl);
+      addUrl(candidate.url ?? candidate.output_url ?? candidate.outputUrl);
     }
   }
 
@@ -190,7 +217,7 @@ export async function POST(req: Request) {
     });
   }
 
-  let data: any;
+  let data: unknown;
   try {
     data = await response.json();
   } catch {

@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -295,10 +296,12 @@ export function ChutesChat({
     setChatError(null);
     setInput("");
 
-    let nextMessages = [
-      ...messages,
-      { id: createId(), role: "user", content: trimmed },
-    ];
+    const userMessage: ChatMessage = {
+      id: createId(),
+      role: "user",
+      content: trimmed,
+    };
+    let nextMessages: ChatMessage[] = [...messages, userMessage];
     setMessages(nextMessages);
     setBusy(true);
     try {

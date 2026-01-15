@@ -1,13 +1,10 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const fs = require("fs");
 const path = require("path");
 
 const root = path.join(__dirname, "..");
 const tapableSource = path.join(root, "node_modules", "tapable");
 const enhancedResolveRoot = path.join(root, "node_modules", "enhanced-resolve");
-const enhancedResolveNodeModules = path.join(
-  enhancedResolveRoot,
-  "node_modules"
-);
 
 if (!fs.existsSync(tapableSource)) {
   process.exit(0);

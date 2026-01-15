@@ -12,24 +12,61 @@ type ImageRequest = {
 
 const isImagenModel = (model: string) => model.startsWith("imagen-");
 
-const pickImagesFromGemini = (data: any) => {
-  const parts = data?.candidates?.[0]?.content?.parts ?? [];
-  return parts
-    .filter((part: any) => part.inlineData?.data)
-    .map((part: any) => ({
-      data: part.inlineData.data as string,
-      mimeType: part.inlineData.mimeType ?? "image/png",
-    }));
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+  return null;
 };
 
-const pickImagesFromImagen = (data: any) => {
-  const predictions = data?.predictions ?? [];
+const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+const pickImagesFromGemini = (data: unknown) => {
+  const record = toRecord(data);
+  const candidates = asArray(record?.candidates);
+  const firstCandidate = toRecord(candidates[0]);
+  const content = toRecord(firstCandidate?.content);
+  const parts = asArray(content?.parts);
+  return parts
+    .map((part) => {
+      const partRecord = toRecord(part);
+      const inlineData = toRecord(partRecord?.inlineData);
+      const imageData =
+        typeof inlineData?.data === "string" ? inlineData.data : "";
+      if (!imageData) return null;
+      const mimeType =
+        typeof inlineData?.mimeType === "string"
+          ? inlineData.mimeType
+          : "image/png";
+      return { data: imageData, mimeType };
+    })
+    .filter(
+      (item): item is { data: string; mimeType: string } => item !== null
+    );
+};
+
+const pickImagesFromImagen = (data: unknown) => {
+  const record = toRecord(data);
+  const predictions = asArray(record?.predictions);
   return predictions
-    .filter((item: any) => item.bytesBase64Encoded || item.bytes_base64_encoded)
-    .map((item: any) => ({
-      data: (item.bytesBase64Encoded ?? item.bytes_base64_encoded) as string,
-      mimeType: item.mimeType ?? "image/png",
-    }));
+    .map((item) => {
+      const recordItem = toRecord(item);
+      const imageData =
+        typeof recordItem?.bytesBase64Encoded === "string"
+          ? recordItem.bytesBase64Encoded
+          : typeof recordItem?.bytes_base64_encoded === "string"
+            ? recordItem.bytes_base64_encoded
+            : "";
+      if (!imageData) return null;
+      const mimeType =
+        typeof recordItem?.mimeType === "string"
+          ? recordItem.mimeType
+          : "image/png";
+      return { data: imageData, mimeType };
+    })
+    .filter(
+      (item): item is { data: string; mimeType: string } => item !== null
+    );
 };
 
 export async function POST(req: Request) {
@@ -83,12 +120,16 @@ export async function POST(req: Request) {
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json();
+  const data = (await response.json()) as Record<string, unknown>;
   if (!response.ok) {
-    return Response.json(
-      { error: data?.error?.message ?? "Image generation failed." },
-      { status: response.status }
-    );
+    const errorRecord = toRecord(data.error);
+    const errorMessage =
+      typeof errorRecord?.message === "string"
+        ? errorRecord.message
+        : typeof data.error === "string"
+          ? data.error
+          : "Image generation failed.";
+    return Response.json({ error: errorMessage }, { status: response.status });
   }
 
   const images = isImagen ? pickImagesFromImagen(data) : pickImagesFromGemini(data);

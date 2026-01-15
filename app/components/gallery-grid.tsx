@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useState } from "react";
@@ -57,7 +58,7 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
         return (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-muted-foreground">
                 <p>No saved generations yet.</p>
-                <p className="text-sm">Turn on "Save to local gallery" to keep them here.</p>
+                <p className="text-sm">Turn on &quot;Save to local gallery&quot; to keep them here.</p>
             </div>
         );
     }
