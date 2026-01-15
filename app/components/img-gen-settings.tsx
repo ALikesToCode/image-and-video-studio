@@ -166,6 +166,9 @@ export function ImgGenSettings({
     const isOpenRouterGemini = isOpenRouter && model.includes("gemini");
     const isChutesHiDream =
         provider === "chutes" && model.toLowerCase().includes("hidream");
+    const normalizedModel = model.toLowerCase();
+    const isChutesKokoro = provider === "chutes" && normalizedModel === "kokoro";
+    const isChutesCsm = provider === "chutes" && normalizedModel === "csm-1b";
 
     const showImageCount = provider === "navy" || isImagenModel;
     const showImageSize =
@@ -466,28 +469,47 @@ export function ImgGenSettings({
                     <div className="grid grid-cols-2 gap-4">
                         {provider === "chutes" ? (
                             <>
-                                <div className="space-y-2 col-span-2">
-                                    <Label>Speaker (Voice)</Label>
-                                    <Input
-                                        placeholder="e.g. af_bella, af_sarah"
-                                        value={chutesTtsSpeaker}
-                                        onChange={(e) => setChutesTtsSpeaker && setChutesTtsSpeaker(e.target.value)}
-                                    />
-                                    <p className="text-[10px] text-muted-foreground">
-                                        Kokoro voices: af_bella, af_sarah, am_adam, am_michael, etc.
-                                    </p>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Speed</Label>
-                                    <Input
-                                        type="number"
-                                        min="0.5"
-                                        max="2.0"
-                                        step="0.1"
-                                        value={chutesTtsSpeed}
-                                        onChange={(e) => setChutesTtsSpeed && setChutesTtsSpeed(e.target.value)}
-                                    />
-                                </div>
+                                {isChutesCsm ? (
+                                    <>
+                                        <div className="space-y-2">
+                                            <Label>Speaker</Label>
+                                            <Input
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                                value={chutesTtsSpeaker}
+                                                onChange={(e) => setChutesTtsSpeaker && setChutesTtsSpeaker(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Max Duration (ms)</Label>
+                                            <Input
+                                                type="number"
+                                                min="1000"
+                                                step="500"
+                                                value={chutesTtsMaxDuration}
+                                                onChange={(e) => setChutesTtsMaxDuration && setChutesTtsMaxDuration(e.target.value)}
+                                            />
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="space-y-2 col-span-2">
+                                        <Label>Speed</Label>
+                                        <Input
+                                            type="number"
+                                            min="0.5"
+                                            max="2.0"
+                                            step="0.1"
+                                            value={chutesTtsSpeed}
+                                            onChange={(e) => setChutesTtsSpeed && setChutesTtsSpeed(e.target.value)}
+                                        />
+                                        {isChutesKokoro ? (
+                                            <p className="text-[10px] text-muted-foreground">
+                                                Kokoro uses speed only.
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                )}
                             </>
                         ) : (
                             <>

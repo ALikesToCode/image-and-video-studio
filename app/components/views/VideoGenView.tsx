@@ -1,10 +1,12 @@
 "use client";
+
+/* eslint-disable @next/next/no-img-element */
 import React, { useRef, useState } from "react";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Download, Trash2, Video as VideoIcon, Upload, X } from "lucide-react";
+import { Sparkles, Download, Video as VideoIcon, Upload, X } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -12,7 +14,6 @@ export function VideoGenView() {
     const context = useStudio();
     const {
         videoUrl,
-        lastOutput,
         jobs,
         statusMessage,
         videoImage,

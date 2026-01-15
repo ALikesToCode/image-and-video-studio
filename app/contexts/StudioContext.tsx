@@ -7,6 +7,8 @@ import {
     GEMINI_VIDEO_MODELS,
     CHUTES_IMAGE_MODELS,
     CHUTES_LLM_MODELS,
+    CHUTES_VIDEO_MODELS,
+    CHUTES_TTS_MODELS,
     OPENROUTER_IMAGE_MODELS,
     NAVY_IMAGE_MODELS,
     NAVY_VIDEO_MODELS,
@@ -371,7 +373,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [chutesGuidanceScale, setChutesGuidanceScale] = useState("7.5");
     // Chutes video
     const [chutesVideoFps, setChutesVideoFps] = useState("16");
-    const [chutesVideoGuidanceScale, setChutesVideoGuidanceScale] = useState("5");
+    const [chutesVideoGuidanceScale, setChutesVideoGuidanceScale] = useState("1");
     // Chutes TTS
     const [chutesTtsSpeed, setChutesTtsSpeed] = useState("1");
     const [chutesTtsSpeaker, setChutesTtsSpeaker] = useState("1"); // for csm-1b
@@ -437,10 +439,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
         if (provider === "chutes") {
             if (mode === "image") return CHUTES_IMAGE_MODELS;
-            // For Chutes TTS, we might have a specific model list or use a generic one
-            // For now, let's assume the main model list is sufficient or a specific one will be added
-            if (mode === "tts") return CHUTES_LLM_MODELS; // Placeholder, adjust if specific TTS models are available
-            return CHUTES_IMAGE_MODELS; // Default for chutes if mode not matched
+            if (mode === "video") return CHUTES_VIDEO_MODELS;
+            if (mode === "tts") return CHUTES_TTS_MODELS;
+            return CHUTES_IMAGE_MODELS;
         }
         if (provider === "openrouter") {
             return openRouterImageModels;
@@ -623,9 +624,27 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 throw new Error(err || "Failed to generate video");
             }
 
-            // Assume blob result for now or check header
-            const blob = await response.blob();
-            const videoUrl = URL.createObjectURL(blob);
+            const contentType = response.headers.get("content-type") ?? "";
+            let videoUrl: string | null = null;
+
+            if (contentType.includes("application/json")) {
+                const data = await response.json();
+                if (data?.error) throw new Error(data.error);
+                if (typeof data?.url === "string") {
+                    videoUrl = data.url;
+                } else if (typeof data?.data === "string") {
+                    const mimeType =
+                        typeof data?.mimeType === "string"
+                            ? data.mimeType
+                            : "video/mp4";
+                    videoUrl = dataUrlFromBase64(data.data, mimeType);
+                }
+            } else {
+                const blob = await response.blob();
+                videoUrl = URL.createObjectURL(blob);
+            }
+
+            if (!videoUrl) throw new Error("No video data received.");
             setVideoUrl(videoUrl);
             completeJob(job.id, { videoUrl });
             setLastOutput({ mode: "video", prompt: job.prompt, model: job.model, provider: job.provider });
@@ -651,6 +670,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
             // Only chutes implemented for now
             if (job.provider === "chutes") {
+                const normalizedModel = (job.model || "").toLowerCase();
+                const isCsm = normalizedModel === "csm-1b";
                 const response = await fetch("/api/chutes/audio", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -658,9 +679,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         apiKey: job.apiKey,
                         prompt: job.prompt,
                         model: job.model,
-                        speed: job.chutesTtsSpeed,
-                        speaker: job.chutesTtsSpeaker,
-                        maxDuration: job.chutesTtsMaxDuration
+                        speed: isCsm ? undefined : job.chutesTtsSpeed,
+                        speaker: isCsm ? job.chutesTtsSpeaker : undefined,
+                        maxDuration: isCsm ? job.chutesTtsMaxDuration : undefined,
                     }),
                 });
 

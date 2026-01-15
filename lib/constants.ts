@@ -80,6 +80,13 @@ export const CHUTES_IMAGE_MODELS: ModelOption[] = [
     },
 ];
 
+export const CHUTES_VIDEO_MODELS: ModelOption[] = [
+    {
+        id: "wan-2-2-i2v-14b-fast",
+        label: "WAN 2.2 I2V 14B Fast",
+    },
+];
+
 export const CHUTES_LLM_MODELS: ModelOption[] = [
     {
         id: "Qwen/Qwen3-32B",
@@ -370,8 +377,8 @@ export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
     },
     chutes: {
         image: CHUTES_IMAGE_MODELS[0].id,
-        video: CHUTES_IMAGE_MODELS[0].id,
-        tts: "kokoro",
+        video: CHUTES_VIDEO_MODELS[0].id,
+        tts: CHUTES_TTS_MODELS[0].id,
     },
     openrouter: {
         image: OPENROUTER_IMAGE_MODELS[0].id,
