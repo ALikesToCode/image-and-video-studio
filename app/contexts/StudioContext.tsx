@@ -79,7 +79,8 @@ export type GenerationJob = {
     chutesTtsSpeaker?: string;
     chutesTtsMaxDuration?: string;
     // Audio output
-    audioUrl?: string;
+    audioUrl?: string; // result
+    videoUrl?: string; // result
     audioData?: string; // base64
 };
 
@@ -599,7 +600,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         startJob(job, "Generating Video...");
         try {
             console.log("Generating video with model:", job.model);
-            let url = "/api/chutes/video";
+            const url = "/api/chutes/video";
             const body: Record<string, unknown> = {
                 apiKey: job.apiKey,
                 prompt: job.prompt,
@@ -641,447 +642,390 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (job.mode === "tts") { await generateAudio(job); return; }
         failJob(job.id, "Mode not fully implemented.");
     };
-    if (job.provider === "chutes") {
-        if (!job.videoImage) throw new Error("Source image required for Chutes video");
 
-        const res = await fetch("/api/chutes/video", {
-            method: "POST",
-            body: JSON.stringify({
-                apiKey: job.apiKey,
-                prompt: job.prompt,
-                image: job.videoImage,
-                fps: Number(job.chutesVideoFps),
-                guidance_scale_2: Number(job.chutesVideoGuidanceScale)
-            })
-        });
 
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.error || "Video generation failed");
-        }
+    const generateAudio = async (job: GenerationJob) => {
+        startJob(job, "Generating Audio...");
+        try {
+            console.log("Generating audio with model:", job.model);
 
-        const data = await res.json();
+            // Only chutes implemented for now
+            if (job.provider === "chutes") {
+                const response = await fetch("/api/chutes/audio", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: job.apiKey,
+                        prompt: job.prompt,
+                        model: job.model,
+                        speed: job.chutesTtsSpeed,
+                        speaker: job.chutesTtsSpeaker,
+                        maxDuration: job.chutesTtsMaxDuration
+                    }),
+                });
 
-        // Expecting { images: [...] } or { video: ... } 
-        // If Chutes returns a video URL directly or base64 stream
-        // Based on image/route, it returns { images: [{ data, mimeType }] } usually which handles base64
-        // Let's assume for now it returns a similar structure or a 'url'
-
-        let videoDataUrl = "";
-        let mime = "video/mp4";
-
-        if (data.images?.[0]?.data) {
-            // It returned base64 in 'images' array? A bit weird for video but possible
-            videoDataUrl = dataUrlFromBase64(data.images[0].data, data.images[0].mimeType || "video/mp4");
-            mime = data.images[0].mimeType || "video/mp4";
-        } else if (data.url) {
-            videoDataUrl = data.url;
-            // If it's a remote URL, we might want to fetch it as blob for consistency if possible, or just use it
-        } else {
-            // Debug fallback if structure is unknown, assuming it might be raw or text?
-            console.log("Unknown video response structure", data);
-            throw new Error("Unknown video response structure");
-        }
-
-        setVideoUrl(videoDataUrl);
-        setLastOutput({ mode: "video", prompt: job.prompt, model: job.model, provider: job.provider });
-        completeJob(job.id);
-        return;
-    }
-    // ... existing gemini/navy logic placeholder ...
-    failJob(job.id, "Provider not implemented for video yet");
-} catch (e) {
-    failJob(job.id, e instanceof Error ? e.message : "Video Generation Failed");
-}
-    };
-
-const generateAudio = async (job: GenerationJob) => {
-    startJob(job, "Generating Audio...");
-    try {
-        console.log("Generating audio with model:", job.model);
-
-        // Only chutes implemented for now
-        if (job.provider === "chutes") {
-            const response = await fetch("/api/chutes/audio", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    apiKey: job.apiKey,
-                    prompt: job.prompt,
-                    model: job.model,
-                    speed: job.chutesTtsSpeed,
-                    speaker: job.chutesTtsSpeaker,
-                    maxDuration: job.chutesTtsMaxDuration
-                }),
-            });
-
-            if (!response.ok) {
-                const err = await response.text();
-                throw new Error(err || "Failed to generate audio");
-            }
-
-            const contentType = response.headers.get("content-type");
-            let audioDataUrl: string | null = null;
-            let audioMime: string | null = null;
-
-            if (contentType && contentType.includes("application/json")) {
-                const data = await response.json();
-                // handle json error or data
-                if (data.error) throw new Error(data.error);
-                // if it returns base64 url or direct url
-                if (data.url) {
-                    audioDataUrl = data.url;
-                    audioMime = data.mimeType || "audio/mpeg"; // Default to mp3 if not specified
-                } else if (data.data) { // Assuming base64 data
-                    audioDataUrl = dataUrlFromBase64(data.data, data.mimeType || "audio/mpeg");
-                    audioMime = data.mimeType || "audio/mpeg";
+                if (!response.ok) {
+                    const err = await response.text();
+                    throw new Error(err || "Failed to generate audio");
                 }
+
+                const contentType = response.headers.get("content-type");
+                let audioDataUrl: string | null = null;
+                let audioMime: string | null = null;
+
+                if (contentType && contentType.includes("application/json")) {
+                    const data = await response.json();
+                    // handle json error or data
+                    if (data.error) throw new Error(data.error);
+                    // if it returns base64 url or direct url
+                    if (data.url) {
+                        audioDataUrl = data.url;
+                        audioMime = data.mimeType || "audio/mpeg"; // Default to mp3 if not specified
+                    } else if (data.data) { // Assuming base64 data
+                        audioDataUrl = dataUrlFromBase64(data.data, data.mimeType || "audio/mpeg");
+                        audioMime = data.mimeType || "audio/mpeg";
+                    }
+                } else {
+                    // Assume direct audio blob
+                    const blob = await response.blob();
+                    audioDataUrl = URL.createObjectURL(blob);
+                    audioMime = blob.type;
+                }
+
+                if (!audioDataUrl) throw new Error("No audio data received.");
+
+                setAudioUrl(audioDataUrl);
+                setAudioMimeType(audioMime);
+                setLastOutput({ mode: "tts", prompt: job.prompt, model: job.model, provider: job.provider, ttsVoice: job.ttsVoice });
+                completeJob(job.id, { audioUrl: audioDataUrl, audioData: audioDataUrl.startsWith("data:") ? audioDataUrl : undefined }); // Store dataUrl in job for history
+                return;
+
             } else {
-                // Assume direct audio blob
-                const blob = await response.blob();
-                audioDataUrl = URL.createObjectURL(blob);
-                audioMime = blob.type;
+                throw new Error("Audio generation not implemented for this provider");
             }
 
-            if (!audioDataUrl) throw new Error("No audio data received.");
-
-            setAudioUrl(audioDataUrl);
-            setAudioMimeType(audioMime);
-            setLastOutput({ mode: "tts", prompt: job.prompt, model: job.model, provider: job.provider, ttsVoice: job.ttsVoice });
-            completeJob(job.id, { audioUrl: audioDataUrl, audioData: audioDataUrl.startsWith("data:") ? audioDataUrl : undefined }); // Store dataUrl in job for history
-            return;
-
-        } else {
-            throw new Error("Audio generation not implemented for this provider");
+        } catch (error) {
+            console.error("Audio generation error:", error);
+            failJob(job.id, error instanceof Error ? error.message : "Audio generation failed");
         }
-
-    } catch (error) {
-        console.error("Audio generation error:", error);
-        failJob(job.id, error instanceof Error ? error.message : "Audio generation failed");
-    }
-};
-
-const runJob = async (job: GenerationJob) => {
-    if (job.mode === "image") { await generateImages(job); return; }
-    if (job.mode === "video") { await generateVideo(job); return; }
-    if (job.mode === "tts") { await generateAudio(job); return; }
-    failJob(job.id, "Mode not fully implemented in this refactor yet.");
-};
-
-// Queue Processor
-useEffect(() => {
-    if (!hydrated || processingRef.current) return;
-    const nextJob = jobs.find(j => j.status === "queued");
-    if (!nextJob) return;
-    processingRef.current = true;
-    runJob(nextJob).finally(() => { processingRef.current = false; });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [jobs, hydrated]);
-
-const handleGenerate = () => {
-    if (!apiKey.trim()) { setErrorMessage("API Key required"); return; }
-    if (!prompt.trim()) { setErrorMessage("Prompt required"); return; }
-    const job: GenerationJob = {
-        id: createId(), status: "queued", mode, provider, model, prompt, apiKey, createdAt: new Date().toISOString(),
-        imageCount, imageAspect, imageSize, navyImageSize, chutesGuidanceScale, chutesWidth, chutesHeight, chutesSteps, chutesResolution, chutesSeed,
-        chutesVideoFps, chutesVideoGuidanceScale, videoImage: videoImage || undefined,
-        videoAspect, videoResolution, videoDuration, ttsVoice, ttsFormat, ttsSpeed, saveToGallery,
-        negativePrompt,
-        chutesTtsSpeed,
-        chutesTtsSpeaker,
-        chutesTtsMaxDuration,
     };
-    setJobs(prev => [...prev, job]);
-    setStatusMessage("Queued...");
-};
 
-const clearKey = () => {
-    setApiKey("");
-    // will trigger local storage clear via effect
-};
 
-const clearGallery = () => {
-    setSavedMedia([]);
-    clearGalleryStore().catch(console.error);
-};
 
-const refreshStorageEstimate = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
-        setStorageError("Storage usage isn't available.");
-        return;
-    }
-    try {
-        const estimate = await navigator.storage.estimate();
-        const persistent = navigator.storage.persisted ? await navigator.storage.persisted() : null;
-        setStorageSnapshot({
-            usage: estimate.usage ?? 0,
-            quota: estimate.quota ?? 0,
-            persistent,
-        });
-        setStorageError(null);
-    } catch (error) {
-        setStorageError(error instanceof Error ? error.message : "Unable to read storage usage.");
-    }
-}, []);
+    // Queue Processor
+    useEffect(() => {
+        if (!hydrated || processingRef.current) return;
+        const nextJob = jobs.find(j => j.status === "queued");
+        if (!nextJob) return;
+        processingRef.current = true;
+        runJob(nextJob).finally(() => { processingRef.current = false; });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [jobs, hydrated]);
 
-const refreshNavyUsage = useCallback(async () => {
-    if (provider !== "navy") return;
-    const trimmedKey = apiKey.trim();
-    if (!trimmedKey) {
-        setNavyUsage(null);
-        setNavyUsageError(null);
-        setNavyUsageUpdatedAt(null);
-        return;
-    }
-    if (navyUsageLoadingRef.current) return;
-    navyUsageLoadingRef.current = true;
-    setNavyUsageLoading(true);
-    try {
-        const response = await fetch("/api/navy/usage", {
-            headers: { "x-user-api-key": trimmedKey },
-        });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload?.error ?? "Unable to fetch usage.");
-        setNavyUsage(payload as NavyUsageResponse);
-        setNavyUsageError(null);
-        setNavyUsageUpdatedAt(new Date().toISOString());
-    } catch (error) {
-        setNavyUsageError(error instanceof Error ? error.message : "Unable to fetch usage.");
-    } finally {
-        navyUsageLoadingRef.current = false;
-        setNavyUsageLoading(false);
-    }
-}, [apiKey, provider]);
+    const handleGenerate = () => {
+        if (!apiKey.trim()) { setErrorMessage("API Key required"); return; }
+        if (!prompt.trim()) { setErrorMessage("Prompt required"); return; }
+        const job: GenerationJob = {
+            id: createId(), status: "queued", mode, provider, model, prompt, apiKey, createdAt: new Date().toISOString(),
+            imageCount, imageAspect, imageSize, navyImageSize, chutesGuidanceScale, chutesWidth, chutesHeight, chutesSteps, chutesResolution, chutesSeed,
+            chutesVideoFps, chutesVideoGuidanceScale, videoImage: videoImage || undefined,
+            videoAspect, videoResolution, videoDuration, ttsVoice, ttsFormat, ttsSpeed, saveToGallery,
+            negativePrompt,
+            chutesTtsSpeed,
+            chutesTtsSpeaker,
+            chutesTtsMaxDuration,
+        };
+        setJobs(prev => [...prev, job]);
+        setStatusMessage("Queued...");
+    };
 
-const refreshModels = useCallback(async () => {
-    if (provider !== "openrouter" && provider !== "navy") return;
-    setModelsLoading(true);
-    setModelsError(null);
-    try {
-        const response = await fetch(`/api/${provider}/models`);
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload?.error ?? `Failed to fetch models from ${provider}`);
+    const clearKey = () => {
+        setApiKey("");
+        // will trigger local storage clear via effect
+    };
 
-        if (provider === "openrouter") {
-            const models = sanitizeModelOptions(payload);
-            setOpenRouterImageModels(models);
-        } else {
-            if (payload.image) setNavyImageModels(sanitizeModelOptions(payload.image));
-            if (payload.video) setNavyVideoModels(sanitizeModelOptions(payload.video));
-            if (payload.audio) setNavyTtsModels(sanitizeModelOptions(payload.audio));
+    const clearGallery = () => {
+        setSavedMedia([]);
+        clearGalleryStore().catch(console.error);
+    };
+
+    const refreshStorageEstimate = useCallback(async () => {
+        if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
+            setStorageError("Storage usage isn't available.");
+            return;
         }
-    } catch (error) {
-        setModelsError(error instanceof Error ? error.message : "Unknown error refreshing models");
-    } finally {
-        setModelsLoading(false);
-    }
-}, [provider]);
+        try {
+            const estimate = await navigator.storage.estimate();
+            const persistent = navigator.storage.persisted ? await navigator.storage.persisted() : null;
+            setStorageSnapshot({
+                usage: estimate.usage ?? 0,
+                quota: estimate.quota ?? 0,
+                persistent,
+            });
+            setStorageError(null);
+        } catch (error) {
+            setStorageError(error instanceof Error ? error.message : "Unable to read storage usage.");
+        }
+    }, []);
 
-const refreshChutesChatModels = useCallback(async () => {
-    setChutesChatModelsLoading(true);
-    setChutesChatModelsError(null);
-    try {
-        const response = await fetch("/api/chutes/models");
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch Chutes models");
-        setChutesChatModels(sanitizeModelOptions(payload));
-    } catch (error) {
-        setChutesChatModelsError(error instanceof Error ? error.message : "Error");
-    } finally {
-        setChutesChatModelsLoading(false);
-    }
-}, []);
+    const refreshNavyUsage = useCallback(async () => {
+        if (provider !== "navy") return;
+        const trimmedKey = apiKey.trim();
+        if (!trimmedKey) {
+            setNavyUsage(null);
+            setNavyUsageError(null);
+            setNavyUsageUpdatedAt(null);
+            return;
+        }
+        if (navyUsageLoadingRef.current) return;
+        navyUsageLoadingRef.current = true;
+        setNavyUsageLoading(true);
+        try {
+            const response = await fetch("/api/navy/usage", {
+                headers: { "x-user-api-key": trimmedKey },
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload?.error ?? "Unable to fetch usage.");
+            setNavyUsage(payload as NavyUsageResponse);
+            setNavyUsageError(null);
+            setNavyUsageUpdatedAt(new Date().toISOString());
+        } catch (error) {
+            setNavyUsageError(error instanceof Error ? error.message : "Unable to fetch usage.");
+        } finally {
+            navyUsageLoadingRef.current = false;
+            setNavyUsageLoading(false);
+        }
+    }, [apiKey, provider]);
 
-// --- Effects (Persistence) ---
+    const refreshModels = useCallback(async () => {
+        if (provider !== "openrouter" && provider !== "navy") return;
+        setModelsLoading(true);
+        setModelsError(null);
+        try {
+            const response = await fetch(`/api/${provider}/models`);
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload?.error ?? `Failed to fetch models from ${provider}`);
 
-// Hydration
-useEffect(() => {
-    setHydrated(true);
-    const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
-    const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
-    const storedMedia = readLocalStorage<StoredMediaRecord[]>(STORAGE_KEYS.images, []);
-    const storedChutesKey = readLocalStorage<string>(STORAGE_KEYS.keyChutes, "");
+            if (provider === "openrouter") {
+                const models = sanitizeModelOptions(payload);
+                setOpenRouterImageModels(models);
+            } else {
+                if (payload.image) setNavyImageModels(sanitizeModelOptions(payload.image));
+                if (payload.video) setNavyVideoModels(sanitizeModelOptions(payload.video));
+                if (payload.audio) setNavyTtsModels(sanitizeModelOptions(payload.audio));
+            }
+        } catch (error) {
+            setModelsError(error instanceof Error ? error.message : "Unknown error refreshing models");
+        } finally {
+            setModelsLoading(false);
+        }
+    }, [provider]);
 
-    if (storedProvider) setProvider(storedProvider);
-    if (storedMode) setMode(storedMode);
-    setChutesChatKey(storedChutesKey);
+    const refreshChutesChatModels = useCallback(async () => {
+        setChutesChatModelsLoading(true);
+        setChutesChatModelsError(null);
+        try {
+            const response = await fetch("/api/chutes/models");
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch Chutes models");
+            setChutesChatModels(sanitizeModelOptions(payload));
+        } catch (error) {
+            setChutesChatModelsError(error instanceof Error ? error.message : "Error");
+        } finally {
+            setChutesChatModelsLoading(false);
+        }
+    }, []);
 
-    const storedOpenRouterModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.openRouterModels, []);
-    if (storedOpenRouterModels.length) setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
+    // --- Effects (Persistence) ---
 
-    const loadSavedMedia = async () => {
-        if (!storedMedia.length) return;
-        if (!idbAvailable) {
-            const legacyEntries = storedMedia.filter(
-                (item): item is StoredMediaRecord & { dataUrl: string } =>
-                    typeof item.dataUrl === "string" && item.dataUrl.length > 0
-            );
-            if (legacyEntries.length) {
-                setSavedMedia(
-                    legacyEntries.map((item) => ({
+    // Hydration
+    useEffect(() => {
+        setHydrated(true);
+        const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
+        const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
+        const storedMedia = readLocalStorage<StoredMediaRecord[]>(STORAGE_KEYS.images, []);
+        const storedChutesKey = readLocalStorage<string>(STORAGE_KEYS.keyChutes, "");
+
+        if (storedProvider) setProvider(storedProvider);
+        if (storedMode) setMode(storedMode);
+        setChutesChatKey(storedChutesKey);
+
+        const storedOpenRouterModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.openRouterModels, []);
+        if (storedOpenRouterModels.length) setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
+
+        const loadSavedMedia = async () => {
+            if (!storedMedia.length) return;
+            if (!idbAvailable) {
+                const legacyEntries = storedMedia.filter(
+                    (item): item is StoredMediaRecord & { dataUrl: string } =>
+                        typeof item.dataUrl === "string" && item.dataUrl.length > 0
+                );
+                if (legacyEntries.length) {
+                    setSavedMedia(
+                        legacyEntries.map((item) => ({
+                            id: item.id,
+                            dataUrl: item.dataUrl,
+                            prompt: item.prompt,
+                            model: item.model,
+                            provider: item.provider,
+                            createdAt: item.createdAt,
+                            kind: item.kind ?? "image",
+                            mimeType: item.mimeType,
+                        }))
+                    );
+                }
+                return;
+            }
+            const entries: StoredMedia[] = [];
+            for (const item of storedMedia) {
+                try {
+                    let blob = await getGalleryBlob(item.id);
+                    if (!blob && item.dataUrl) {
+                        const response = await fetch(item.dataUrl);
+                        if (response.ok) blob = await response.blob();
+                        if (blob) await putGalleryBlob(item.id, blob);
+                    }
+                    if (!blob) continue;
+                    const url = URL.createObjectURL(blob);
+                    galleryUrlsRef.current.set(item.id, url);
+                    entries.push({
                         id: item.id,
-                        dataUrl: item.dataUrl,
+                        dataUrl: url,
                         prompt: item.prompt,
                         model: item.model,
                         provider: item.provider,
                         createdAt: item.createdAt,
                         kind: item.kind ?? "image",
-                        mimeType: item.mimeType,
-                    }))
-                );
-            }
-            return;
-        }
-        const entries: StoredMedia[] = [];
-        for (const item of storedMedia) {
-            try {
-                let blob = await getGalleryBlob(item.id);
-                if (!blob && item.dataUrl) {
-                    const response = await fetch(item.dataUrl);
-                    if (response.ok) blob = await response.blob();
-                    if (blob) await putGalleryBlob(item.id, blob);
+                        mimeType: item.mimeType ?? blob.type,
+                    });
+                } catch {
+                    // simplified error handling
                 }
-                if (!blob) continue;
-                const url = URL.createObjectURL(blob);
-                galleryUrlsRef.current.set(item.id, url);
-                entries.push({
-                    id: item.id,
-                    dataUrl: url,
-                    prompt: item.prompt,
-                    model: item.model,
-                    provider: item.provider,
-                    createdAt: item.createdAt,
-                    kind: item.kind ?? "image",
-                    mimeType: item.mimeType ?? blob.type,
-                });
-            } catch {
-                // simplified error handling
             }
+            setSavedMedia(entries);
+        };
+        void loadSavedMedia();
+
+    }, [idbAvailable]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.provider, JSON.stringify(provider));
+        writeLocalStorage(STORAGE_KEYS.mode, JSON.stringify(mode));
+    }, [provider, mode, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        const storageKey = getKeyStorage(provider);
+        if (apiKey) writeLocalStorage(storageKey, JSON.stringify(apiKey));
+        else window.localStorage.removeItem(storageKey);
+    }, [apiKey, provider, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        const storedKey = readLocalStorage<string>(getKeyStorage(provider), "");
+        setApiKey(storedKey);
+    }, [provider, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (provider === "navy" && apiKey.trim()) {
+            void refreshNavyUsage();
+            const interval = window.setInterval(() => void refreshNavyUsage(), 60000);
+            return () => window.clearInterval(interval);
+        } else {
+            setNavyUsage(null);
         }
-        setSavedMedia(entries);
+    }, [provider, apiKey, hydrated, refreshNavyUsage]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        try {
+            const storedMedia: StoredMediaRecord[] = savedMedia.map((item) => ({
+                id: item.id,
+                prompt: item.prompt,
+                model: item.model,
+                provider: item.provider,
+                createdAt: item.createdAt,
+                kind: item.kind,
+                mimeType: item.mimeType,
+                ...(!idbAvailable || !item.dataUrl.startsWith("blob:") ? { dataUrl: item.dataUrl } : {}),
+            }));
+            writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedMedia));
+        } catch { }
+    }, [savedMedia, hydrated, idbAvailable]);
+
+    const value: StudioContextType = {
+        hydrated,
+        provider, setProvider,
+        mode, setMode,
+        apiKey, setApiKey,
+        model, setModel,
+        prompt, setPrompt,
+        negativePrompt, setNegativePrompt,
+        imageCount, setImageCount,
+        imageAspect, setImageAspect,
+        imageSize, setImageSize,
+        navyImageSize, setNavyImageSize,
+        chutesVideoFps, setChutesVideoFps,
+        chutesVideoGuidanceScale, setChutesVideoGuidanceScale,
+        videoImage, setVideoImage,
+        chutesGuidanceScale, setChutesGuidanceScale,
+        chutesWidth, setChutesWidth,
+        chutesHeight, setChutesHeight,
+        chutesSteps, setChutesSteps,
+        chutesResolution, setChutesResolution,
+        chutesSeed, setChutesSeed,
+        videoAspect, setVideoAspect,
+        videoResolution, setVideoResolution,
+        videoDuration, setVideoDuration,
+        ttsVoice, setTtsVoice,
+        ttsFormat, setTtsFormat,
+        ttsSpeed, setTtsSpeed,
+        saveToGallery, setSaveToGallery,
+        chutesChatKey,
+        chutesChatModels,
+        chutesChatModel, setChutesChatModel,
+        chutesToolImageModel, setChutesToolImageModel,
+        chutesChatModelsLoading,
+        chutesChatModelsError,
+        openRouterImageModels,
+        navyImageModels,
+        navyVideoModels,
+        navyTtsModels,
+        modelSuggestions,
+        statusMessage, setStatusMessage,
+        errorMessage, setErrorMessage,
+        modelsLoading, modelsError,
+        navyUsage, navyUsageError, navyUsageLoading, navyUsageUpdatedAt, refreshNavyUsage,
+        storageSnapshot, storageError, refreshStorageEstimate,
+        generatedImages, setGeneratedImages,
+        savedMedia, setSavedMedia,
+        videoUrl, setVideoUrl,
+        audioUrl, setAudioUrl,
+        audioMimeType, setAudioMimeType,
+        lastOutput, setLastOutput,
+        jobs, updateJobs,
+        hasActiveJobs, runningJobs, queuedJobs, recentJobs,
+        supportsVideo, supportsTts,
+        clearKey, clearGallery,
+        refreshModels, refreshChutesChatModels,
+        handleGenerate,
+        generateImage: generateImages,
+        generateVideo,
+        generateAudio,
+        runJob,
+        // Chutes TTS
+        chutesTtsSpeed, setChutesTtsSpeed,
+        chutesTtsSpeaker, setChutesTtsSpeaker,
+        chutesTtsMaxDuration, setChutesTtsMaxDuration,
     };
-    void loadSavedMedia();
 
-}, [idbAvailable]);
-
-useEffect(() => {
-    if (!hydrated) return;
-    writeLocalStorage(STORAGE_KEYS.provider, JSON.stringify(provider));
-    writeLocalStorage(STORAGE_KEYS.mode, JSON.stringify(mode));
-}, [provider, mode, hydrated]);
-
-useEffect(() => {
-    if (!hydrated) return;
-    const storageKey = getKeyStorage(provider);
-    if (apiKey) writeLocalStorage(storageKey, JSON.stringify(apiKey));
-    else window.localStorage.removeItem(storageKey);
-}, [apiKey, provider, hydrated]);
-
-useEffect(() => {
-    if (!hydrated) return;
-    const storedKey = readLocalStorage<string>(getKeyStorage(provider), "");
-    setApiKey(storedKey);
-}, [provider, hydrated]);
-
-useEffect(() => {
-    if (!hydrated) return;
-    if (provider === "navy" && apiKey.trim()) {
-        void refreshNavyUsage();
-        const interval = window.setInterval(() => void refreshNavyUsage(), 60000);
-        return () => window.clearInterval(interval);
-    } else {
-        setNavyUsage(null);
-    }
-}, [provider, apiKey, hydrated, refreshNavyUsage]);
-
-useEffect(() => {
-    if (!hydrated) return;
-    try {
-        const storedMedia: StoredMediaRecord[] = savedMedia.map((item) => ({
-            id: item.id,
-            prompt: item.prompt,
-            model: item.model,
-            provider: item.provider,
-            createdAt: item.createdAt,
-            kind: item.kind,
-            mimeType: item.mimeType,
-            ...(!idbAvailable || !item.dataUrl.startsWith("blob:") ? { dataUrl: item.dataUrl } : {}),
-        }));
-        writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedMedia));
-    } catch { }
-}, [savedMedia, hydrated, idbAvailable]);
-
-const value: StudioContextType = {
-    hydrated,
-    provider, setProvider,
-    mode, setMode,
-    apiKey, setApiKey,
-    model, setModel,
-    prompt, setPrompt,
-    negativePrompt, setNegativePrompt,
-    imageCount, setImageCount,
-    imageAspect, setImageAspect,
-    imageSize, setImageSize,
-    navyImageSize, setNavyImageSize,
-    chutesVideoFps, setChutesVideoFps,
-    chutesVideoGuidanceScale, setChutesVideoGuidanceScale,
-    videoImage, setVideoImage,
-    chutesGuidanceScale, setChutesGuidanceScale,
-    chutesWidth, setChutesWidth,
-    chutesHeight, setChutesHeight,
-    chutesSteps, setChutesSteps,
-    chutesResolution, setChutesResolution,
-    chutesSeed, setChutesSeed,
-    videoAspect, setVideoAspect,
-    videoResolution, setVideoResolution,
-    videoDuration, setVideoDuration,
-    ttsVoice, setTtsVoice,
-    ttsFormat, setTtsFormat,
-    ttsSpeed, setTtsSpeed,
-    saveToGallery, setSaveToGallery,
-    chutesChatKey,
-    chutesChatModels,
-    chutesChatModel, setChutesChatModel,
-    chutesToolImageModel, setChutesToolImageModel,
-    chutesChatModelsLoading,
-    chutesChatModelsError,
-    openRouterImageModels,
-    navyImageModels,
-    navyVideoModels,
-    navyTtsModels,
-    modelSuggestions,
-    statusMessage, setStatusMessage,
-    errorMessage, setErrorMessage,
-    modelsLoading, modelsError,
-    navyUsage, navyUsageError, navyUsageLoading, navyUsageUpdatedAt, refreshNavyUsage,
-    storageSnapshot, storageError, refreshStorageEstimate,
-    generatedImages, setGeneratedImages,
-    savedMedia, setSavedMedia,
-    videoUrl, setVideoUrl,
-    audioUrl, setAudioUrl,
-    audioMimeType, setAudioMimeType,
-    lastOutput, setLastOutput,
-    jobs, updateJobs,
-    hasActiveJobs, runningJobs, queuedJobs, recentJobs,
-    supportsVideo, supportsTts,
-    clearKey, clearGallery,
-    refreshModels, refreshChutesChatModels,
-    handleGenerate,
-    generateImage: generateImages,
-    generateVideo,
-    generateAudio,
-    runJob,
-    // Chutes TTS
-    chutesTtsSpeed, setChutesTtsSpeed,
-    chutesTtsSpeaker, setChutesTtsSpeaker,
-    chutesTtsMaxDuration, setChutesTtsMaxDuration,
-};
-
-return (
-    <StudioContext.Provider value={value}>
-        {children}
-    </StudioContext.Provider>
-);
+    return (
+        <StudioContext.Provider value={value}>
+            {children}
+        </StudioContext.Provider>
+    );
 }
 
 export const useStudio = () => {

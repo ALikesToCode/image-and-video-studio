@@ -90,6 +90,12 @@ interface ImgGenSettingsProps {
     chutesVideoGuidanceScale?: string;
     setChutesVideoGuidanceScale?: (v: string) => void;
     onRefreshUsage?: () => void;
+    chutesTtsSpeed?: string;
+    setChutesTtsSpeed?: (s: string) => void;
+    chutesTtsSpeaker?: string;
+    setChutesTtsSpeaker?: (s: string) => void;
+    chutesTtsMaxDuration?: string;
+    setChutesTtsMaxDuration?: (s: string) => void;
 }
 
 export function ImgGenSettings({
@@ -144,7 +150,14 @@ export function ImgGenSettings({
     navyUsageError,
     navyUsageLoading,
     navyUsageUpdatedAt,
+
     onRefreshUsage,
+    chutesTtsSpeed,
+    setChutesTtsSpeed,
+    chutesTtsSpeaker,
+    setChutesTtsSpeaker,
+    chutesTtsMaxDuration,
+    setChutesTtsMaxDuration,
 }: ImgGenSettingsProps) {
 
 
@@ -451,47 +464,76 @@ export function ImgGenSettings({
 
                 {mode === "tts" && (
                     <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label>Voice</Label>
-                            <Select value={ttsVoice} onValueChange={setTtsVoice}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {TTS_VOICES.map((voice) => (
-                                        <SelectItem key={voice} value={voice}>
-                                            {voice}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Format</Label>
-                            <Select value={ttsFormat} onValueChange={setTtsFormat}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {TTS_FORMATS.map((format) => (
-                                        <SelectItem key={format} value={format}>
-                                            {format}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Speed</Label>
-                            <Input
-                                type="number"
-                                min="0.25"
-                                max="4"
-                                step="0.05"
-                                value={ttsSpeed}
-                                onChange={(e) => setTtsSpeed(e.target.value)}
-                            />
-                        </div>
+                        {provider === "chutes" ? (
+                            <>
+                                <div className="space-y-2 col-span-2">
+                                    <Label>Speaker (Voice)</Label>
+                                    <Input
+                                        placeholder="e.g. af_bella, af_sarah"
+                                        value={chutesTtsSpeaker}
+                                        onChange={(e) => setChutesTtsSpeaker && setChutesTtsSpeaker(e.target.value)}
+                                    />
+                                    <p className="text-[10px] text-muted-foreground">
+                                        Kokoro voices: af_bella, af_sarah, am_adam, am_michael, etc.
+                                    </p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Speed</Label>
+                                    <Input
+                                        type="number"
+                                        min="0.5"
+                                        max="2.0"
+                                        step="0.1"
+                                        value={chutesTtsSpeed}
+                                        onChange={(e) => setChutesTtsSpeed && setChutesTtsSpeed(e.target.value)}
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="space-y-2">
+                                    <Label>Voice</Label>
+                                    <Select value={ttsVoice} onValueChange={setTtsVoice}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {TTS_VOICES.map((voice) => (
+                                                <SelectItem key={voice} value={voice}>
+                                                    {voice}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Format</Label>
+                                    <Select value={ttsFormat} onValueChange={setTtsFormat}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {TTS_FORMATS.map((format) => (
+                                                <SelectItem key={format} value={format}>
+                                                    {format}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Speed</Label>
+                                    <Input
+                                        type="number"
+                                        min="0.25"
+                                        max="4"
+                                        step="0.05"
+                                        value={ttsSpeed}
+                                        onChange={(e) => setTtsSpeed(e.target.value)}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
