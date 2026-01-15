@@ -63,6 +63,18 @@ export const CHUTES_IMAGE_MODELS: ModelOption[] = [
         label: "Chutes Z Image Turbo",
     },
     {
+        id: "chutes-hidream",
+        label: "Chutes HiDream",
+    },
+    {
+        id: "chroma",
+        label: "Chroma",
+    },
+    {
+        id: "JuggernautXL-Ragnarok",
+        label: "JuggernautXL Ragnarok",
+    },
+    {
         id: "Qwen-Image-2512",
         label: "Qwen Image 2512",
     },

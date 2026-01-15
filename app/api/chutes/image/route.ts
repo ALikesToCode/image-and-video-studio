@@ -9,6 +9,8 @@ type ImageRequest = {
   width?: number;
   height?: number;
   numInferenceSteps?: number;
+  resolution?: string;
+  seed?: number | null;
 };
 
 type ImagePayload = {
@@ -92,6 +94,21 @@ const downloadImage = async (url: string) => {
   };
 };
 
+const asPositiveInt = (value?: number) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value <= 0) return null;
+  return Math.round(value);
+};
+
+const resolveHiDreamResolution = (body: ImageRequest) => {
+  if (typeof body.resolution === "string" && body.resolution.trim()) {
+    return body.resolution.trim();
+  }
+  const width = asPositiveInt(body.width) ?? 1024;
+  const height = asPositiveInt(body.height) ?? 1024;
+  return `${width}x${height}`;
+};
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
@@ -106,8 +123,13 @@ export async function POST(req: Request) {
   }
 
   const model = body.model ?? "z-image-turbo";
-  const url = "https://image.chutes.ai/generate";
-  const payload = {
+  const normalizedModel = model.toLowerCase();
+  const isZImageTurbo = normalizedModel === "z-image-turbo";
+  const isHiDream =
+    normalizedModel === "chutes-hidream" || normalizedModel === "hidream";
+
+  let url = "https://image.chutes.ai/generate";
+  let payload: Record<string, unknown> = {
     model,
     prompt,
     negative_prompt: body.negativePrompt,
@@ -116,6 +138,20 @@ export async function POST(req: Request) {
     height: body.height,
     num_inference_steps: body.numInferenceSteps,
   };
+
+  if (isZImageTurbo) {
+    url = "https://chutes-z-image-turbo.chutes.ai/generate";
+    payload = { prompt };
+  } else if (isHiDream) {
+    url = "https://chutes-hidream.chutes.ai/generate";
+    payload = {
+      seed: body.seed ?? null,
+      prompt,
+      resolution: resolveHiDreamResolution(body),
+      guidance_scale: body.guidanceScale,
+      num_inference_steps: body.numInferenceSteps,
+    };
+  }
 
   const response = await fetch(url, {
     method: "POST",
