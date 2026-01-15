@@ -692,13 +692,6 @@ export default function Studio() {
 
   useEffect(() => {
     if (!hydrated) return;
-    if (provider === "chutes" && chutesChatKey !== apiKey) {
-      setApiKey(chutesChatKey);
-    }
-  }, [chutesChatKey, provider, hydrated, apiKey]);
-
-  useEffect(() => {
-    if (!hydrated) return;
     void refreshStorageEstimate();
   }, [hydrated, savedMedia, refreshStorageEstimate]);
 
