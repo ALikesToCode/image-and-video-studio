@@ -1880,8 +1880,7 @@ export default function Studio() {
           )}
 
           <ChutesChat
-            apiKey={chutesChatKey}
-            setApiKey={setChutesChatKey}
+            apiKey={provider === "chutes" ? apiKey : chutesChatKey}
             models={chutesChatModels}
             model={chutesChatModel}
             setModel={setChutesChatModel}

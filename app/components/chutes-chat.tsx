@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/ui/card";
-import { Input } from "@/app/components/ui/input";
 import { Label } from "@/app/components/ui/label";
 import {
   Select,
@@ -39,7 +38,6 @@ type ChatMessage = {
 
 type ChutesChatProps = {
   apiKey: string;
-  setApiKey: (value: string) => void;
   models: ModelOption[];
   model: string;
   setModel: (value: string) => void;
@@ -60,7 +58,6 @@ const createId = () => {
 
 export function ChutesChat({
   apiKey,
-  setApiKey,
   models,
   model,
   setModel,
@@ -286,7 +283,7 @@ export function ChutesChat({
     const trimmed = input.trim();
     if (!trimmed || busy) return;
     if (!apiKey.trim()) {
-      setChatError("Add your Chutes API key to chat.");
+      setChatError("Add your Chutes API key in settings.");
       return;
     }
     if (!model) {
@@ -358,15 +355,6 @@ export function ChutesChat({
         </CardTitle>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
-            <Label>Chutes API Key</Label>
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Paste Chutes API key"
-            />
-          </div>
-          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Chat Model</Label>
               {onRefreshModels ? (
@@ -394,6 +382,11 @@ export function ChutesChat({
             </Select>
             {modelsError ? (
               <p className="text-xs text-destructive">{modelsError}</p>
+            ) : null}
+            {!apiKey.trim() ? (
+              <p className="text-xs text-muted-foreground">
+                Add your Chutes API key in settings to enable chat.
+              </p>
             ) : null}
           </div>
           <div className="space-y-2 md:col-span-2">
