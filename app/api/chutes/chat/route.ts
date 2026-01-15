@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   const payload: Record<string, unknown> = {
     model,
     messages,
-    stream: false,
+    stream: true,
   };
 
   if (Array.isArray(tools) && tools.length) {
@@ -52,13 +52,19 @@ export async function POST(req: Request) {
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json();
   if (!response.ok) {
+    const data = await response.json();
     return Response.json(
       { error: data?.error?.message ?? "Chat completion failed." },
       { status: response.status }
     );
   }
 
-  return Response.json(data);
+  return new Response(response.body, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }

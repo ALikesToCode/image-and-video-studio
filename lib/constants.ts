@@ -337,6 +337,17 @@ export const NAVY_TTS_MODELS: ModelOption[] = [
     },
 ];
 
+export const CHUTES_TTS_MODELS: ModelOption[] = [
+    {
+        id: "kokoro",
+        label: "Kokoro",
+    },
+    {
+        id: "csm-1b",
+        label: "CSM 1B",
+    },
+];
+
 export const IMAGE_ASPECTS = ["1:1", "3:4", "4:3", "9:16", "16:9"];
 export const IMAGE_SIZES = ["1K", "2K", "4K"];
 export const IMAGEN_SIZES = ["1K", "2K"];
@@ -360,7 +371,7 @@ export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
     chutes: {
         image: CHUTES_IMAGE_MODELS[0].id,
         video: CHUTES_IMAGE_MODELS[0].id,
-        tts: CHUTES_IMAGE_MODELS[0].id,
+        tts: "kokoro",
     },
     openrouter: {
         image: OPENROUTER_IMAGE_MODELS[0].id,

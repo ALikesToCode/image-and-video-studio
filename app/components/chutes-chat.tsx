@@ -2,10 +2,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, MessageSquarePlus } from "lucide-react";
+import { Loader2, Send, Trash2, Bot, User, Sparkles, Image as ImageIcon, ChevronDown, ChevronRight, BrainCircuit } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/ui/card";
-import { Label } from "@/app/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -15,8 +13,13 @@ import {
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
 import { type ModelOption } from "@/lib/constants";
-import { dataUrlFromBase64 } from "@/lib/utils";
+import { dataUrlFromBase64, cn } from "@/lib/utils";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "@/lib/chutes-prompts";
+import { motion, AnimatePresence } from "framer-motion";
+import { Avatar, AvatarFallback } from "./ui/avatar";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { createParser, type EventSourceMessage } from "eventsource-parser";
 
 type ToolCall = {
   id: string;
@@ -57,6 +60,38 @@ const createId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+// Helper component for the thinking block
+function ThinkingBlock({ content }: { content: string }) {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  return (
+    <div className="mb-3 rounded-xl bg-background/50 border border-border/50 overflow-hidden text-xs">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors text-muted-foreground/80 font-medium select-none"
+      >
+        <BrainCircuit className="h-3.5 w-3.5" />
+        <span>Thinking Process</span>
+        <ChevronRight className={cn("h-3.5 w-3.5 ml-auto transition-transform", isExpanded && "rotate-90")} />
+      </button>
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className="p-3 pt-0 font-mono text-muted-foreground/70 whitespace-pre-wrap leading-relaxed border-t border-border/30 border-dashed">
+              {content.trim()}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export function ChutesChat({
   apiKey,
   models,
@@ -75,9 +110,11 @@ export function ChutesChat({
   const [chatError, setChatError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Auto-scroll to bottom
   useEffect(() => {
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, [messages, busy]);
 
   const toolSpec = useMemo(
@@ -143,7 +180,12 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
       return base;
     });
 
-  const callChat = async (items: ChatMessage[]) => {
+
+
+  const callChatStreaming = async (
+    items: ChatMessage[],
+    onUpdate: (update: { content?: string; toolCalls?: ToolCall[]; role?: string }) => void
+  ) => {
     const response = await fetch("/api/chutes/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -160,11 +202,101 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
         temperature: 0.7,
       }),
     });
-    const payload = await response.json();
+
     if (!response.ok) {
+      const payload = await response.json();
       throw new Error(payload?.error ?? "Chat request failed.");
     }
-    return payload;
+
+    if (!response.body) {
+      throw new Error("No response body.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    // Accumulators
+    let contentAcc = "";
+    // Tool calls are tricky because they come as deltas to specific indices
+    // We'll maintain a map or array of tool calls being built
+    const toolCallsMap: Record<number, { id?: string; type?: string; name?: string; args?: string }> = {};
+
+    const parser = createParser({
+      onEvent: (event: EventSourceMessage) => {
+        if (event.type === "event") {
+          if (event.data === "[DONE]") return;
+          try {
+            const json = JSON.parse(event.data);
+            const choice = json.choices?.[0];
+            if (!choice) return;
+
+            const delta = choice.delta;
+
+            // Debugging aid
+            // console.log("delta", delta);
+
+            if (delta.content) {
+              contentAcc += delta.content;
+              onUpdate({ content: contentAcc });
+            }
+
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const index = tc.index;
+                if (!toolCallsMap[index]) {
+                  toolCallsMap[index] = { args: "" };
+                }
+                const current = toolCallsMap[index];
+
+                if (tc.id) current.id = tc.id;
+                if (tc.type) current.type = tc.type;
+                if (tc.function?.name) current.name = tc.function.name;
+                if (tc.function?.arguments) current.args += tc.function.arguments;
+              }
+
+              // Reconstruct full tool calls array
+              const toolCalls: ToolCall[] = Object.values(toolCallsMap).map((tc) => ({
+                id: tc.id || "",
+                type: tc.type || "function",
+                function: {
+                  name: tc.name || "",
+                  arguments: tc.args || "",
+                }
+              })).filter(tc => tc.function.name && tc.id); // Only partial filter, might be incomplete
+
+              if (toolCalls.length > 0) {
+                onUpdate({ toolCalls });
+              }
+            }
+          } catch (e) {
+            console.error("Parse error", e);
+          }
+        }
+      }
+    });
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parser.feed(decoder.decode(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    // Final result return could be useful, but state is updated via callback
+    return {
+      content: contentAcc,
+      toolCalls: Object.values(toolCallsMap).map((tc) => ({
+        id: tc.id || "",
+        type: tc.type || "function",
+        function: {
+          name: tc.name || "",
+          arguments: tc.args || "",
+        }
+      }))
+    };
   };
 
   const runGenerateImage = async (args: Record<string, unknown>) => {
@@ -303,32 +435,65 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
       role: "user",
       content: trimmed,
     };
-    let nextMessages: ChatMessage[] = [...messages, userMessage];
-    setMessages(nextMessages);
+
+    // Optimistic update
+    let currentMessages: ChatMessage[] = [...messages, userMessage];
+    setMessages(currentMessages);
     setBusy(true);
+
     try {
       for (let step = 0; step < 3; step += 1) {
-        const payload = await callChat(nextMessages);
-        const message = payload?.choices?.[0]?.message;
-        const content =
-          typeof message?.content === "string" ? message.content : "";
-        const toolCalls = Array.isArray(message?.tool_calls)
-          ? (message.tool_calls as ToolCall[])
-          : Array.isArray(message?.toolCalls)
-            ? (message.toolCalls as ToolCall[])
-            : [];
+        // Create placeholder assistant message
+        const assistantId = createId();
         const assistantMessage: ChatMessage = {
-          id: createId(),
+          id: assistantId,
           role: "assistant",
-          content,
-          toolCalls: toolCalls.length ? toolCalls : undefined,
+          content: "",
         };
-        nextMessages = [...nextMessages, assistantMessage];
-        setMessages(nextMessages);
-        if (!toolCalls.length) break;
-        const toolMessages = await handleToolCalls(toolCalls);
-        nextMessages = [...nextMessages, ...toolMessages];
-        setMessages(nextMessages);
+
+        // Add to state immediately
+        currentMessages = [...currentMessages, assistantMessage];
+        setMessages(currentMessages);
+
+        // Stream content into this message
+        const finalResult = await callChatStreaming(
+          currentMessages.slice(0, -1), // Send history excluding the placeholder
+          (update) => {
+            setMessages((prev) => prev.map((msg) => {
+              if (msg.id === assistantId) {
+                return {
+                  ...msg,
+                  content: update.content ?? msg.content,
+                  toolCalls: update.toolCalls ?? msg.toolCalls,
+                };
+              }
+              return msg;
+            }));
+          }
+        );
+
+        // After stream is done, final update to ensure consistency (and clean up any missing fields)
+        const finalToolCalls = finalResult.toolCalls.filter(tc => tc.id && tc.function.name);
+
+        // Update the message in our local variable to be current
+        const finalizedAssistantMessage: ChatMessage = {
+          id: assistantId,
+          role: "assistant",
+          content: finalResult.content,
+          toolCalls: finalToolCalls.length ? finalToolCalls : undefined
+        };
+
+        // Replace the placeholder in currentMessages with the finalized one
+        currentMessages = [...currentMessages.slice(0, -1), finalizedAssistantMessage];
+        setMessages(currentMessages);
+
+        // Check for tool calls
+        if (!finalToolCalls.length) break;
+
+        // Run tools
+        const toolMessages = await handleToolCalls(finalToolCalls);
+        currentMessages = [...currentMessages, ...toolMessages];
+        setMessages(currentMessages);
       }
     } catch (error) {
       setChatError(
@@ -340,7 +505,7 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submitMessage();
     }
@@ -352,162 +517,265 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
   };
 
   return (
-    <Card className="border-2 border-primary/10 shadow-xl bg-card/50 backdrop-blur-3xl">
-      <CardHeader className="space-y-3">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <MessageSquarePlus className="h-5 w-5" />
-          Chutes Agent Chat
-        </CardTitle>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Chat Model</Label>
-              {onRefreshModels ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onRefreshModels}
-                  disabled={modelsLoading}
-                >
-                  {modelsLoading ? "Refreshing..." : "Refresh models"}
-                </Button>
-              ) : null}
+    <div className="flex flex-col h-full bg-background/50 isolate">
+      {/* Header */}
+      <header className="flex-none p-4 glass border-b sticky top-0 z-10">
+        <div className="flex flex-col sm:flex-row gap-3 justify-between items-center max-w-5xl mx-auto w-full">
+          <div className="flex items-center gap-2">
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="p-2 rounded-xl bg-primary/10 text-primary"
+            >
+              <Bot className="h-6 w-6" />
+            </motion.div>
+            <div>
+              <h2 className="font-semibold text-lg leading-none">Chutes Agent</h2>
+              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                Online
+              </p>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <Select value={model} onValueChange={setModel}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full sm:w-[200px] h-9 glass-card border-0 bg-secondary/50">
                 <SelectValue placeholder="Select a model" />
               </SelectTrigger>
               <SelectContent>
-                {models.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.label}
-                  </SelectItem>
+                {models.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {modelsError ? (
-              <p className="text-xs text-destructive">{modelsError}</p>
-            ) : null}
-            {!apiKey.trim() ? (
-              <p className="text-xs text-muted-foreground">
-                Add your Chutes API key in settings to enable chat.
-              </p>
-            ) : null}
-          </div>
-          <div className="space-y-2 md:col-span-2">
-            <Label>Default Image Model (Tool)</Label>
+
             <Select value={toolImageModel} onValueChange={setToolImageModel}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select image model" />
+              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Image Model">
+                <ImageIcon className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
-                {imageModels.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.label}
-                  </SelectItem>
+                {imageModels.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+
+            {onRefreshModels && (
+              <Button variant="ghost" size="icon" onClick={onRefreshModels} disabled={modelsLoading} className="h-9 w-9">
+                <Sparkles className={cn("h-4 w-4", modelsLoading && "animate-spin")} />
+              </Button>
+            )}
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div
-          ref={scrollRef}
-          className="max-h-[420px] space-y-4 overflow-y-auto rounded-lg border bg-muted/20 p-4"
-        >
-          {messages.length ? (
-            messages.map((message) => {
-              const isUser = message.role === "user";
-              const isTool = message.role === "tool";
-              const label =
-                message.role === "assistant"
-                  ? "Assistant"
-                  : message.role === "tool"
-                    ? message.name ?? "Tool"
-                    : "You";
-              return (
-                <div
-                  key={message.id}
-                  className={`max-w-[85%] space-y-2 rounded-lg p-3 text-sm ${isUser
-                    ? "ml-auto bg-primary text-primary-foreground"
-                    : isTool
-                      ? "bg-muted"
-                      : "bg-card"} `}
-                >
-                  <div className="text-[10px] uppercase tracking-wide opacity-70">
-                    {label}
-                  </div>
-                  {message.content ? (
-                    <p className="whitespace-pre-wrap">{message.content}</p>
-                  ) : message.toolCalls?.length ? (
-                    <p className="italic opacity-70">Tool call requested.</p>
-                  ) : (
-                    <p className="italic opacity-70">No message content.</p>
-                  )}
-                  {message.images?.length ? (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {message.images.map((image) => (
-                        <img
-                          key={image.id}
-                          src={image.dataUrl}
-                          alt="Generated"
-                          className="w-full rounded-md border"
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Ask for an image or a plan. The agent can call tools.
-            </p>
-          )}
-        </div>
-
-        {chatError ? (
-          <p className="text-sm text-destructive">{chatError}</p>
+        {modelsError ? (
+          <div className="max-w-5xl mx-auto w-full pt-2">
+            <p className="text-xs text-destructive">{modelsError}</p>
+          </div>
         ) : null}
+      </header>
 
-        <div className="space-y-2">
-          <Label>Message</Label>
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask the agent to generate or refine prompts..."
-            className="min-h-[90px]"
-          />
-          <div className="flex flex-wrap gap-2">
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto min-h-0 container mx-auto" ref={scrollRef}>
+        <div className="max-w-3xl mx-auto py-6 space-y-6 px-4">
+          <AnimatePresence initial={false} mode="popLayout">
+            {messages.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex flex-col items-center justify-center min-h-[400px] text-center space-y-4"
+              >
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
+                  <Sparkles className="h-8 w-8 text-primary/60" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-medium">How can I help you create?</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    Ask me to generate images, refine prompts, or brainstorm ideas.
+                  </p>
+                </div>
+              </motion.div>
+            ) : (
+              messages.map((message) => {
+                const isUser = message.role === "user";
+                const isTool = message.role === "tool";
+                const isAssistant = message.role === "assistant";
+
+                if (isTool && !message.images?.length && !message.content.includes("error")) {
+                  // Collapse purely technical tool outputs unless they have images or errors
+                  return null;
+                }
+
+                // Parse content for <think> blocks
+                let thoughtContent: string | null = null;
+                let displayContent = message.content;
+
+                if (isAssistant) {
+                  const thinkMatch = message.content.match(/<think>([\s\S]*?)<\/think>/);
+                  if (thinkMatch) {
+                    thoughtContent = thinkMatch[1];
+                    displayContent = message.content.replace(/<think>[\s\S]*?<\/think>/, "").trim();
+                  }
+                }
+
+                return (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.3 }}
+                    className={cn(
+                      "flex gap-4 group",
+                      isUser ? "flex-row-reverse" : "flex-row"
+                    )}
+                  >
+                    <Avatar className={cn("h-8 w-8 border", isUser ? "bg-primary text-primary-foreground" : "bg-card")}>
+                      <AvatarFallback className={isUser ? "bg-primary text-primary-foreground" : "bg-secondary"}>
+                        {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    <div className={cn(
+                      "flex flex-col gap-2 max-w-[85%]",
+                      isUser ? "items-end" : "items-start",
+                      "w-full"
+                    )}>
+                      {/* Name/Role */}
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium px-1">
+                        {isUser ? "You" : isTool ? "System Helper" : "Agent"}
+                      </span>
+
+                      {/* Content */}
+                      <div className={cn(
+                        "relative rounded-2xl px-5 py-3.5 text-sm shadow-sm w-full transition-all duration-300",
+                        isUser
+                          ? "bg-primary text-primary-foreground rounded-tr-sm"
+                          : isTool
+                            ? "bg-secondary/50 text-secondary-foreground border border-border/50 text-xs font-mono"
+                            : "glass-card text-foreground rounded-tl-sm"
+                      )}>
+
+                        {thoughtContent && <ThinkingBlock content={thoughtContent} />}
+
+                        {displayContent ? (
+                          isUser ? (
+                            <p className="whitespace-pre-wrap leading-relaxed">{displayContent}</p>
+                          ) : (
+                            <div className="prose prose-sm dark:prose-invert max-w-none break-words leading-relaxed">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {displayContent}
+                              </ReactMarkdown>
+                            </div>
+                          )
+                        ) : message.toolCalls?.length ? (
+                          <div className="flex items-center gap-2 text-muted-foreground italic text-xs">
+                            <Sparkles className="h-3 w-3" />
+                            Generating content...
+                          </div>
+                        ) : null}
+
+                        {/* Images Grid */}
+                        {message.images?.length ? (
+                          <div className="grid grid-cols-2 gap-2 mt-3 w-full">
+                            {message.images.map((image) => (
+                              <motion.div
+                                key={image.id}
+                                layoutId={image.id}
+                                className="relative aspect-square rounded-lg overflow-hidden border bg-background/50 group/image"
+                              >
+                                <img
+                                  src={image.dataUrl}
+                                  alt="Generated"
+                                  className="w-full h-full object-cover transition-transform duration-500 group-hover/image:scale-110"
+                                />
+                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                  <Button size="icon" variant="secondary" className="h-8 w-8 rounded-full" onClick={() => window.open(image.dataUrl, '_blank')}>
+                                    <ChevronDown className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </motion.div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })
+            )}
+
+            {busy && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="flex gap-4"
+              >
+                <div className="w-8 h-8 flex items-center justify-center">
+                  <div className="w-2 h-2 bg-primary/50 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                  <div className="w-2 h-2 bg-primary/50 rounded-full animate-bounce [animation-delay:-0.15s] mx-1" />
+                  <div className="w-2 h-2 bg-primary/50 rounded-full animate-bounce" />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <div className="h-4" />
+        </div>
+      </div>
+
+      {/* Input Area */}
+      <footer className="flex-none p-4 glass border-t mt-auto">
+        <div className="max-w-3xl mx-auto w-full relative">
+          <AnimatePresence>
+            {messages.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="absolute -top-12 right-0"
+              >
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearChat}
+                  className="text-muted-foreground hover:text-destructive transition-colors gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Clear Chat
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="relative glass-card rounded-3xl p-1.5 flex items-end gap-2 shadow-lg ring-1 ring-white/20">
+            <div className="flex-1">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Message Chutes Agent..."
+                className="min-h-[48px] max-h-[200px] w-full resize-none border-0 bg-transparent py-3 px-4 focus-visible:ring-0 text-base"
+                rows={1}
+              />
+            </div>
             <Button
+              size="icon"
               onClick={() => void submitMessage()}
-              disabled={busy || !input.trim() || !apiKey.trim() || !model}
-              className="flex-1"
-            >
-              {busy ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Thinking...
-                </>
-              ) : (
-                "Send message"
+              disabled={!input.trim() || busy || !apiKey.trim()}
+              className={cn(
+                "h-10 w-10 rounded-full mb-1 transition-all duration-300 shadow",
+                input.trim() ? "bg-primary text-primary-foreground hover:scale-105" : "bg-muted text-muted-foreground"
               )}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={clearChat}
-              disabled={busy || !messages.length}
             >
-              Clear chat
+              {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Press <kbd className="font-mono">Cmd+Enter</kbd> to send.
-          </p>
+          {chatError ? (
+            <p className="mt-2 text-xs text-destructive">{chatError}</p>
+          ) : null}
         </div>
-      </CardContent>
-    </Card>
+      </footer>
+    </div>
   );
 }

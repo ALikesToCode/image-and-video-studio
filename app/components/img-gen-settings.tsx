@@ -15,7 +15,7 @@ import {
     CardHeader,
     CardTitle,
 } from "@/app/components/ui/card";
-import { Eye, EyeOff, Settings2, Trash2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import {
     IMAGE_ASPECTS,
     IMAGE_SIZES,
@@ -29,7 +29,6 @@ import {
     VIDEO_DURATIONS,
     VIDEO_RESOLUTIONS,
 } from "@/lib/constants";
-import { useState } from "react";
 import { NavyUsageResponse } from "@/lib/types";
 
 interface ImgGenSettingsProps {
@@ -84,6 +83,12 @@ interface ImgGenSettingsProps {
     navyUsageError?: string | null;
     navyUsageLoading?: boolean;
     navyUsageUpdatedAt?: string | null;
+    navyImageSize?: string;
+    setNavyImageSize?: (s: string) => void;
+    chutesVideoFps?: string;
+    setChutesVideoFps?: (v: string) => void;
+    chutesVideoGuidanceScale?: string;
+    setChutesVideoGuidanceScale?: (v: string) => void;
     onRefreshUsage?: () => void;
 }
 
@@ -91,18 +96,20 @@ export function ImgGenSettings({
     provider,
     setProvider,
     mode,
-    setMode,
-    apiKey,
-    setApiKey,
     model,
     setModel,
-    clearKey,
     imageAspect,
     setImageAspect,
     imageSize,
     setImageSize,
     imageCount,
     setImageCount,
+    navyImageSize,
+    setNavyImageSize,
+    chutesVideoFps,
+    setChutesVideoFps,
+    chutesVideoGuidanceScale,
+    setChutesVideoGuidanceScale,
     chutesGuidanceScale,
     setChutesGuidanceScale,
     chutesWidth,
@@ -130,8 +137,6 @@ export function ImgGenSettings({
     saveToGallery,
     setSaveToGallery,
     modelSuggestions,
-    supportsVideo,
-    supportsTts,
     onRefreshModels,
     modelsLoading,
     modelsError,
@@ -141,7 +146,7 @@ export function ImgGenSettings({
     navyUsageUpdatedAt,
     onRefreshUsage,
 }: ImgGenSettingsProps) {
-    const [showKey, setShowKey] = useState(false);
+
 
     const isOpenRouter = provider === "openrouter";
     const isImagenModel = model.startsWith("imagen-");
@@ -190,81 +195,23 @@ export function ImgGenSettings({
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-                {/* Mode & Provider */}
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                        <Label>Mode</Label>
-                        <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                            <SelectTrigger>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="image">Image</SelectItem>
-                                <SelectItem value="video" disabled={!supportsVideo}>
-                                    Video
-                                </SelectItem>
-                                <SelectItem value="tts" disabled={!supportsTts}>
-                                    TTS
-                                </SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <div className="space-y-2">
-                        <Label>Provider</Label>
-                        <Select
-                            value={provider}
-                            onValueChange={(v) => setProvider(v as Provider)}
-                        >
-                            <SelectTrigger>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="gemini">Google Gemini</SelectItem>
-                                <SelectItem value="navy">NavyAI</SelectItem>
-                                <SelectItem value="openrouter">OpenRouter</SelectItem>
-                                <SelectItem value="chutes">Chutes</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                </div>
-
-                {/* API Key */}
+                {/* Provider Selection */}
                 <div className="space-y-2">
-                    <Label>API Key</Label>
-                    <div className="flex gap-2">
-                        <div className="relative flex-1">
-                            <Input
-                                type={showKey ? "text" : "password"}
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                placeholder={`Paste ${provider.charAt(0).toUpperCase() + provider.slice(1)
-                                    } API Key`}
-                                className="pr-10"
-                            />
-                            <Button
-                                size="icon"
-                                variant="ghost"
-                                className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:bg-transparent"
-                                onClick={() => setShowKey(!showKey)}
-                            >
-                                {showKey ? (
-                                    <EyeOff className="h-4 w-4" />
-                                ) : (
-                                    <Eye className="h-4 w-4" />
-                                )}
-                            </Button>
-                        </div>
-                        {apiKey && (
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={clearKey}
-                                title="Forget Key"
-                            >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                        )}
-                    </div>
+                    <Label>Provider</Label>
+                    <Select
+                        value={provider}
+                        onValueChange={(v) => setProvider(v as Provider)}
+                    >
+                        <SelectTrigger>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="gemini">Google Gemini</SelectItem>
+                            <SelectItem value="navy">NavyAI</SelectItem>
+                            <SelectItem value="openrouter">OpenRouter</SelectItem>
+                            <SelectItem value="chutes">Chutes</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
 
                 {/* Model */}
@@ -303,31 +250,50 @@ export function ImgGenSettings({
                 {/* Dynamic Options */}
                 {mode === "image" && (
                     <div className="grid grid-cols-2 gap-4">
-                        {showImageAspect && (
-                            <div className="space-y-2">
-                                <Label>Aspect Ratio</Label>
-                                <Select value={imageAspect} onValueChange={setImageAspect}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {IMAGE_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        )}
-                        {showImageSize && (
+                        {provider === "navy" ? (
                             <div className="space-y-2">
                                 <Label>Size</Label>
-                                <Select value={imageSize} onValueChange={setImageSize}>
+                                <Select value={navyImageSize} onValueChange={setNavyImageSize}>
                                     <SelectTrigger>
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {availableImageSizes.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                        {/* Assuming Navy uses standard sizes or we need to fetch them. defaulting to 1024x1024 */}
+                                        <SelectItem value="1024x1024">1024x1024</SelectItem>
+                                        <SelectItem value="512x512">512x512</SelectItem>
+                                        <SelectItem value="768x768">768x768</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
+                        ) : (
+                            <>
+                                {showImageAspect && (
+                                    <div className="space-y-2">
+                                        <Label>Aspect Ratio</Label>
+                                        <Select value={imageAspect} onValueChange={setImageAspect}>
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {IMAGE_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
+                                {showImageSize && (
+                                    <div className="space-y-2">
+                                        <Label>Size</Label>
+                                        <Select value={imageSize} onValueChange={setImageSize}>
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {availableImageSizes.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
+                            </>
                         )}
                         {showImageCount && (
                             <div className="space-y-2">
@@ -418,39 +384,68 @@ export function ImgGenSettings({
 
                 {mode === "video" && (
                     <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label>Aspect Ratio</Label>
-                            <Select value={videoAspect} onValueChange={setVideoAspect}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {VIDEO_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Resolution</Label>
-                            <Select value={videoResolution} onValueChange={setVideoResolution}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {VIDEO_RESOLUTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Duration (s)</Label>
-                            <Select value={videoDuration} onValueChange={setVideoDuration}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {VIDEO_DURATIONS.map(d => <SelectItem key={d} value={d}>{d}s</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        {provider === "chutes" ? (
+                            <>
+                                <div className="space-y-2">
+                                    <Label>FPS</Label>
+                                    <Input
+                                        type="number"
+                                        min="1"
+                                        max="60"
+                                        step="1"
+                                        value={chutesVideoFps}
+                                        onChange={(e) => setChutesVideoFps && setChutesVideoFps(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Guidance Scale 2</Label>
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        max="20"
+                                        step="0.1"
+                                        value={chutesVideoGuidanceScale}
+                                        onChange={(e) => setChutesVideoGuidanceScale && setChutesVideoGuidanceScale(e.target.value)}
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="space-y-2">
+                                    <Label>Aspect Ratio</Label>
+                                    <Select value={videoAspect} onValueChange={setVideoAspect}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {VIDEO_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Resolution</Label>
+                                    <Select value={videoResolution} onValueChange={setVideoResolution}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {VIDEO_RESOLUTIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Duration (s)</Label>
+                                    <Select value={videoDuration} onValueChange={setVideoDuration}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {VIDEO_DURATIONS.map(d => <SelectItem key={d} value={d}>{d}s</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
