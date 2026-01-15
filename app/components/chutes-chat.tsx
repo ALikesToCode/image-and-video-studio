@@ -223,54 +223,52 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
 
     const parser = createParser({
       onEvent: (event: EventSourceMessage) => {
-        if (event.type === "event") {
-          if (event.data === "[DONE]") return;
-          try {
-            const json = JSON.parse(event.data);
-            const choice = json.choices?.[0];
-            if (!choice) return;
+        if (event.data === "[DONE]") return;
+        try {
+          const json = JSON.parse(event.data);
+          const choice = json.choices?.[0];
+          if (!choice) return;
 
-            const delta = choice.delta;
+          const delta = choice.delta;
 
-            // Debugging aid
-            // console.log("delta", delta);
+          // Debugging aid
+          // console.log("delta", delta);
 
-            if (delta.content) {
-              contentAcc += delta.content;
-              onUpdate({ content: contentAcc });
-            }
-
-            if (delta.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                const index = tc.index;
-                if (!toolCallsMap[index]) {
-                  toolCallsMap[index] = { args: "" };
-                }
-                const current = toolCallsMap[index];
-
-                if (tc.id) current.id = tc.id;
-                if (tc.type) current.type = tc.type;
-                if (tc.function?.name) current.name = tc.function.name;
-                if (tc.function?.arguments) current.args += tc.function.arguments;
-              }
-
-              // Reconstruct full tool calls array
-              const toolCalls: ToolCall[] = Object.values(toolCallsMap).map((tc) => ({
-                id: tc.id || "",
-                type: tc.type || "function",
-                function: {
-                  name: tc.name || "",
-                  arguments: tc.args || "",
-                }
-              })).filter(tc => tc.function.name && tc.id); // Only partial filter, might be incomplete
-
-              if (toolCalls.length > 0) {
-                onUpdate({ toolCalls });
-              }
-            }
-          } catch (e) {
-            console.error("Parse error", e);
+          if (delta.content) {
+            contentAcc += delta.content;
+            onUpdate({ content: contentAcc });
           }
+
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const index = tc.index;
+              if (!toolCallsMap[index]) {
+                toolCallsMap[index] = { args: "" };
+              }
+              const current = toolCallsMap[index];
+
+              if (tc.id) current.id = tc.id;
+              if (tc.type) current.type = tc.type;
+              if (tc.function?.name) current.name = tc.function.name;
+              if (tc.function?.arguments) current.args += tc.function.arguments;
+            }
+
+            // Reconstruct full tool calls array
+            const toolCalls: ToolCall[] = Object.values(toolCallsMap).map((tc) => ({
+              id: tc.id || "",
+              type: tc.type || "function",
+              function: {
+                name: tc.name || "",
+                arguments: tc.args || "",
+              }
+            })).filter(tc => tc.function.name && tc.id); // Only partial filter, might be incomplete
+
+            if (toolCalls.length > 0) {
+              onUpdate({ toolCalls });
+            }
+          }
+        } catch (e) {
+          console.error("Parse error", e);
         }
       }
     });
