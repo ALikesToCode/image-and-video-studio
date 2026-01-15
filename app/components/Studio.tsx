@@ -6,6 +6,7 @@ import {
   GEMINI_IMAGE_MODELS,
   GEMINI_VIDEO_MODELS,
   CHUTES_IMAGE_MODELS,
+  CHUTES_LLM_MODELS,
   OPENROUTER_IMAGE_MODELS,
   NAVY_IMAGE_MODELS,
   NAVY_VIDEO_MODELS,
@@ -43,6 +44,7 @@ import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Download, Loader2, Maximize2 } from "lucide-react";
 import { ImageViewer } from "./image-viewer";
+import { ChutesChat } from "./chutes-chat";
 
 type JobStatus = "queued" | "running" | "success" | "error";
 
@@ -68,6 +70,8 @@ type GenerationJob = {
   chutesWidth: string;
   chutesHeight: string;
   chutesSteps: string;
+  chutesResolution: string;
+  chutesSeed: string;
   videoAspect: string;
   videoResolution: string;
   videoDuration: string;
@@ -111,6 +115,9 @@ const STORAGE_KEYS = {
   navyImageModels: "studio_navy_image_models",
   navyVideoModels: "studio_navy_video_models",
   navyTtsModels: "studio_navy_tts_models",
+  chutesChatModels: "studio_chutes_chat_models",
+  chutesChatModel: "studio_chutes_chat_model",
+  chutesToolImageModel: "studio_chutes_tool_image_model",
 };
 
 const MAX_SAVED_MEDIA = 12;
@@ -318,6 +325,8 @@ export default function Studio() {
   const [chutesWidth, setChutesWidth] = useState("1024");
   const [chutesHeight, setChutesHeight] = useState("1024");
   const [chutesSteps, setChutesSteps] = useState("50");
+  const [chutesResolution, setChutesResolution] = useState("1024x1024");
+  const [chutesSeed, setChutesSeed] = useState("");
   const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0]);
   const [videoResolution, setVideoResolution] = useState(VIDEO_RESOLUTIONS[0]);
   const [videoDuration, setVideoDuration] = useState(VIDEO_DURATIONS[2]);
@@ -325,6 +334,19 @@ export default function Studio() {
   const [ttsFormat, setTtsFormat] = useState(TTS_FORMATS[0]);
   const [ttsSpeed, setTtsSpeed] = useState("1");
   const [saveToGallery, setSaveToGallery] = useState(true);
+  const [chutesChatKey, setChutesChatKey] = useState("");
+  const [chutesChatModels, setChutesChatModels] =
+    useState<ModelOption[]>(CHUTES_LLM_MODELS);
+  const [chutesChatModel, setChutesChatModel] = useState(
+    CHUTES_LLM_MODELS[0]?.id ?? ""
+  );
+  const [chutesToolImageModel, setChutesToolImageModel] = useState(
+    CHUTES_IMAGE_MODELS[0]?.id ?? "z-image-turbo"
+  );
+  const [chutesChatModelsLoading, setChutesChatModelsLoading] = useState(false);
+  const [chutesChatModelsError, setChutesChatModelsError] = useState<
+    string | null
+  >(null);
 
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [savedMedia, setSavedMedia] = useState<StoredMedia[]>([]);
@@ -483,6 +505,19 @@ export default function Studio() {
       STORAGE_KEYS.navyTtsModels,
       []
     );
+    const storedChutesChatModels = readLocalStorage<ModelOption[]>(
+      STORAGE_KEYS.chutesChatModels,
+      []
+    );
+    const storedChutesChatModel = readLocalStorage<string | null>(
+      STORAGE_KEYS.chutesChatModel,
+      null
+    );
+    const storedChutesToolImageModel = readLocalStorage<string | null>(
+      STORAGE_KEYS.chutesToolImageModel,
+      null
+    );
+    const storedChutesKey = readLocalStorage<string>(STORAGE_KEYS.keyChutes, "");
 
     if (storedProvider) setProvider(storedProvider);
     if (storedMode) setMode(storedMode);
@@ -498,6 +533,17 @@ export default function Studio() {
     if (storedNavyTtsModels.length) {
       setNavyTtsModels(sanitizeModelOptions(storedNavyTtsModels));
     }
+    if (storedChutesChatModels.length) {
+      setChutesChatModels(sanitizeModelOptions(storedChutesChatModels));
+    }
+    if (storedChutesChatModel) {
+      setChutesChatModels((prev) => ensureModelOption(prev, storedChutesChatModel));
+      setChutesChatModel(storedChutesChatModel);
+    }
+    if (storedChutesToolImageModel) {
+      setChutesToolImageModel(storedChutesToolImageModel);
+    }
+    setChutesChatKey(storedChutesKey);
     const loadSavedMedia = async () => {
       if (!storedMedia.length) return;
       if (!idbAvailable) {
@@ -620,6 +666,21 @@ export default function Studio() {
 
   useEffect(() => {
     if (!hydrated) return;
+    if (provider !== "chutes") return;
+    if (chutesChatKey !== apiKey) {
+      setChutesChatKey(apiKey);
+    }
+  }, [apiKey, provider, hydrated, chutesChatKey]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (provider === "chutes" && chutesChatKey !== apiKey) {
+      setApiKey(chutesChatKey);
+    }
+  }, [chutesChatKey, provider, hydrated, apiKey]);
+
+  useEffect(() => {
+    if (!hydrated) return;
     void refreshStorageEstimate();
   }, [hydrated, savedMedia, refreshStorageEstimate]);
 
@@ -657,6 +718,15 @@ export default function Studio() {
       window.localStorage.removeItem(storageKey);
     }
   }, [apiKey, provider, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (chutesChatKey) {
+      writeLocalStorage(STORAGE_KEYS.keyChutes, JSON.stringify(chutesChatKey));
+    } else {
+      window.localStorage.removeItem(STORAGE_KEYS.keyChutes);
+    }
+  }, [chutesChatKey, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -718,6 +788,30 @@ export default function Studio() {
       JSON.stringify(sanitizeModelOptions(navyImageModels))
     );
   }, [navyImageModels, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !chutesChatModels.length) return;
+    writeLocalStorage(
+      STORAGE_KEYS.chutesChatModels,
+      JSON.stringify(sanitizeModelOptions(chutesChatModels))
+    );
+  }, [chutesChatModels, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeLocalStorage(
+      STORAGE_KEYS.chutesChatModel,
+      JSON.stringify(chutesChatModel)
+    );
+  }, [chutesChatModel, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeLocalStorage(
+      STORAGE_KEYS.chutesToolImageModel,
+      JSON.stringify(chutesToolImageModel)
+    );
+  }, [chutesToolImageModel, hydrated]);
 
   useEffect(() => {
     if (!hydrated || !navyVideoModels.length) return;
@@ -978,6 +1072,46 @@ export default function Studio() {
     }
   };
 
+  const refreshChutesChatModels = async () => {
+    if (chutesChatModelsLoading) return;
+    setChutesChatModelsError(null);
+    if (!chutesChatKey.trim()) {
+      setChutesChatModelsError("Add your Chutes API key to fetch models.");
+      return;
+    }
+    setChutesChatModelsLoading(true);
+    try {
+      const response = await fetch("/api/chutes/models", {
+        headers: { "x-user-api-key": chutesChatKey },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Unable to fetch Chutes models.");
+      }
+      const rawModels = Array.isArray(payload?.data) ? payload.data : [];
+      if (!rawModels.length) {
+        throw new Error("No models returned by Chutes.");
+      }
+      const models = rawModels
+        .map((item: any) => ({
+          id: item?.id,
+          label: item?.id ?? item?.name ?? "Unknown",
+        }))
+        .filter((item: any) => typeof item.id === "string" && item.id.length > 0);
+
+      setChutesChatModels(models);
+      if (!models.some((entry: ModelOption) => entry.id === chutesChatModel)) {
+        setChutesChatModel(models[0].id);
+      }
+    } catch (error) {
+      setChutesChatModelsError(
+        error instanceof Error ? error.message : "Unable to fetch models."
+      );
+    } finally {
+      setChutesChatModelsLoading(false);
+    }
+  };
+
   const trimJobHistory = (items: GenerationJob[]) => {
     const completedCount = items.filter(
       (job) => job.status === "success" || job.status === "error"
@@ -1123,6 +1257,9 @@ export default function Studio() {
         const width = Number(job.chutesWidth);
         const height = Number(job.chutesHeight);
         const numInferenceSteps = Number(job.chutesSteps);
+        const resolution = job.chutesResolution.trim();
+        const seedValue = job.chutesSeed.trim();
+        const seed = seedValue.length ? Number(seedValue) : null;
         const response = await fetch("/api/chutes/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1137,6 +1274,8 @@ export default function Studio() {
             numInferenceSteps: Number.isFinite(numInferenceSteps)
               ? numInferenceSteps
               : undefined,
+            resolution: resolution.length ? resolution : undefined,
+            seed: seed !== null && Number.isFinite(seed) ? seed : null,
           }),
         });
         const payload = await response.json();
@@ -1467,6 +1606,8 @@ export default function Studio() {
       chutesWidth,
       chutesHeight,
       chutesSteps,
+      chutesResolution,
+      chutesSeed,
       videoAspect,
       videoResolution,
       videoDuration,
@@ -1516,6 +1657,10 @@ export default function Studio() {
             setChutesHeight={setChutesHeight}
             chutesSteps={chutesSteps}
             setChutesSteps={setChutesSteps}
+            chutesResolution={chutesResolution}
+            setChutesResolution={setChutesResolution}
+            chutesSeed={chutesSeed}
+            setChutesSeed={setChutesSeed}
             videoAspect={videoAspect}
             setVideoAspect={setVideoAspect}
             videoResolution={videoResolution}
@@ -1691,6 +1836,20 @@ export default function Studio() {
               ) : null}
             </section>
           )}
+
+          <ChutesChat
+            apiKey={chutesChatKey}
+            setApiKey={setChutesChatKey}
+            models={chutesChatModels}
+            model={chutesChatModel}
+            setModel={setChutesChatModel}
+            imageModels={CHUTES_IMAGE_MODELS}
+            toolImageModel={chutesToolImageModel}
+            setToolImageModel={setChutesToolImageModel}
+            onRefreshModels={refreshChutesChatModels}
+            modelsLoading={chutesChatModelsLoading}
+            modelsError={chutesChatModelsError}
+          />
         </div>
       </main>
 

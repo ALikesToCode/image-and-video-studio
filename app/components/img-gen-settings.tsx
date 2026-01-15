@@ -56,6 +56,10 @@ interface ImgGenSettingsProps {
     setChutesHeight: (v: string) => void;
     chutesSteps: string;
     setChutesSteps: (v: string) => void;
+    chutesResolution: string;
+    setChutesResolution: (v: string) => void;
+    chutesSeed: string;
+    setChutesSeed: (v: string) => void;
     videoAspect: string;
     setVideoAspect: (a: string) => void;
     videoResolution: string;
@@ -107,6 +111,10 @@ export function ImgGenSettings({
     setChutesHeight,
     chutesSteps,
     setChutesSteps,
+    chutesResolution,
+    setChutesResolution,
+    chutesSeed,
+    setChutesSeed,
     videoAspect,
     setVideoAspect,
     videoResolution,
@@ -138,6 +146,8 @@ export function ImgGenSettings({
     const isOpenRouter = provider === "openrouter";
     const isImagenModel = model.startsWith("imagen-");
     const isOpenRouterGemini = isOpenRouter && model.includes("gemini");
+    const isChutesHiDream =
+        provider === "chutes" && model.toLowerCase().includes("hidream");
 
     const showImageCount = provider === "navy" || isImagenModel;
     const showImageSize =
@@ -357,26 +367,52 @@ export function ImgGenSettings({
                                 onChange={(e) => setChutesSteps(e.target.value)}
                             />
                         </div>
-                        <div className="space-y-2">
-                            <Label>Width</Label>
-                            <Input
-                                type="number"
-                                min="64"
-                                step="64"
-                                value={chutesWidth}
-                                onChange={(e) => setChutesWidth(e.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Height</Label>
-                            <Input
-                                type="number"
-                                min="64"
-                                step="64"
-                                value={chutesHeight}
-                                onChange={(e) => setChutesHeight(e.target.value)}
-                            />
-                        </div>
+                        {isChutesHiDream ? (
+                            <>
+                                <div className="space-y-2">
+                                    <Label>Resolution</Label>
+                                    <Input
+                                        value={chutesResolution}
+                                        onChange={(e) => setChutesResolution(e.target.value)}
+                                        placeholder="1024x1024"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Seed (Optional)</Label>
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value={chutesSeed}
+                                        onChange={(e) => setChutesSeed(e.target.value)}
+                                        placeholder="Random"
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="space-y-2">
+                                    <Label>Width</Label>
+                                    <Input
+                                        type="number"
+                                        min="64"
+                                        step="64"
+                                        value={chutesWidth}
+                                        onChange={(e) => setChutesWidth(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Height</Label>
+                                    <Input
+                                        type="number"
+                                        min="64"
+                                        step="64"
+                                        value={chutesHeight}
+                                        onChange={(e) => setChutesHeight(e.target.value)}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 

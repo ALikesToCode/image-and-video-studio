@@ -80,6 +80,13 @@ export const CHUTES_IMAGE_MODELS: ModelOption[] = [
     },
 ];
 
+export const CHUTES_LLM_MODELS: ModelOption[] = [
+    {
+        id: "Qwen/Qwen3-32B",
+        label: "Qwen3 32B",
+    },
+];
+
 export const OPENROUTER_IMAGE_MODELS: ModelOption[] = [
     {
         id: "google/gemini-2.5-flash-image-preview",
