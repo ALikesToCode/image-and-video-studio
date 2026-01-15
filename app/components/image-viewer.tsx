@@ -65,7 +65,7 @@ export function ImageViewer({
                             />
                         )}
                     </div>
-                    <div className="w-full lg:w-[360px] border-t lg:border-t-0 lg:border-l bg-card p-6 overflow-y-auto">
+                    <div className="w-full lg:w-[360px] border-t lg:border-t-0 lg:border-l border-border/50 bg-background/80 backdrop-blur-xl p-6 overflow-y-auto">
                         <div className="space-y-4">
                             <div>
                                 <p className="text-xs uppercase tracking-widest text-muted-foreground">

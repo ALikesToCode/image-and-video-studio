@@ -46,7 +46,7 @@ export function PromptInput({
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        className="min-h-[120px] resize-none pr-12 text-lg shadow-sm"
+                        className="min-h-[120px] resize-none pr-12 text-lg shadow-inner bg-background/50 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all font-light"
                     />
                     <div className="absolute right-3 top-3">
                         <Sparkles className="h-5 w-5 text-muted-foreground opacity-20" />

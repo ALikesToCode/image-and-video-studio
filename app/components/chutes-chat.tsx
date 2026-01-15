@@ -16,6 +16,7 @@ import {
 import { Textarea } from "@/app/components/ui/textarea";
 import { type ModelOption } from "@/lib/constants";
 import { dataUrlFromBase64 } from "@/lib/utils";
+import { CHUTES_IMAGE_GUIDE_PROMPT } from "@/lib/chutes-prompts";
 
 type ToolCall = {
   id: string;
@@ -119,7 +120,11 @@ export function ChutesChat({
 
   const systemPrompt = useMemo(() => {
     const modelList = imageModels.map((item) => item.id).join(", ");
-    return `You can call the generate_image tool. Default image model: ${toolImageModel}. Available image models: ${modelList}.`;
+    return `${CHUTES_IMAGE_GUIDE_PROMPT}
+
+You are an image generation assistant. Use the guide above to help craft prompts, ask for missing details when needed, and summarize the final prompt before generating.
+
+You can call the generate_image tool. Default image model: ${toolImageModel}. Available image models: ${modelList}.`;
   }, [toolImageModel, imageModels]);
 
   const toApiMessages = (items: ChatMessage[]) =>

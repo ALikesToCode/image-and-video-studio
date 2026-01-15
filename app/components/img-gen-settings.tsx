@@ -179,7 +179,7 @@ export function ImgGenSettings({
     };
 
     return (
-        <Card className="h-fit">
+        <Card className="h-fit glass-card border-0">
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                     <Settings2 className="h-5 w-5" />
@@ -519,76 +519,66 @@ export function ImgGenSettings({
                 </div>
 
                 {provider === "navy" ? (
-                    <div className="rounded-lg border bg-muted/30 p-3 text-xs">
-                        <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold">NavyAI usage</span>
+                    <div className="rounded-xl border border-border/50 bg-secondary/20 p-4 text-xs">
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                            <span className="font-semibold uppercase tracking-wider text-muted-foreground">NavyAI Status</span>
                             {onRefreshUsage && (
                                 <Button
                                     variant="ghost"
                                     size="sm"
+                                    className="h-6 px-2 hover:bg-background/50"
                                     onClick={onRefreshUsage}
                                     disabled={navyUsageLoading}
                                 >
-                                    {navyUsageLoading ? "Refreshing..." : "Refresh"}
+                                    {navyUsageLoading ? "..." : "Refresh"}
                                 </Button>
                             )}
                         </div>
                         {navyUsageError ? (
                             <p className="mt-2 text-destructive">{navyUsageError}</p>
                         ) : navyUsage ? (
-                            <div className="mt-2 grid grid-cols-2 gap-3 text-muted-foreground">
+                            <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-muted-foreground">
                                 <div>
-                                    <div className="text-[10px] uppercase tracking-wide">Plan</div>
-                                    <div className="text-foreground">{navyUsage.plan}</div>
+                                    <div className="text-[10px] uppercase tracking-wide opacity-70">Plan</div>
+                                    <div className="text-foreground font-medium">{navyUsage.plan}</div>
                                 </div>
                                 <div>
-                                    <div className="text-[10px] uppercase tracking-wide">RPM Limit</div>
-                                    <div className="text-foreground">{formatCount(navyUsage.limits.rpm)}</div>
+                                    <div className="text-[10px] uppercase tracking-wide opacity-70">RPM Limit</div>
+                                    <div className="text-foreground font-medium">{formatCount(navyUsage.limits.rpm)}</div>
                                 </div>
-                                <div>
-                                    <div className="text-[10px] uppercase tracking-wide">Tokens Used</div>
-                                    <div className="text-foreground">
-                                        {formatCount(navyUsage.usage.tokens_used_today)}
+                                <div className="col-span-2 bg-background/30 rounded-lg p-2 border border-border/30">
+                                    <div className="flex justify-between items-end mb-1">
+                                        <span className="text-[10px] uppercase tracking-wide opacity-70">Daily Token Usage</span>
+                                        <span className="text-foreground font-medium">{usagePercent !== null ? `${usagePercent.toFixed(1)}%` : "-"}</span>
+                                    </div>
+                                    <div className="w-full bg-background h-1.5 rounded-full overflow-hidden">
+                                        <div
+                                            className="bg-primary h-full transition-all duration-500"
+                                            style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }}
+                                        />
+                                    </div>
+                                    <div className="flex justify-between text-[10px] mt-1 text-muted-foreground">
+                                        <span>{formatCount(navyUsage.usage.tokens_used_today)} used</span>
+                                        <span>{formatCount(navyUsage.usage.tokens_remaining_today)} left</span>
                                     </div>
                                 </div>
+
                                 <div>
-                                    <div className="text-[10px] uppercase tracking-wide">Tokens Remaining</div>
-                                    <div className="text-foreground">
-                                        {formatCount(navyUsage.usage.tokens_remaining_today)}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-[10px] uppercase tracking-wide">Percent Used</div>
-                                    <div className="text-foreground">
-                                        {usagePercent !== null ? `${usagePercent.toFixed(1)}%` : "-"}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-[10px] uppercase tracking-wide">Resets In</div>
-                                    <div className="text-foreground">
+                                    <div className="text-[10px] uppercase tracking-wide opacity-70">Resets In</div>
+                                    <div className="text-foreground font-medium">
                                         {formatDuration(navyUsage.usage.resets_in_ms)}
                                     </div>
                                 </div>
-                                <div className="col-span-2">
-                                    <div className="text-[10px] uppercase tracking-wide">Rate Limit (per minute)</div>
-                                    <div className="text-foreground">
-                                        {formatCount(navyUsage.rate_limits.per_minute.used)}/
-                                        {formatCount(navyUsage.rate_limits.per_minute.limit)} used ·{" "}
-                                        {formatCount(navyUsage.rate_limits.per_minute.remaining)} remaining
+                                <div>
+                                    <div className="text-[10px] uppercase tracking-wide opacity-70">Rate Limit (1m)</div>
+                                    <div className="text-foreground font-medium">
+                                        {formatCount(navyUsage.rate_limits.per_minute.remaining)} left
                                     </div>
                                 </div>
-                                <div className="col-span-2 text-[10px] uppercase tracking-wide">
-                                    Resets at (UTC):{" "}
-                                    <span className="normal-case text-foreground">
-                                        {new Date(navyUsage.usage.resets_at_utc).toUTCString()}
-                                    </span>
-                                </div>
+
                                 {usageUpdatedLabel ? (
-                                    <div className="col-span-2 text-[10px] uppercase tracking-wide">
-                                        Updated:{" "}
-                                        <span className="normal-case text-foreground">
-                                            {usageUpdatedLabel}
-                                        </span>
+                                    <div className="col-span-2 text-[10px] text-right opacity-50 mt-1">
+                                        Updated: {usageUpdatedLabel}
                                     </div>
                                 ) : null}
                             </div>

@@ -78,69 +78,69 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
                     {items.map((item) => {
                         const kind = item.kind ?? "image";
                         return (
-                        <motion.div
-                            key={item.id}
-                            layout
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            transition={{ duration: 0.2 }}
-                        >
-                            <Card className="overflow-hidden group relative border-0 shadow-md">
-                                <div className="aspect-square relative">
-                                    {kind === "image" ? (
-                                        <img
-                                            src={item.dataUrl}
-                                            alt={item.prompt}
-                                            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                            loading="lazy"
-                                        />
-                                    ) : kind === "video" ? (
-                                        <video
-                                            src={item.dataUrl}
-                                            className="h-full w-full object-cover"
-                                            muted
-                                            playsInline
-                                            preload="metadata"
-                                        />
-                                    ) : (
-                                        <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground">
-                                            <AudioLines className="h-6 w-6" />
-                                            <span className="text-xs uppercase tracking-widest">Audio</span>
+                            <motion.div
+                                key={item.id}
+                                layout
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                transition={{ duration: 0.2 }}
+                            >
+                                <Card className="overflow-hidden group relative glass-card border-none shadow-sm hover:shadow-lg transition-all">
+                                    <div className="aspect-square relative">
+                                        {kind === "image" ? (
+                                            <img
+                                                src={item.dataUrl}
+                                                alt={item.prompt}
+                                                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                                loading="lazy"
+                                            />
+                                        ) : kind === "video" ? (
+                                            <video
+                                                src={item.dataUrl}
+                                                className="h-full w-full object-cover"
+                                                muted
+                                                playsInline
+                                                preload="metadata"
+                                            />
+                                        ) : (
+                                            <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground">
+                                                <AudioLines className="h-6 w-6" />
+                                                <span className="text-xs uppercase tracking-widest">Audio</span>
+                                            </div>
+                                        )}
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                            <Button
+                                                size="icon"
+                                                variant="secondary"
+                                                onClick={() => setActiveItem(item)}
+                                                className="h-8 w-8 rounded-full"
+                                            >
+                                                <Maximize2 className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                size="icon"
+                                                variant="secondary"
+                                                onClick={() => handleDownload(item)}
+                                                className="h-8 w-8 rounded-full"
+                                            >
+                                                <Download className="h-4 w-4" />
+                                            </Button>
                                         </div>
-                                    )}
-                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                        <Button
-                                            size="icon"
-                                            variant="secondary"
-                                            onClick={() => setActiveItem(item)}
-                                            className="h-8 w-8 rounded-full"
-                                        >
-                                            <Maximize2 className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            size="icon"
-                                            variant="secondary"
-                                            onClick={() => handleDownload(item)}
-                                            className="h-8 w-8 rounded-full"
-                                        >
-                                            <Download className="h-4 w-4" />
-                                        </Button>
                                     </div>
-                                </div>
-                                <div className="p-2 text-xs text-muted-foreground truncate bg-card border-t">
-                                    <span className="mr-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest">
-                                        {kind === "video" ? (
-                                            <Video className="h-3 w-3" />
-                                        ) : kind === "audio" ? (
-                                            <AudioLines className="h-3 w-3" />
-                                        ) : null}
-                                        {kind}
-                                    </span>
-                                    {item.prompt}
-                                </div>
-                            </Card>
-                        </motion.div>
+                                    <div className="p-2 text-xs text-muted-foreground truncate bg-card border-t">
+                                        <span className="mr-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest">
+                                            {kind === "video" ? (
+                                                <Video className="h-3 w-3" />
+                                            ) : kind === "audio" ? (
+                                                <AudioLines className="h-3 w-3" />
+                                            ) : null}
+                                            {kind}
+                                        </span>
+                                        {item.prompt}
+                                    </div>
+                                </Card>
+                            </motion.div>
                         );
                     })}
                 </AnimatePresence>

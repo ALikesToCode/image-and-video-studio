@@ -1662,12 +1662,12 @@ export default function Studio() {
   if (!hydrated) return null; // Avoid hydration mismatch
 
   return (
-    <div className="container mx-auto max-w-7xl animate-in fade-in space-y-8 p-6 lg:p-12">
+    <div className="container mx-auto max-w-[1600px] animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8 p-4 md:p-6 lg:p-12 pb-32">
       <Header />
 
-      <main className="grid grid-cols-1 gap-12 lg:grid-cols-12">
-        {/* Left Column: Controls */}
-        <div className="space-y-8 lg:col-span-4 lg:space-y-12">
+      <main className="grid grid-cols-1 gap-8 lg:gap-12 lg:grid-cols-12 items-start">
+        {/* Left Column: Controls - Sticky on Desktop */}
+        <div className="space-y-6 lg:col-span-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto no-scrollbar rounded-2xl">
           <ImgGenSettings
             provider={provider}
             setProvider={setProvider}
@@ -1726,12 +1726,40 @@ export default function Studio() {
             navyUsageUpdatedAt={navyUsageUpdatedAt}
             onRefreshUsage={provider === "navy" ? refreshNavyUsage : undefined}
           />
+
+          {/* Storage Snapshot Mini-Card */}
+          <div className="glass-card rounded-xl p-4 text-xs">
+            <div className="flex items-center justify-between gap-4 mb-2">
+              <span className="font-semibold text-muted-foreground uppercase tracking-wider">Local Storage</span>
+              <Button variant="ghost" size="sm" className="h-6 px-2" onClick={refreshStorageEstimate}>
+                Refresh
+              </Button>
+            </div>
+            {storageError ? (
+              <p className="text-destructive">{storageError}</p>
+            ) : storageSnapshot ? (
+              <div className="space-y-2">
+                <div className="w-full bg-secondary h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className="bg-primary h-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, (storageSnapshot.usage / storageSnapshot.quota) * 100)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>{formatBytes(storageSnapshot.usage)} used</span>
+                  <span>{formatBytes(storageSnapshot.quota)} total</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-muted-foreground">Checking...</p>
+            )}
+          </div>
         </div>
 
         {/* Right Column: Prompt & Preview */}
-        <div className="space-y-8 lg:col-span-8">
-          <Card className="border-2 border-primary/10 shadow-xl bg-card/50 backdrop-blur-3xl">
-            <CardContent className="p-6 lg:p-8 space-y-8">
+        <div className="space-y-8 lg:col-span-8 min-h-[50vh]">
+          <div className="glass-card rounded-2xl shadow-xl transition-all duration-300 hover:shadow-2xl hover:border-primary/20">
+            <div className="p-6 lg:p-8 space-y-8">
               <PromptInput
                 prompt={prompt}
                 setPrompt={setPrompt}
@@ -1790,8 +1818,8 @@ export default function Studio() {
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Output Preview Area */}
           {hasOutput && (
@@ -1887,47 +1915,16 @@ export default function Studio() {
         </div>
       </main>
 
-      <div className="my-12 h-px bg-border/50" />
-
-      {/* Gallery Section */}
-      <div className="rounded-xl border bg-card/50 p-4 text-sm">
-        <div className="flex items-center justify-between gap-4">
-          <span className="font-semibold">Storage usage</span>
-          <Button variant="ghost" size="sm" onClick={refreshStorageEstimate}>
-            Refresh
+      <section className="space-y-8 pt-24 pb-12">
+        <div className="flex items-center gap-4">
+          <h2 className="text-3xl font-serif text-gradient font-bold tracking-tight">Gallery</h2>
+          <div className="h-px flex-1 bg-border/60" />
+          <Button variant="ghost" size="sm" className="hidden lg:flex" onClick={clearGallery}>
+            Clear All
           </Button>
         </div>
-        {storageError ? (
-          <p className="mt-2 text-xs text-destructive">{storageError}</p>
-        ) : storageSnapshot ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              {formatBytes(storageSnapshot.usage)} of{" "}
-              {formatBytes(storageSnapshot.quota)} used
-            </span>
-            {storageSnapshot.quota > 0 && (
-              <span>
-                ({Math.min(
-                  100,
-                  Math.round(
-                    (storageSnapshot.usage / storageSnapshot.quota) * 100
-                  )
-                )}
-                %)
-              </span>
-            )}
-            {storageSnapshot.persistent !== null && (
-              <span>
-                Persistence: {storageSnapshot.persistent ? "granted" : "not granted"}
-              </span>
-            )}
-          </div>
-        ) : (
-          <p className="mt-2 text-xs text-muted-foreground">Checking storage...</p>
-        )}
-      </div>
-
-      <GalleryGrid items={savedMedia} onClear={clearGallery} />
+        <GalleryGrid items={savedMedia} onClear={clearGallery} />
+      </section>
       <ImageViewer
         open={!!viewerImage}
         onOpenChange={closeViewer}
