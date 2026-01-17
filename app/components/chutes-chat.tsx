@@ -20,6 +20,12 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createParser, type EventSourceMessage } from "eventsource-parser";
+import {
+  deleteStudioState,
+  getStudioState,
+  isStudioStateAvailable,
+  putStudioState,
+} from "@/lib/studio-state-db";
 
 type ToolCall = {
   id: string;
@@ -53,11 +59,93 @@ type ChutesChatProps = {
   modelsError?: string | null;
 };
 
+const CHAT_STORAGE_KEY = "studio_chat_chutes_history";
+const MAX_CHAT_MESSAGES = 120;
+
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const readLocalStorage = <T,>(key: string, fallback: T): T => {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (!stored) return fallback;
+    return JSON.parse(stored) as T;
+  } catch {
+    return fallback;
+  }
+};
+
+const writeLocalStorage = (key: string, value: string) => {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(key, value);
+};
+
+const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id : "";
+      const role = record.role;
+      const content = typeof record.content === "string" ? record.content : "";
+      if (!id) return null;
+      if (role !== "user" && role !== "assistant" && role !== "tool") return null;
+
+      const message: ChatMessage = { id, role, content };
+      if (typeof record.toolCallId === "string") message.toolCallId = record.toolCallId;
+      if (typeof record.name === "string") message.name = record.name;
+
+      if (Array.isArray(record.toolCalls)) {
+        const toolCalls = record.toolCalls
+          .map((tc) => {
+            if (!tc || typeof tc !== "object") return null;
+            const tcRecord = tc as Record<string, unknown>;
+            const tcId = typeof tcRecord.id === "string" ? tcRecord.id : "";
+            const tcType = typeof tcRecord.type === "string" ? tcRecord.type : "function";
+            const fn = tcRecord.function;
+            if (!fn || typeof fn !== "object") return null;
+            const fnRecord = fn as Record<string, unknown>;
+            const fnName = typeof fnRecord.name === "string" ? fnRecord.name : "";
+            const fnArgs = typeof fnRecord.arguments === "string" ? fnRecord.arguments : "";
+            if (!tcId || !fnName) return null;
+            return {
+              id: tcId,
+              type: tcType,
+              function: {
+                name: fnName,
+                arguments: fnArgs,
+              },
+            };
+          })
+          .filter((entry): entry is ToolCall => !!entry);
+        if (toolCalls.length) message.toolCalls = toolCalls;
+      }
+
+      if (Array.isArray(record.images)) {
+        const images = record.images
+          .map((img) => {
+            if (!img || typeof img !== "object") return null;
+            const imgRecord = img as Record<string, unknown>;
+            const imgId = typeof imgRecord.id === "string" ? imgRecord.id : "";
+            const dataUrl = typeof imgRecord.dataUrl === "string" ? imgRecord.dataUrl : "";
+            const mimeType = typeof imgRecord.mimeType === "string" ? imgRecord.mimeType : "";
+            if (!imgId || !dataUrl) return null;
+            return { id: imgId, dataUrl, mimeType: mimeType || "image/png" };
+          })
+          .filter((entry): entry is { id: string; dataUrl: string; mimeType: string } => !!entry);
+        if (images.length) message.images = images;
+      }
+
+      return message;
+    })
+    .filter((entry): entry is ChatMessage => !!entry)
+    .slice(-MAX_CHAT_MESSAGES);
 };
 
 // Helper component for the thinking block
@@ -109,6 +197,69 @@ export function ChutesChat({
   const [busy, setBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadMessages = async () => {
+      if (typeof window === "undefined") return;
+      let storedMessages: ChatMessage[] = [];
+
+      if (isStudioStateAvailable()) {
+        try {
+          const fromDb = await getStudioState<ChatMessage[]>(CHAT_STORAGE_KEY);
+          storedMessages = sanitizeChatMessages(fromDb);
+        } catch {
+          storedMessages = [];
+        }
+      }
+
+      if (!storedMessages.length) {
+        storedMessages = sanitizeChatMessages(
+          readLocalStorage<ChatMessage[]>(CHAT_STORAGE_KEY, [])
+        );
+      }
+
+      if (!cancelled && storedMessages.length) {
+        setMessages(storedMessages);
+      }
+    };
+
+    void loadMessages();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (messages.length <= MAX_CHAT_MESSAGES) return;
+    setMessages((prev) => prev.slice(-MAX_CHAT_MESSAGES));
+  }, [messages]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const trimmed = messages.slice(-MAX_CHAT_MESSAGES);
+    const persist = async () => {
+      if (isStudioStateAvailable()) {
+        try {
+          await putStudioState(CHAT_STORAGE_KEY, trimmed);
+          return;
+        } catch {
+          // fall through to localStorage
+        }
+      }
+      try {
+        writeLocalStorage(CHAT_STORAGE_KEY, JSON.stringify(trimmed));
+      } catch {
+        // ignore storage failures
+      }
+    };
+
+    const handle = window.setTimeout(() => {
+      void persist();
+    }, 300);
+
+    return () => window.clearTimeout(handle);
+  }, [messages]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -512,6 +663,12 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
   const clearChat = () => {
     setMessages([]);
     setChatError(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(CHAT_STORAGE_KEY);
+    }
+    if (isStudioStateAvailable()) {
+      void deleteStudioState(CHAT_STORAGE_KEY);
+    }
   };
 
   return (

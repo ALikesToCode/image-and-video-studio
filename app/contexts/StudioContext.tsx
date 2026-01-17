@@ -102,6 +102,10 @@ const STORAGE_KEYS = {
     provider: "studio_provider",
     mode: "studio_mode",
     model: "studio_model",
+    modelSelections: "studio_model_selections",
+    settings: "studio_settings",
+    generatedImages: "studio_generated_images",
+    lastOutput: "studio_last_output",
     keyGemini: "studio_api_key_gemini",
     keyNavy: "studio_api_key_navy",
     keyChutes: "studio_api_key_chutes",
@@ -115,6 +119,33 @@ const STORAGE_KEYS = {
     chutesChatModel: "studio_chutes_chat_model",
     chutesToolImageModel: "studio_chutes_tool_image_model",
 };
+
+type StoredSettings = Partial<{
+    prompt: string;
+    negativePrompt: string;
+    imageCount: number;
+    imageAspect: string;
+    imageSize: string;
+    navyImageSize: string;
+    chutesGuidanceScale: string;
+    chutesWidth: string;
+    chutesHeight: string;
+    chutesSteps: string;
+    chutesResolution: string;
+    chutesSeed: string;
+    chutesVideoFps: string;
+    chutesVideoGuidanceScale: string;
+    videoAspect: string;
+    videoResolution: string;
+    videoDuration: string;
+    ttsVoice: string;
+    ttsFormat: string;
+    ttsSpeed: string;
+    saveToGallery: boolean;
+    chutesTtsSpeed: string;
+    chutesTtsSpeaker: string;
+    chutesTtsMaxDuration: string;
+}>;
 
 const MAX_CACHED_MODELS = 200;
 const MAX_SAVED_MEDIA = 12;
@@ -180,6 +211,43 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const getString = (value: unknown, fallback = "") =>
     typeof value === "string" ? value : fallback;
+
+const getNumber = (value: unknown, fallback: number) =>
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const getBoolean = (value: unknown, fallback: boolean) =>
+    typeof value === "boolean" ? value : fallback;
+
+const isProvider = (value: unknown): value is Provider =>
+    value === "gemini" || value === "navy" || value === "chutes" || value === "openrouter";
+
+const isMode = (value: unknown): value is Mode =>
+    value === "image" || value === "video" || value === "tts";
+
+const sanitizeGeneratedImages = (value: unknown): GeneratedImage[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((item) => {
+            if (!isRecord(item)) return null;
+            const dataUrl = getString(item.dataUrl);
+            if (!dataUrl) return null;
+            const mimeType = getString(item.mimeType, "image/png");
+            const id = getString(item.id, createId());
+            return { id, dataUrl, mimeType };
+        })
+        .filter((item): item is GeneratedImage => !!item)
+        .slice(0, MAX_SAVED_MEDIA);
+};
+
+const sanitizeModelSelections = (value: unknown): Record<string, string> => {
+    if (!isRecord(value)) return {};
+    return Object.entries(value).reduce<Record<string, string>>((acc, [key, entry]) => {
+        if (typeof entry === "string" && entry.trim()) {
+            acc[key] = entry;
+        }
+        return acc;
+    }, {});
+};
 
 const buildGeneratedImages = (payload: unknown): GeneratedImage[] => {
     const record = isRecord(payload) ? payload : {};
@@ -316,8 +384,8 @@ interface StudioContextType {
     setAudioUrl: (s: string | null) => void;
     audioMimeType: string | null;
     setAudioMimeType: (s: string | null) => void;
-    lastOutput: { mode: Mode; prompt: string; model: string; provider: Provider; ttsVoice?: string } | null;
-    setLastOutput: (o: { mode: Mode; prompt: string; model: string; provider: Provider; ttsVoice?: string } | null) => void;
+    lastOutput: { mode: Mode; prompt: string; model: string; provider: Provider; ttsVoice?: string; mediaIds?: string[] } | null;
+    setLastOutput: (o: { mode: Mode; prompt: string; model: string; provider: Provider; ttsVoice?: string; mediaIds?: string[] } | null) => void;
 
     // Jobs
     jobs: GenerationJob[];
@@ -413,7 +481,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     const [modelsLoading, setModelsLoading] = useState(false);
     const [modelsError, setModelsError] = useState<string | null>(null);
-    const [lastOutput, setLastOutput] = useState<{ mode: Mode; prompt: string; model: string; provider: Provider; ttsVoice?: string } | null>(null);
+    const [lastOutput, setLastOutput] = useState<{ mode: Mode; prompt: string; model: string; provider: Provider; ttsVoice?: string; mediaIds?: string[] } | null>(null);
 
     const [storageSnapshot, setStorageSnapshot] = useState<StorageSnapshot | null>(null);
     const [storageError, setStorageError] = useState<string | null>(null);
@@ -427,6 +495,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const galleryUrlsRef = useRef(new Map<string, string>());
     const navyUsageLoadingRef = useRef(false);
     const processingRef = useRef(false);
+    const skipApiKeyWriteRef = useRef(false);
+    const lastProviderModeRef = useRef(`${provider}:${mode}`);
 
     // --- Computed ---
     const supportsVideo = provider === "gemini" || provider === "navy" || provider === "chutes";
@@ -518,8 +588,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             saveToGallery: boolean;
             kind: StoredMedia["kind"];
         }
-    ) => {
-        if (!metadata.saveToGallery || items.length === 0) return;
+    ): Promise<StoredMedia[]> => {
+        if (!metadata.saveToGallery || items.length === 0) return [];
         try {
             const entries: StoredMedia[] = [];
             for (const item of items) {
@@ -549,8 +619,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (entries.length) {
                 setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
             }
+            return entries;
         } catch (error) {
             setErrorMessage(error instanceof Error ? error.message : "Gallery save failed");
+            return [];
         }
     };
 
@@ -586,11 +658,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             }
 
             setGeneratedImages(images);
-            await addMediaToGallery(
+            const galleryEntries = await addMediaToGallery(
                 images.map(img => ({ url: img.dataUrl, mimeType: img.mimeType })),
                 { prompt: job.prompt, model: job.model, provider: job.provider, saveToGallery: job.saveToGallery, kind: "image" }
             );
-            setLastOutput({ mode: "image", prompt: job.prompt, model: job.model, provider: job.provider });
+            setLastOutput({
+                mode: "image",
+                prompt: job.prompt,
+                model: job.model,
+                provider: job.provider,
+                mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
+            });
             completeJob(job.id);
         } catch (e) {
             failJob(job.id, e instanceof Error ? e.message : "Failed");
@@ -626,6 +704,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
             const contentType = response.headers.get("content-type") ?? "";
             let videoUrl: string | null = null;
+            let videoBlob: Blob | undefined;
+            let videoMimeType: string | undefined;
 
             if (contentType.includes("application/json")) {
                 const data = await response.json();
@@ -637,17 +717,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         typeof data?.mimeType === "string"
                             ? data.mimeType
                             : "video/mp4";
+                    videoMimeType = mimeType;
                     videoUrl = dataUrlFromBase64(data.data, mimeType);
                 }
             } else {
                 const blob = await response.blob();
+                videoBlob = blob;
+                videoMimeType = blob.type || "video/mp4";
                 videoUrl = URL.createObjectURL(blob);
             }
 
             if (!videoUrl) throw new Error("No video data received.");
             setVideoUrl(videoUrl);
             completeJob(job.id, { videoUrl });
-            setLastOutput({ mode: "video", prompt: job.prompt, model: job.model, provider: job.provider });
+            const galleryEntries = await addMediaToGallery(
+                [{ url: videoUrl, mimeType: videoMimeType, blob: videoBlob }],
+                { prompt: job.prompt, model: job.model, provider: job.provider, saveToGallery: job.saveToGallery, kind: "video" }
+            );
+            setLastOutput({
+                mode: "video",
+                prompt: job.prompt,
+                model: job.model,
+                provider: job.provider,
+                mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
+            });
 
         } catch (error) {
             console.error("Video generation error:", error);
@@ -693,6 +786,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 const contentType = response.headers.get("content-type");
                 let audioDataUrl: string | null = null;
                 let audioMime: string | null = null;
+                let audioBlob: Blob | undefined;
 
                 if (contentType && contentType.includes("application/json")) {
                     const data = await response.json();
@@ -709,6 +803,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 } else {
                     // Assume direct audio blob
                     const blob = await response.blob();
+                    audioBlob = blob;
                     audioDataUrl = URL.createObjectURL(blob);
                     audioMime = blob.type;
                 }
@@ -717,7 +812,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
                 setAudioUrl(audioDataUrl);
                 setAudioMimeType(audioMime);
-                setLastOutput({ mode: "tts", prompt: job.prompt, model: job.model, provider: job.provider, ttsVoice: job.ttsVoice });
+                const galleryEntries = await addMediaToGallery(
+                    [{ url: audioDataUrl, mimeType: audioMime ?? undefined, blob: audioBlob }],
+                    { prompt: job.prompt, model: job.model, provider: job.provider, saveToGallery: job.saveToGallery, kind: "audio" }
+                );
+                setLastOutput({
+                    mode: "tts",
+                    prompt: job.prompt,
+                    model: job.model,
+                    provider: job.provider,
+                    ttsVoice: job.ttsVoice,
+                    mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
+                });
                 completeJob(job.id, { audioUrl: audioDataUrl, audioData: audioDataUrl.startsWith("data:") ? audioDataUrl : undefined }); // Store dataUrl in job for history
                 return;
 
@@ -866,6 +972,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
         const storedMedia = readLocalStorage<StoredMediaRecord[]>(STORAGE_KEYS.images, []);
         const storedChutesKey = readLocalStorage<string>(STORAGE_KEYS.keyChutes, "");
+        const storedSettings = readLocalStorage<StoredSettings>(STORAGE_KEYS.settings, {});
+        const storedGeneratedImages = readLocalStorage<GeneratedImage[]>(STORAGE_KEYS.generatedImages, []);
+        const storedLastOutput = readLocalStorage<unknown>(STORAGE_KEYS.lastOutput, null);
 
         if (storedProvider) setProvider(storedProvider);
         if (storedMode) setMode(storedMode);
@@ -873,6 +982,102 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
         const storedOpenRouterModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.openRouterModels, []);
         if (storedOpenRouterModels.length) setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
+        const storedNavyImageModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyImageModels, []);
+        if (storedNavyImageModels.length) setNavyImageModels(sanitizeModelOptions(storedNavyImageModels));
+        const storedNavyVideoModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyVideoModels, []);
+        if (storedNavyVideoModels.length) setNavyVideoModels(sanitizeModelOptions(storedNavyVideoModels));
+        const storedNavyTtsModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyTtsModels, []);
+        if (storedNavyTtsModels.length) setNavyTtsModels(sanitizeModelOptions(storedNavyTtsModels));
+
+        const storedChutesChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.chutesChatModels, []);
+        if (storedChutesChatModels.length) setChutesChatModels(sanitizeModelOptions(storedChutesChatModels));
+        const storedChutesChatModel = readLocalStorage<string>(STORAGE_KEYS.chutesChatModel, "");
+        if (storedChutesChatModel) setChutesChatModel(storedChutesChatModel);
+        const storedToolImageModel = readLocalStorage<string>(STORAGE_KEYS.chutesToolImageModel, "");
+        if (storedToolImageModel) setChutesToolImageModel(storedToolImageModel);
+
+        if (isRecord(storedSettings)) {
+            const storedPrompt = getString(storedSettings.prompt);
+            if (storedPrompt) setPrompt(storedPrompt);
+            const storedNegativePrompt = getString(storedSettings.negativePrompt);
+            if (storedNegativePrompt) setNegativePrompt(storedNegativePrompt);
+
+            const storedImageCount = getNumber(storedSettings.imageCount, 1);
+            if (storedImageCount > 0) setImageCount(storedImageCount);
+
+            const storedImageAspect = getString(storedSettings.imageAspect);
+            if (IMAGE_ASPECTS.includes(storedImageAspect)) setImageAspect(storedImageAspect);
+            const storedImageSize = getString(storedSettings.imageSize);
+            if (IMAGE_SIZES.includes(storedImageSize)) setImageSize(storedImageSize);
+            const storedNavyImageSize = getString(storedSettings.navyImageSize);
+            if (storedNavyImageSize) setNavyImageSize(storedNavyImageSize);
+            const storedGuidanceScale = getString(storedSettings.chutesGuidanceScale);
+            if (storedGuidanceScale) setChutesGuidanceScale(storedGuidanceScale);
+            const storedWidth = getString(storedSettings.chutesWidth);
+            if (storedWidth) setChutesWidth(storedWidth);
+            const storedHeight = getString(storedSettings.chutesHeight);
+            if (storedHeight) setChutesHeight(storedHeight);
+            const storedSteps = getString(storedSettings.chutesSteps);
+            if (storedSteps) setChutesSteps(storedSteps);
+            const storedResolution = getString(storedSettings.chutesResolution);
+            if (storedResolution) setChutesResolution(storedResolution);
+            const storedSeed = getString(storedSettings.chutesSeed);
+            if (storedSeed) setChutesSeed(storedSeed);
+            const storedVideoFps = getString(storedSettings.chutesVideoFps);
+            if (storedVideoFps) setChutesVideoFps(storedVideoFps);
+            const storedVideoGuidance = getString(storedSettings.chutesVideoGuidanceScale);
+            if (storedVideoGuidance) setChutesVideoGuidanceScale(storedVideoGuidance);
+
+            const storedVideoAspect = getString(storedSettings.videoAspect);
+            if (VIDEO_ASPECTS.includes(storedVideoAspect)) setVideoAspect(storedVideoAspect);
+            const storedVideoResolution = getString(storedSettings.videoResolution);
+            if (VIDEO_RESOLUTIONS.includes(storedVideoResolution)) setVideoResolution(storedVideoResolution);
+            const storedVideoDuration = getString(storedSettings.videoDuration);
+            if (VIDEO_DURATIONS.includes(storedVideoDuration)) setVideoDuration(storedVideoDuration);
+
+            const storedTtsVoice = getString(storedSettings.ttsVoice);
+            if (TTS_VOICES.includes(storedTtsVoice)) setTtsVoice(storedTtsVoice);
+            const storedTtsFormat = getString(storedSettings.ttsFormat);
+            if (TTS_FORMATS.includes(storedTtsFormat)) setTtsFormat(storedTtsFormat);
+            const storedTtsSpeed = getString(storedSettings.ttsSpeed);
+            if (storedTtsSpeed) setTtsSpeed(storedTtsSpeed);
+
+            const storedSaveToGallery = getBoolean(storedSettings.saveToGallery, true);
+            setSaveToGallery(storedSaveToGallery);
+
+            const storedChutesTtsSpeed = getString(storedSettings.chutesTtsSpeed);
+            if (storedChutesTtsSpeed) setChutesTtsSpeed(storedChutesTtsSpeed);
+            const storedChutesTtsSpeaker = getString(storedSettings.chutesTtsSpeaker);
+            if (storedChutesTtsSpeaker) setChutesTtsSpeaker(storedChutesTtsSpeaker);
+            const storedChutesTtsMaxDuration = getString(storedSettings.chutesTtsMaxDuration);
+            if (storedChutesTtsMaxDuration) setChutesTtsMaxDuration(storedChutesTtsMaxDuration);
+        }
+
+        const sanitizedImages = sanitizeGeneratedImages(storedGeneratedImages);
+        if (sanitizedImages.length) setGeneratedImages(sanitizedImages);
+
+        if (isRecord(storedLastOutput)) {
+            const mode = storedLastOutput.mode;
+            const provider = storedLastOutput.provider;
+            if (isMode(mode) && isProvider(provider)) {
+                const prompt = getString(storedLastOutput.prompt);
+                const model = getString(storedLastOutput.model);
+                const ttsVoice = getString(storedLastOutput.ttsVoice);
+                const mediaIds = Array.isArray(storedLastOutput.mediaIds)
+                    ? storedLastOutput.mediaIds.filter((entry): entry is string => typeof entry === "string")
+                    : [];
+                if (prompt && model) {
+                    setLastOutput({
+                        mode,
+                        provider,
+                        prompt,
+                        model,
+                        ttsVoice: ttsVoice || undefined,
+                        mediaIds: mediaIds.length ? mediaIds : undefined,
+                    });
+                }
+            }
+        }
 
         const loadSavedMedia = async () => {
             if (!storedMedia.length) return;
@@ -937,6 +1142,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
+        const storedKey = readLocalStorage<string>(getKeyStorage(provider), "");
+        skipApiKeyWriteRef.current = true;
+        setApiKey(storedKey);
+    }, [provider, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (skipApiKeyWriteRef.current) {
+            skipApiKeyWriteRef.current = false;
+            return;
+        }
         const storageKey = getKeyStorage(provider);
         if (apiKey) writeLocalStorage(storageKey, JSON.stringify(apiKey));
         else window.localStorage.removeItem(storageKey);
@@ -944,9 +1160,158 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
-        const storedKey = readLocalStorage<string>(getKeyStorage(provider), "");
-        setApiKey(storedKey);
-    }, [provider, hydrated]);
+        const selectionKey = `${provider}:${mode}`;
+        const selections = sanitizeModelSelections(
+            readLocalStorage<unknown>(STORAGE_KEYS.modelSelections, {})
+        );
+        const availableModels = modelSuggestions.map((item) => item.id);
+        const storedModel = selections[selectionKey];
+        const providerModeChanged = lastProviderModeRef.current !== selectionKey;
+        lastProviderModeRef.current = selectionKey;
+
+        if (providerModeChanged) {
+            if (storedModel && availableModels.includes(storedModel) && storedModel !== model) {
+                setModel(storedModel);
+                return;
+            }
+        }
+
+        if (!availableModels.includes(model) && availableModels.length) {
+            setModel(availableModels[0]);
+        }
+    }, [provider, mode, modelSuggestions, model, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (!model) return;
+        const selectionKey = `${provider}:${mode}`;
+        const selections = sanitizeModelSelections(
+            readLocalStorage<unknown>(STORAGE_KEYS.modelSelections, {})
+        );
+        selections[selectionKey] = model;
+        writeLocalStorage(STORAGE_KEYS.modelSelections, JSON.stringify(selections));
+    }, [model, provider, mode, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        const payload: StoredSettings = {
+            prompt,
+            negativePrompt,
+            imageCount,
+            imageAspect,
+            imageSize,
+            navyImageSize,
+            chutesGuidanceScale,
+            chutesWidth,
+            chutesHeight,
+            chutesSteps,
+            chutesResolution,
+            chutesSeed,
+            chutesVideoFps,
+            chutesVideoGuidanceScale,
+            videoAspect,
+            videoResolution,
+            videoDuration,
+            ttsVoice,
+            ttsFormat,
+            ttsSpeed,
+            saveToGallery,
+            chutesTtsSpeed,
+            chutesTtsSpeaker,
+            chutesTtsMaxDuration,
+        };
+        try {
+            writeLocalStorage(STORAGE_KEYS.settings, JSON.stringify(payload));
+        } catch { }
+    }, [
+        prompt,
+        negativePrompt,
+        imageCount,
+        imageAspect,
+        imageSize,
+        navyImageSize,
+        chutesGuidanceScale,
+        chutesWidth,
+        chutesHeight,
+        chutesSteps,
+        chutesResolution,
+        chutesSeed,
+        chutesVideoFps,
+        chutesVideoGuidanceScale,
+        videoAspect,
+        videoResolution,
+        videoDuration,
+        ttsVoice,
+        ttsFormat,
+        ttsSpeed,
+        saveToGallery,
+        chutesTtsSpeed,
+        chutesTtsSpeaker,
+        chutesTtsMaxDuration,
+        hydrated,
+    ]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        const trimmedImages = generatedImages.slice(0, MAX_SAVED_MEDIA);
+        try {
+            if (trimmedImages.length) {
+                writeLocalStorage(STORAGE_KEYS.generatedImages, JSON.stringify(trimmedImages));
+            } else {
+                window.localStorage.removeItem(STORAGE_KEYS.generatedImages);
+            }
+        } catch { }
+    }, [generatedImages, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        try {
+            if (lastOutput) {
+                writeLocalStorage(STORAGE_KEYS.lastOutput, JSON.stringify(lastOutput));
+            } else {
+                window.localStorage.removeItem(STORAGE_KEYS.lastOutput);
+            }
+        } catch { }
+    }, [lastOutput, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.openRouterModels, JSON.stringify(openRouterImageModels));
+    }, [openRouterImageModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.navyImageModels, JSON.stringify(navyImageModels));
+    }, [navyImageModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.navyVideoModels, JSON.stringify(navyVideoModels));
+    }, [navyVideoModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.navyTtsModels, JSON.stringify(navyTtsModels));
+    }, [navyTtsModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.chutesChatModels, JSON.stringify(chutesChatModels));
+    }, [chutesChatModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (chutesChatModel) {
+            writeLocalStorage(STORAGE_KEYS.chutesChatModel, JSON.stringify(chutesChatModel));
+        }
+    }, [chutesChatModel, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (chutesToolImageModel) {
+            writeLocalStorage(STORAGE_KEYS.chutesToolImageModel, JSON.stringify(chutesToolImageModel));
+        }
+    }, [chutesToolImageModel, hydrated]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -975,6 +1340,42 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedMedia));
         } catch { }
     }, [savedMedia, hydrated, idbAvailable]);
+
+    useEffect(() => {
+        if (!hydrated || !lastOutput?.mediaIds?.length) return;
+        const mediaMap = new Map(savedMedia.map((item) => [item.id, item]));
+        const resolveMedia = (id: string) => mediaMap.get(id);
+
+        if (lastOutput.mode === "video" && !videoUrl) {
+            const entry = resolveMedia(lastOutput.mediaIds[0]);
+            if (entry?.kind === "video") {
+                setVideoUrl(entry.dataUrl);
+            }
+        }
+
+        if (lastOutput.mode === "tts" && !audioUrl) {
+            const entry = resolveMedia(lastOutput.mediaIds[0]);
+            if (entry?.kind === "audio") {
+                setAudioUrl(entry.dataUrl);
+                setAudioMimeType(entry.mimeType ?? null);
+            }
+        }
+
+        if (lastOutput.mode === "image" && generatedImages.length === 0) {
+            const images = lastOutput.mediaIds
+                .map((id) => resolveMedia(id))
+                .filter((entry): entry is StoredMedia => !!entry && (entry.kind ?? "image") === "image")
+                .map((entry) => ({
+                    id: entry.id,
+                    dataUrl: entry.dataUrl,
+                    mimeType: entry.mimeType ?? "image/png",
+                }))
+                .slice(0, MAX_SAVED_MEDIA);
+            if (images.length) {
+                setGeneratedImages(images);
+            }
+        }
+    }, [savedMedia, lastOutput, hydrated, videoUrl, audioUrl, generatedImages.length]);
 
     const value: StudioContextType = {
         hydrated,
