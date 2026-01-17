@@ -5,6 +5,7 @@ import { CHUTES_IMAGE_MODELS } from "@/lib/constants";
 export function ChatView() {
     const {
         apiKey,
+        chutesChatKey,
         chutesChatModels,
         chutesChatModel,
         setChutesChatModel,
@@ -12,8 +13,12 @@ export function ChatView() {
         setChutesToolImageModel,
         chutesChatModelsLoading,
         chutesChatModelsError,
-        refreshChutesChatModels
+        refreshChutesChatModels,
+        saveChatImages,
+        saveToGallery,
     } = useStudio();
+
+    const chatApiKey = chutesChatKey || apiKey;
 
     // Use global key if set, assuming Chutes provider
     // Ideally, we should check which provider is capable of chat or if Chat is always Chutes here?
@@ -23,7 +28,7 @@ export function ChatView() {
     return (
         <div className="h-full w-full flex flex-col">
             <ChutesChat
-                apiKey={apiKey} // Or specific chutes key? logic in Studio.tsx synced them.
+                apiKey={chatApiKey}
                 models={chutesChatModels}
                 model={chutesChatModel}
                 setModel={setChutesChatModel}
@@ -33,6 +38,8 @@ export function ChatView() {
                 modelsLoading={chutesChatModelsLoading}
                 modelsError={chutesChatModelsError}
                 onRefreshModels={refreshChutesChatModels}
+                saveToGallery={saveToGallery}
+                onSaveImages={saveChatImages}
             />
         </div>
     );

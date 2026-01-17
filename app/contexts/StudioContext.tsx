@@ -404,6 +404,11 @@ interface StudioContextType {
     clearGallery: () => void;
     refreshModels: () => Promise<void>;
     refreshChutesChatModels: () => Promise<void>;
+    saveChatImages: (payload: {
+        images: { id: string; dataUrl: string; mimeType: string }[];
+        prompt: string;
+        model: string;
+    }) => Promise<void>;
 
     // Logic
     // Logic
@@ -876,6 +881,27 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         clearGalleryStore().catch(console.error);
     };
 
+    const saveChatImages = async (payload: {
+        images: { id: string; dataUrl: string; mimeType: string }[];
+        prompt: string;
+        model: string;
+    }) => {
+        if (!payload.images.length) return;
+        await addMediaToGallery(
+            payload.images.map((image) => ({
+                url: image.dataUrl,
+                mimeType: image.mimeType,
+            })),
+            {
+                prompt: payload.prompt,
+                model: payload.model,
+                provider: "chutes",
+                saveToGallery,
+                kind: "image",
+            }
+        );
+    };
+
     const refreshStorageEstimate = useCallback(async () => {
         if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
             setStorageError("Storage usage isn't available.");
@@ -952,7 +978,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setChutesChatModelsLoading(true);
         setChutesChatModelsError(null);
         try {
-            const response = await fetch("/api/chutes/models");
+            const key = chutesChatKey.trim();
+            if (!key) {
+                throw new Error("Missing Chutes API key.");
+            }
+            const response = await fetch("/api/chutes/models", {
+                headers: {
+                    "x-user-api-key": key,
+                },
+            });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch Chutes models");
             setChutesChatModels(sanitizeModelOptions(payload));
@@ -961,7 +995,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         } finally {
             setChutesChatModelsLoading(false);
         }
-    }, []);
+    }, [chutesChatKey]);
 
     // --- Effects (Persistence) ---
 
@@ -1156,6 +1190,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storageKey = getKeyStorage(provider);
         if (apiKey) writeLocalStorage(storageKey, JSON.stringify(apiKey));
         else window.localStorage.removeItem(storageKey);
+    }, [apiKey, provider, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (provider === "chutes") {
+            setChutesChatKey(apiKey);
+        }
     }, [apiKey, provider, hydrated]);
 
     useEffect(() => {
@@ -1432,6 +1473,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         supportsVideo, supportsTts,
         clearKey, clearGallery,
         refreshModels, refreshChutesChatModels,
+        saveChatImages,
         handleGenerate,
         generateImage: generateImages,
         generateVideo,

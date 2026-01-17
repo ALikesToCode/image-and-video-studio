@@ -57,6 +57,12 @@ type ChutesChatProps = {
   onRefreshModels?: () => void;
   modelsLoading?: boolean;
   modelsError?: string | null;
+  saveToGallery?: boolean;
+  onSaveImages?: (payload: {
+    images: { id: string; dataUrl: string; mimeType: string }[];
+    prompt: string;
+    model: string;
+  }) => Promise<void> | void;
 };
 
 const CHAT_STORAGE_KEY = "studio_chat_chutes_history";
@@ -191,6 +197,8 @@ export function ChutesChat({
   onRefreshModels,
   modelsLoading,
   modelsError,
+  saveToGallery = false,
+  onSaveImages,
 }: ChutesChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -543,7 +551,16 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
         continue;
       }
       try {
+        const prompt =
+          typeof args.prompt === "string" ? args.prompt.trim() : "";
         const result = await runGenerateImage(args);
+        if (saveToGallery && onSaveImages) {
+          await onSaveImages({
+            images: result.images,
+            prompt,
+            model: result.model,
+          });
+        }
         toolMessages.push({
           id: createId(),
           role: "tool",
