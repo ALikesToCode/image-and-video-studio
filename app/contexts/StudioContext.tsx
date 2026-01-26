@@ -1179,9 +1179,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 const models = sanitizeModelOptions(payload);
                 setOpenRouterImageModels(models);
             } else {
-                if (payload.image) setNavyImageModels(sanitizeModelOptions(payload.image));
-                if (payload.video) setNavyVideoModels(sanitizeModelOptions(payload.video));
-                if (payload.audio) setNavyTtsModels(sanitizeModelOptions(payload.audio));
+                const imageModels = sanitizeModelOptions(payload?.image ?? payload?.images ?? []);
+                const videoModels = sanitizeModelOptions(payload?.video ?? payload?.videos ?? []);
+                const audioModels = sanitizeModelOptions(payload?.audio ?? payload?.tts ?? []);
+                const chatModels = sanitizeModelOptions(payload?.chat ?? payload?.llm ?? payload?.text ?? []);
+                if (imageModels.length) setNavyImageModels(imageModels);
+                if (videoModels.length) setNavyVideoModels(videoModels);
+                if (audioModels.length) setNavyTtsModels(audioModels);
+                if (chatModels.length) setNavyChatModels(chatModels);
             }
         } catch (error) {
             setModelsError(error instanceof Error ? error.message : "Unknown error refreshing models");
@@ -1230,12 +1235,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             const payload = await response.json();
             if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch NavyAI models");
 
-            const raw = Array.isArray(payload?.data)
-                ? payload.data
-                : Array.isArray(payload)
-                    ? payload
-                    : [];
-            const models = sanitizeModelOptions(raw);
+            const models = sanitizeModelOptions(
+                payload?.chat ??
+                payload?.llm ??
+                payload?.text ??
+                (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [])
+            );
             if (models.length) setNavyChatModels(models);
         } catch (error) {
             setNavyChatModelsError(error instanceof Error ? error.message : "Error");
