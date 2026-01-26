@@ -1,7 +1,7 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
@@ -18,11 +18,17 @@ export function VideoGenView() {
         statusMessage,
         videoImage,
         setVideoImage,
-        provider
+        provider,
+        mode,
+        setMode,
     } = context;
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDragging, setIsDragging] = useState(false);
+
+    useEffect(() => {
+        if (mode !== "video") setMode("video");
+    }, [mode, setMode]);
 
     const isRunning = jobs.some((job) => job.status === "running" || job.status === "queued");
 
@@ -61,7 +67,12 @@ export function VideoGenView() {
         <div className="flex h-full">
             {/* Sidebar Settings - Pass all props from context */}
             <div className="w-[340px] flex-none border-r bg-background/50 p-6 overflow-y-auto hidden xl:block">
-                <ImgGenSettings {...context} />
+                <ImgGenSettings
+                    {...context}
+                    onRefreshModels={context.refreshModels}
+                    modelsLoading={context.modelsLoading}
+                    modelsError={context.modelsError}
+                />
             </div>
 
             {/* Main Content */}

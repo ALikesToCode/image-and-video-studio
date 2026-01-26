@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from "react";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ChutesChat } from "../chutes-chat";
 import { CHUTES_IMAGE_MODELS } from "@/lib/constants";
@@ -24,13 +25,25 @@ export function ChatView() {
         navyChatModelsError,
         refreshNavyChatModels,
         navyImageModels,
+        navyVideoModels,
+        navyTtsModels,
         saveChatImages,
         saveToGallery,
     } = useStudio();
 
     const isNavyChat = chatProvider === "navy";
     const chatApiKey = isNavyChat ? apiKeys.navy : apiKeys.chutes;
-    const chatModels = isNavyChat ? navyChatModels : chutesChatModels;
+    const navyChatModelsFiltered = useMemo(() => {
+        if (!navyChatModels.length) return [];
+        const exclude = new Set([
+            ...navyImageModels.map((model) => model.id),
+            ...navyVideoModels.map((model) => model.id),
+            ...navyTtsModels.map((model) => model.id),
+        ]);
+        return navyChatModels.filter((model) => !exclude.has(model.id));
+    }, [navyChatModels, navyImageModels, navyVideoModels, navyTtsModels]);
+    const resolvedNavyChatModels = navyChatModelsFiltered.length ? navyChatModelsFiltered : navyChatModels;
+    const chatModels = isNavyChat ? resolvedNavyChatModels : chutesChatModels;
     const chatModel = isNavyChat ? navyChatModel : chutesChatModel;
     const setChatModel = isNavyChat ? setNavyChatModel : setChutesChatModel;
     const imageModels = isNavyChat ? navyImageModels : CHUTES_IMAGE_MODELS;
@@ -41,6 +54,22 @@ export function ChatView() {
     const onRefreshModels = isNavyChat ? refreshNavyChatModels : refreshChutesChatModels;
     const handleSaveImages = (payload: { images: { id: string; dataUrl: string; mimeType: string }[]; prompt: string; model: string }) =>
         saveChatImages({ ...payload, provider: chatProvider });
+
+    useEffect(() => {
+        if (!isNavyChat) return;
+        if (!resolvedNavyChatModels.length) return;
+        if (!resolvedNavyChatModels.some((model) => model.id === navyChatModel)) {
+            setNavyChatModel(resolvedNavyChatModels[0].id);
+        }
+    }, [isNavyChat, navyChatModel, resolvedNavyChatModels, setNavyChatModel]);
+
+    useEffect(() => {
+        if (!isNavyChat) return;
+        if (!navyImageModels.length) return;
+        if (!navyImageModels.some((model) => model.id === navyToolImageModel)) {
+            setNavyToolImageModel(navyImageModels[0].id);
+        }
+    }, [isNavyChat, navyImageModels, navyToolImageModel, setNavyToolImageModel]);
 
     return (
         <div className="h-full w-full flex flex-col">

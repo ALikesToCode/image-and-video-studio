@@ -552,6 +552,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         [provider, setApiKeyForProvider]
     );
 
+    const refreshNavyCatalog = useCallback(async () => {
+        const key = apiKeys.navy.trim();
+        if (!key) {
+            throw new Error("Missing NavyAI API key.");
+        }
+        const response = await fetch("/api/navy/models", {
+            headers: {
+                "x-user-api-key": key,
+            },
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload?.error ?? "Failed to fetch NavyAI models");
+        }
+        const imageModels = sanitizeModelOptions(payload?.image ?? payload?.images ?? []);
+        const videoModels = sanitizeModelOptions(payload?.video ?? payload?.videos ?? []);
+        const audioModels = sanitizeModelOptions(payload?.audio ?? payload?.tts ?? []);
+        const chatModels = sanitizeModelOptions(payload?.chat ?? payload?.llm ?? payload?.text ?? []);
+        setNavyImageModels(imageModels);
+        setNavyVideoModels(videoModels);
+        setNavyTtsModels(audioModels);
+        setNavyChatModels(chatModels);
+    }, [apiKeys.navy]);
+
     const modelSuggestions = useMemo(() => {
         if (provider === "gemini") {
             return mode === "image" ? GEMINI_IMAGE_MODELS : GEMINI_VIDEO_MODELS;
@@ -1163,37 +1187,29 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setModelsLoading(true);
         setModelsError(null);
         try {
-            const key = provider === "openrouter" ? apiKeys.openrouter : apiKeys.navy;
-            if (!key.trim()) {
-                throw new Error(`Missing ${provider === "openrouter" ? "OpenRouter" : "NavyAI"} API key.`);
-            }
-            const response = await fetch(`/api/${provider}/models`, {
-                headers: {
-                    "x-user-api-key": key,
-                },
-            });
-            const payload = await response.json();
-            if (!response.ok) throw new Error(payload?.error ?? `Failed to fetch models from ${provider}`);
-
             if (provider === "openrouter") {
+                const key = apiKeys.openrouter;
+                if (!key.trim()) {
+                    throw new Error("Missing OpenRouter API key.");
+                }
+                const response = await fetch("/api/openrouter/models", {
+                    headers: {
+                        "x-user-api-key": key,
+                    },
+                });
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch models from openrouter");
                 const models = sanitizeModelOptions(payload);
                 setOpenRouterImageModels(models);
             } else {
-                const imageModels = sanitizeModelOptions(payload?.image ?? payload?.images ?? []);
-                const videoModels = sanitizeModelOptions(payload?.video ?? payload?.videos ?? []);
-                const audioModels = sanitizeModelOptions(payload?.audio ?? payload?.tts ?? []);
-                const chatModels = sanitizeModelOptions(payload?.chat ?? payload?.llm ?? payload?.text ?? []);
-                if (imageModels.length) setNavyImageModels(imageModels);
-                if (videoModels.length) setNavyVideoModels(videoModels);
-                if (audioModels.length) setNavyTtsModels(audioModels);
-                if (chatModels.length) setNavyChatModels(chatModels);
+                await refreshNavyCatalog();
             }
         } catch (error) {
             setModelsError(error instanceof Error ? error.message : "Unknown error refreshing models");
         } finally {
             setModelsLoading(false);
         }
-    }, [provider, apiKeys.openrouter, apiKeys.navy]);
+    }, [provider, apiKeys.openrouter, refreshNavyCatalog]);
 
     const refreshChutesChatModels = useCallback(async () => {
         setChutesChatModelsLoading(true);
@@ -1223,31 +1239,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setNavyChatModelsLoading(true);
         setNavyChatModelsError(null);
         try {
-            const key = apiKeys.navy.trim();
-            if (!key) {
-                throw new Error("Missing NavyAI API key.");
-            }
-            const response = await fetch("/api/navy/models", {
-                headers: {
-                    "x-user-api-key": key,
-                },
-            });
-            const payload = await response.json();
-            if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch NavyAI models");
-
-            const models = sanitizeModelOptions(
-                payload?.chat ??
-                payload?.llm ??
-                payload?.text ??
-                (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [])
-            );
-            if (models.length) setNavyChatModels(models);
+            await refreshNavyCatalog();
         } catch (error) {
             setNavyChatModelsError(error instanceof Error ? error.message : "Error");
         } finally {
             setNavyChatModelsLoading(false);
         }
-    }, [apiKeys.navy]);
+    }, [refreshNavyCatalog]);
 
     // --- Effects (Persistence) ---
 
@@ -1452,6 +1450,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (!hydrated) return;
         writeLocalStorage(STORAGE_KEYS.chatProvider, JSON.stringify(chatProvider));
     }, [chatProvider, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (!apiKeys.navy.trim()) return;
+        void refreshNavyCatalog();
+    }, [apiKeys.navy, hydrated, refreshNavyCatalog]);
 
     useEffect(() => {
         if (!hydrated) return;
