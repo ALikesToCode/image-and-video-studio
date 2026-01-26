@@ -11,6 +11,7 @@ import {
     CHUTES_TTS_MODELS,
     OPENROUTER_IMAGE_MODELS,
     NAVY_IMAGE_MODELS,
+    NAVY_CHAT_MODELS,
     NAVY_VIDEO_MODELS,
     NAVY_TTS_MODELS,
     IMAGE_ASPECTS,
@@ -22,6 +23,7 @@ import {
     TTS_VOICES,
     type Provider,
     type Mode,
+    type ChatProvider,
     type ModelOption,
 } from "@/lib/constants";
 import {
@@ -98,6 +100,8 @@ type StorageSnapshot = {
     persistent: boolean | null;
 };
 
+type ProviderKeys = Record<Provider, string>;
+
 const STORAGE_KEYS = {
     provider: "studio_provider",
     mode: "studio_mode",
@@ -115,9 +119,13 @@ const STORAGE_KEYS = {
     navyImageModels: "studio_navy_image_models",
     navyVideoModels: "studio_navy_video_models",
     navyTtsModels: "studio_navy_tts_models",
+    chatProvider: "studio_chat_provider",
     chutesChatModels: "studio_chutes_chat_models",
     chutesChatModel: "studio_chutes_chat_model",
     chutesToolImageModel: "studio_chutes_tool_image_model",
+    navyChatModels: "studio_navy_chat_models",
+    navyChatModel: "studio_navy_chat_model",
+    navyToolImageModel: "studio_navy_tool_image_model",
 };
 
 type StoredSettings = Partial<{
@@ -221,6 +229,9 @@ const getBoolean = (value: unknown, fallback: boolean) =>
 const isProvider = (value: unknown): value is Provider =>
     value === "gemini" || value === "navy" || value === "chutes" || value === "openrouter";
 
+const isChatProvider = (value: unknown): value is ChatProvider =>
+    value === "chutes" || value === "navy";
+
 const isMode = (value: unknown): value is Mode =>
     value === "image" || value === "video" || value === "tts";
 
@@ -278,6 +289,8 @@ interface StudioContextType {
     setMode: (m: Mode) => void;
     apiKey: string;
     setApiKey: (k: string) => void;
+    apiKeys: ProviderKeys;
+    setApiKeyForProvider: (provider: Provider, key: string) => void;
     model: string;
     setModel: (m: string) => void;
 
@@ -337,7 +350,8 @@ interface StudioContextType {
     setChutesTtsMaxDuration: (s: string) => void;
 
     // Chutes Chat Specifics
-    chutesChatKey: string;
+    chatProvider: ChatProvider;
+    setChatProvider: (p: ChatProvider) => void;
     chutesChatModels: ModelOption[];
     chutesChatModel: string;
     setChutesChatModel: (s: string) => void;
@@ -345,6 +359,13 @@ interface StudioContextType {
     setChutesToolImageModel: (s: string) => void;
     chutesChatModelsLoading: boolean;
     chutesChatModelsError: string | null;
+    navyChatModels: ModelOption[];
+    navyChatModel: string;
+    setNavyChatModel: (s: string) => void;
+    navyToolImageModel: string;
+    setNavyToolImageModel: (s: string) => void;
+    navyChatModelsLoading: boolean;
+    navyChatModelsError: string | null;
 
     // Data / Models
     openRouterImageModels: ModelOption[];
@@ -404,10 +425,12 @@ interface StudioContextType {
     clearGallery: () => void;
     refreshModels: () => Promise<void>;
     refreshChutesChatModels: () => Promise<void>;
+    refreshNavyChatModels: () => Promise<void>;
     saveChatImages: (payload: {
         images: { id: string; dataUrl: string; mimeType: string }[];
         prompt: string;
         model: string;
+        provider: Provider;
     }) => Promise<void>;
 
     // Logic
@@ -427,7 +450,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     // --- Core State ---
     const [provider, setProvider] = useState<Provider>("gemini");
     const [mode, setMode] = useState<Mode>("image");
-    const [apiKey, setApiKey] = useState("");
+    const [apiKeys, setApiKeys] = useState<ProviderKeys>({
+        gemini: "",
+        navy: "",
+        chutes: "",
+        openrouter: "",
+    });
+    const apiKey = apiKeys[provider] ?? "";
     const [model, setModel] = useState(DEFAULT_MODELS.gemini.image);
 
     // --- Dynamic Models ---
@@ -465,13 +494,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [ttsSpeed, setTtsSpeed] = useState("1");
     const [saveToGallery, setSaveToGallery] = useState(true);
 
-    // --- Chutes Chat Helper State ---
-    const [chutesChatKey, setChutesChatKey] = useState("");
+    // --- Chat Helper State ---
+    const [chatProvider, setChatProvider] = useState<ChatProvider>("chutes");
     const [chutesChatModels, setChutesChatModels] = useState<ModelOption[]>(CHUTES_LLM_MODELS);
     const [chutesChatModel, setChutesChatModel] = useState(CHUTES_LLM_MODELS[0]?.id ?? "");
     const [chutesToolImageModel, setChutesToolImageModel] = useState(CHUTES_IMAGE_MODELS[0]?.id ?? "z-image-turbo");
     const [chutesChatModelsLoading, setChutesChatModelsLoading] = useState(false);
     const [chutesChatModelsError, setChutesChatModelsError] = useState<string | null>(null);
+    const [navyChatModels, setNavyChatModels] = useState<ModelOption[]>(NAVY_CHAT_MODELS);
+    const [navyChatModel, setNavyChatModel] = useState(NAVY_CHAT_MODELS[0]?.id ?? "");
+    const [navyToolImageModel, setNavyToolImageModel] = useState(NAVY_IMAGE_MODELS[0]?.id ?? "flux.1-schnell");
+    const [navyChatModelsLoading, setNavyChatModelsLoading] = useState(false);
+    const [navyChatModelsError, setNavyChatModelsError] = useState<string | null>(null);
 
     // --- App Logic State ---
     const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
@@ -500,13 +534,23 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const galleryUrlsRef = useRef(new Map<string, string>());
     const navyUsageLoadingRef = useRef(false);
     const processingRef = useRef(false);
-    const skipApiKeyWriteRef = useRef(false);
     const lastProviderModeRef = useRef(`${provider}:${mode}`);
 
     // --- Computed ---
     const supportsVideo = provider === "gemini" || provider === "navy" || provider === "chutes";
     const supportsTts = provider === "navy" || provider === "chutes";
     const idbAvailable = useMemo(() => isIndexedDbAvailable(), []);
+
+    const setApiKeyForProvider = useCallback((target: Provider, key: string) => {
+        setApiKeys((prev) => ({ ...prev, [target]: key }));
+    }, []);
+
+    const setApiKey = useCallback(
+        (key: string) => {
+            setApiKeyForProvider(provider, key);
+        },
+        [provider, setApiKeyForProvider]
+    );
 
     const modelSuggestions = useMemo(() => {
         if (provider === "gemini") {
@@ -684,52 +728,176 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         startJob(job, "Generating Video...");
         try {
             console.log("Generating video with model:", job.model);
-            const url = "/api/chutes/video";
-            const body: Record<string, unknown> = {
-                apiKey: job.apiKey,
-                prompt: job.prompt,
-                model: job.model,
-                image: job.videoImage,
-                fps: job.chutesVideoFps,
-                guidance_scale_2: job.chutesVideoGuidanceScale
-            };
-
-            // If we add other providers, switch logic here
-
-            const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-            });
-
-            if (!response.ok) {
-                const err = await response.text();
-                throw new Error(err || "Failed to generate video");
-            }
-
-            const contentType = response.headers.get("content-type") ?? "";
             let videoUrl: string | null = null;
             let videoBlob: Blob | undefined;
             let videoMimeType: string | undefined;
 
-            if (contentType.includes("application/json")) {
+            if (job.provider === "chutes") {
+                const response = await fetch("/api/chutes/video", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: job.apiKey,
+                        prompt: job.prompt,
+                        model: job.model,
+                        image: job.videoImage,
+                        fps: job.chutesVideoFps,
+                        guidance_scale_2: job.chutesVideoGuidanceScale
+                    }),
+                });
+
+                if (!response.ok) {
+                    const err = await response.text();
+                    throw new Error(err || "Failed to generate video");
+                }
+
+                const contentType = response.headers.get("content-type") ?? "";
+                if (contentType.includes("application/json")) {
+                    const data = await response.json();
+                    if (data?.error) throw new Error(data.error);
+                    if (typeof data?.url === "string") {
+                        videoUrl = data.url;
+                    } else if (typeof data?.data === "string") {
+                        const mimeType =
+                            typeof data?.mimeType === "string"
+                                ? data.mimeType
+                                : "video/mp4";
+                        videoMimeType = mimeType;
+                        videoUrl = dataUrlFromBase64(data.data, mimeType);
+                    }
+                } else {
+                    const blob = await response.blob();
+                    videoBlob = blob;
+                    videoMimeType = blob.type || "video/mp4";
+                    videoUrl = URL.createObjectURL(blob);
+                }
+            } else if (job.provider === "navy") {
+                const response = await fetch("/api/navy/video", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: job.apiKey,
+                        model: job.model,
+                        prompt: job.prompt,
+                    }),
+                });
+
                 const data = await response.json();
-                if (data?.error) throw new Error(data.error);
-                if (typeof data?.url === "string") {
-                    videoUrl = data.url;
-                } else if (typeof data?.data === "string") {
-                    const mimeType =
-                        typeof data?.mimeType === "string"
-                            ? data.mimeType
-                            : "video/mp4";
-                    videoMimeType = mimeType;
-                    videoUrl = dataUrlFromBase64(data.data, mimeType);
+                if (!response.ok) {
+                    throw new Error(data?.error ?? "Failed to generate video");
+                }
+                if (!data?.id) {
+                    throw new Error("No job id returned by NavyAI.");
+                }
+
+                const jobId = data.id as string;
+                const maxAttempts = 120;
+                for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                    setStatusMessage(`Rendering (NavyAI)...`);
+                    const poll = await fetch(`/api/navy/video?id=${encodeURIComponent(jobId)}`, {
+                        headers: {
+                            "x-user-api-key": job.apiKey,
+                        },
+                    });
+                    const pollData = await poll.json();
+                    if (!poll.ok) {
+                        throw new Error(pollData?.error ?? "Unable to fetch video status");
+                    }
+                    if (!pollData.done) {
+                        await new Promise((resolve) => setTimeout(resolve, 2000));
+                        continue;
+                    }
+                    if (pollData.error) {
+                        throw new Error(pollData.error);
+                    }
+                    if (typeof pollData.videoUrl === "string") {
+                        videoUrl = pollData.videoUrl;
+                        break;
+                    }
+                }
+
+                if (videoUrl) {
+                    const downloadResponse = await fetch("/api/navy/video/download", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-user-api-key": job.apiKey,
+                        },
+                        body: JSON.stringify({ url: videoUrl }),
+                    });
+                    if (downloadResponse.ok) {
+                        const blob = await downloadResponse.blob();
+                        videoBlob = blob;
+                        videoMimeType = blob.type || "video/mp4";
+                        videoUrl = URL.createObjectURL(blob);
+                    }
+                }
+            } else if (job.provider === "gemini") {
+                const response = await fetch("/api/gemini/video", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: job.apiKey,
+                        prompt: job.prompt,
+                        model: job.model,
+                        aspectRatio: job.videoAspect,
+                        resolution: job.videoResolution,
+                        durationSeconds: job.videoDuration,
+                        negativePrompt: job.negativePrompt,
+                    }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error ?? "Failed to start video generation");
+                }
+                if (!data?.name) {
+                    throw new Error("No operation name returned by Gemini.");
+                }
+
+                const operationName = data.name as string;
+                const maxAttempts = 120;
+                for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                    setStatusMessage(`Rendering (Gemini)...`);
+                    const poll = await fetch(`/api/gemini/video?name=${encodeURIComponent(operationName)}`, {
+                        headers: {
+                            "x-user-api-key": job.apiKey,
+                        },
+                    });
+                    const pollData = await poll.json();
+                    if (!poll.ok) {
+                        throw new Error(pollData?.error ?? "Unable to fetch video status");
+                    }
+                    if (!pollData.done) {
+                        await new Promise((resolve) => setTimeout(resolve, 2000));
+                        continue;
+                    }
+                    if (pollData.error) {
+                        throw new Error(pollData.error);
+                    }
+                    if (typeof pollData.videoUri === "string") {
+                        const downloadResponse = await fetch("/api/gemini/video/download", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                                apiKey: job.apiKey,
+                                uri: pollData.videoUri,
+                            }),
+                        });
+                        if (!downloadResponse.ok) {
+                            const err = await downloadResponse.text();
+                            throw new Error(err || "Unable to download Gemini video");
+                        }
+                        const blob = await downloadResponse.blob();
+                        videoBlob = blob;
+                        videoMimeType = blob.type || "video/mp4";
+                        videoUrl = URL.createObjectURL(blob);
+                        break;
+                    }
                 }
             } else {
-                const blob = await response.blob();
-                videoBlob = blob;
-                videoMimeType = blob.type || "video/mp4";
-                videoUrl = URL.createObjectURL(blob);
+                throw new Error("Video generation not implemented for this provider");
             }
 
             if (!videoUrl) throw new Error("No video data received.");
@@ -766,7 +934,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         try {
             console.log("Generating audio with model:", job.model);
 
-            // Only chutes implemented for now
             if (job.provider === "chutes") {
                 const normalizedModel = (job.model || "").toLowerCase();
                 const isCsm = normalizedModel === "csm-1b";
@@ -831,10 +998,51 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 });
                 completeJob(job.id, { audioUrl: audioDataUrl, audioData: audioDataUrl.startsWith("data:") ? audioDataUrl : undefined }); // Store dataUrl in job for history
                 return;
-
-            } else {
-                throw new Error("Audio generation not implemented for this provider");
             }
+
+            if (job.provider === "navy") {
+                const response = await fetch("/api/navy/tts", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: job.apiKey,
+                        model: job.model,
+                        input: job.prompt,
+                        voice: job.ttsVoice,
+                        speed: Number(job.ttsSpeed) || undefined,
+                        responseFormat: job.ttsFormat,
+                    }),
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.error ?? "Failed to generate audio");
+                }
+                const audioData = data?.audio?.data;
+                const mimeType = data?.audio?.mimeType ?? "audio/mpeg";
+                if (typeof audioData !== "string" || !audioData.length) {
+                    throw new Error("No audio data received.");
+                }
+                const audioDataUrl = dataUrlFromBase64(audioData, mimeType);
+                setAudioUrl(audioDataUrl);
+                setAudioMimeType(mimeType);
+                const galleryEntries = await addMediaToGallery(
+                    [{ url: audioDataUrl, mimeType }],
+                    { prompt: job.prompt, model: job.model, provider: job.provider, saveToGallery: job.saveToGallery, kind: "audio" }
+                );
+                setLastOutput({
+                    mode: "tts",
+                    prompt: job.prompt,
+                    model: job.model,
+                    provider: job.provider,
+                    ttsVoice: job.ttsVoice,
+                    mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
+                });
+                completeJob(job.id, { audioUrl: audioDataUrl, audioData: audioDataUrl });
+                return;
+            }
+
+            throw new Error("Audio generation not implemented for this provider");
 
         } catch (error) {
             console.error("Audio generation error:", error);
@@ -872,8 +1080,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     };
 
     const clearKey = () => {
-        setApiKey("");
-        // will trigger local storage clear via effect
+        setApiKeyForProvider(provider, "");
     };
 
     const clearGallery = () => {
@@ -885,6 +1092,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         images: { id: string; dataUrl: string; mimeType: string }[];
         prompt: string;
         model: string;
+        provider: Provider;
     }) => {
         if (!payload.images.length) return;
         await addMediaToGallery(
@@ -895,7 +1103,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             {
                 prompt: payload.prompt,
                 model: payload.model,
-                provider: "chutes",
+                provider: payload.provider,
                 saveToGallery,
                 kind: "image",
             }
@@ -955,7 +1163,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setModelsLoading(true);
         setModelsError(null);
         try {
-            const response = await fetch(`/api/${provider}/models`);
+            const key = provider === "openrouter" ? apiKeys.openrouter : apiKeys.navy;
+            if (!key.trim()) {
+                throw new Error(`Missing ${provider === "openrouter" ? "OpenRouter" : "NavyAI"} API key.`);
+            }
+            const response = await fetch(`/api/${provider}/models`, {
+                headers: {
+                    "x-user-api-key": key,
+                },
+            });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload?.error ?? `Failed to fetch models from ${provider}`);
 
@@ -972,13 +1188,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         } finally {
             setModelsLoading(false);
         }
-    }, [provider]);
+    }, [provider, apiKeys.openrouter, apiKeys.navy]);
 
     const refreshChutesChatModels = useCallback(async () => {
         setChutesChatModelsLoading(true);
         setChutesChatModelsError(null);
         try {
-            const key = chutesChatKey.trim();
+            const key = apiKeys.chutes.trim();
             if (!key) {
                 throw new Error("Missing Chutes API key.");
             }
@@ -989,13 +1205,44 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch Chutes models");
-            setChutesChatModels(sanitizeModelOptions(payload));
+            const models = sanitizeModelOptions(payload);
+            if (models.length) setChutesChatModels(models);
         } catch (error) {
             setChutesChatModelsError(error instanceof Error ? error.message : "Error");
         } finally {
             setChutesChatModelsLoading(false);
         }
-    }, [chutesChatKey]);
+    }, [apiKeys.chutes]);
+
+    const refreshNavyChatModels = useCallback(async () => {
+        setNavyChatModelsLoading(true);
+        setNavyChatModelsError(null);
+        try {
+            const key = apiKeys.navy.trim();
+            if (!key) {
+                throw new Error("Missing NavyAI API key.");
+            }
+            const response = await fetch("/api/navy/models", {
+                headers: {
+                    "x-user-api-key": key,
+                },
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch NavyAI models");
+
+            const raw = Array.isArray(payload?.data)
+                ? payload.data
+                : Array.isArray(payload)
+                    ? payload
+                    : [];
+            const models = sanitizeModelOptions(raw);
+            if (models.length) setNavyChatModels(models);
+        } catch (error) {
+            setNavyChatModelsError(error instanceof Error ? error.message : "Error");
+        } finally {
+            setNavyChatModelsLoading(false);
+        }
+    }, [apiKeys.navy]);
 
     // --- Effects (Persistence) ---
 
@@ -1005,14 +1252,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
         const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
         const storedMedia = readLocalStorage<StoredMediaRecord[]>(STORAGE_KEYS.images, []);
-        const storedChutesKey = readLocalStorage<string>(STORAGE_KEYS.keyChutes, "");
+        const storedChatProvider = readLocalStorage<ChatProvider | null>(STORAGE_KEYS.chatProvider, null);
+        const storedKeys: ProviderKeys = {
+            gemini: readLocalStorage<string>(STORAGE_KEYS.keyGemini, ""),
+            navy: readLocalStorage<string>(STORAGE_KEYS.keyNavy, ""),
+            chutes: readLocalStorage<string>(STORAGE_KEYS.keyChutes, ""),
+            openrouter: readLocalStorage<string>(STORAGE_KEYS.keyOpenRouter, ""),
+        };
         const storedSettings = readLocalStorage<StoredSettings>(STORAGE_KEYS.settings, {});
         const storedGeneratedImages = readLocalStorage<GeneratedImage[]>(STORAGE_KEYS.generatedImages, []);
         const storedLastOutput = readLocalStorage<unknown>(STORAGE_KEYS.lastOutput, null);
 
         if (storedProvider) setProvider(storedProvider);
         if (storedMode) setMode(storedMode);
-        setChutesChatKey(storedChutesKey);
+        if (storedChatProvider && isChatProvider(storedChatProvider)) setChatProvider(storedChatProvider);
+        setApiKeys(storedKeys);
 
         const storedOpenRouterModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.openRouterModels, []);
         if (storedOpenRouterModels.length) setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
@@ -1029,6 +1283,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (storedChutesChatModel) setChutesChatModel(storedChutesChatModel);
         const storedToolImageModel = readLocalStorage<string>(STORAGE_KEYS.chutesToolImageModel, "");
         if (storedToolImageModel) setChutesToolImageModel(storedToolImageModel);
+        const storedNavyChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyChatModels, []);
+        if (storedNavyChatModels.length) setNavyChatModels(sanitizeModelOptions(storedNavyChatModels));
+        const storedNavyChatModel = readLocalStorage<string>(STORAGE_KEYS.navyChatModel, "");
+        if (storedNavyChatModel) setNavyChatModel(storedNavyChatModel);
+        const storedNavyToolImageModel = readLocalStorage<string>(STORAGE_KEYS.navyToolImageModel, "");
+        if (storedNavyToolImageModel) setNavyToolImageModel(storedNavyToolImageModel);
 
         if (isRecord(storedSettings)) {
             const storedPrompt = getString(storedSettings.prompt);
@@ -1176,28 +1436,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
-        const storedKey = readLocalStorage<string>(getKeyStorage(provider), "");
-        skipApiKeyWriteRef.current = true;
-        setApiKey(storedKey);
-    }, [provider, hydrated]);
+        (Object.entries(apiKeys) as [Provider, string][]).forEach(([entry, key]) => {
+            const storageKey = getKeyStorage(entry);
+            if (key) writeLocalStorage(storageKey, JSON.stringify(key));
+            else window.localStorage.removeItem(storageKey);
+        });
+    }, [apiKeys, hydrated]);
 
     useEffect(() => {
         if (!hydrated) return;
-        if (skipApiKeyWriteRef.current) {
-            skipApiKeyWriteRef.current = false;
-            return;
-        }
-        const storageKey = getKeyStorage(provider);
-        if (apiKey) writeLocalStorage(storageKey, JSON.stringify(apiKey));
-        else window.localStorage.removeItem(storageKey);
-    }, [apiKey, provider, hydrated]);
-
-    useEffect(() => {
-        if (!hydrated) return;
-        if (provider === "chutes") {
-            setChutesChatKey(apiKey);
-        }
-    }, [apiKey, provider, hydrated]);
+        writeLocalStorage(STORAGE_KEYS.chatProvider, JSON.stringify(chatProvider));
+    }, [chatProvider, hydrated]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -1356,6 +1605,25 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.navyChatModels, JSON.stringify(navyChatModels));
+    }, [navyChatModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (navyChatModel) {
+            writeLocalStorage(STORAGE_KEYS.navyChatModel, JSON.stringify(navyChatModel));
+        }
+    }, [navyChatModel, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        if (navyToolImageModel) {
+            writeLocalStorage(STORAGE_KEYS.navyToolImageModel, JSON.stringify(navyToolImageModel));
+        }
+    }, [navyToolImageModel, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
         if (provider === "navy" && apiKey.trim()) {
             void refreshNavyUsage();
             const interval = window.setInterval(() => void refreshNavyUsage(), 60000);
@@ -1423,6 +1691,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         provider, setProvider,
         mode, setMode,
         apiKey, setApiKey,
+        apiKeys, setApiKeyForProvider,
         model, setModel,
         prompt, setPrompt,
         negativePrompt, setNegativePrompt,
@@ -1446,12 +1715,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         ttsFormat, setTtsFormat,
         ttsSpeed, setTtsSpeed,
         saveToGallery, setSaveToGallery,
-        chutesChatKey,
+        chatProvider, setChatProvider,
         chutesChatModels,
         chutesChatModel, setChutesChatModel,
         chutesToolImageModel, setChutesToolImageModel,
         chutesChatModelsLoading,
         chutesChatModelsError,
+        navyChatModels,
+        navyChatModel, setNavyChatModel,
+        navyToolImageModel, setNavyToolImageModel,
+        navyChatModelsLoading,
+        navyChatModelsError,
         openRouterImageModels,
         navyImageModels,
         navyVideoModels,
@@ -1472,7 +1746,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         hasActiveJobs, runningJobs, queuedJobs, recentJobs,
         supportsVideo, supportsTts,
         clearKey, clearGallery,
-        refreshModels, refreshChutesChatModels,
+        refreshModels, refreshChutesChatModels, refreshNavyChatModels,
         saveChatImages,
         handleGenerate,
         generateImage: generateImages,

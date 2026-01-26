@@ -1,5 +1,6 @@
 export type Provider = "gemini" | "navy" | "chutes" | "openrouter";
 export type Mode = "image" | "video" | "tts";
+export type ChatProvider = "chutes" | "navy";
 export type ModelOption = {
     id: string;
     label: string;
@@ -54,6 +55,25 @@ export const NAVY_VIDEO_MODELS: ModelOption[] = [
     {
         id: "cogvideox-flash",
         label: "CogVideoX Flash",
+    },
+];
+
+export const NAVY_CHAT_MODELS: ModelOption[] = [
+    {
+        id: "gpt-4o",
+        label: "GPT-4o",
+    },
+    {
+        id: "gpt-5",
+        label: "GPT-5",
+    },
+    {
+        id: "o4-mini",
+        label: "O4 Mini",
+    },
+    {
+        id: "claude-sonnet-4.5",
+        label: "Claude Sonnet 4.5",
     },
 ];
 

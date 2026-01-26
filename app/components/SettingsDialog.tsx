@@ -14,25 +14,17 @@ import { Input } from "@/app/components/ui/input";
 import { Label } from "@/app/components/ui/label";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { Settings } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import { Provider } from "@/lib/constants";
 
 export function SettingsDialog() {
-    const { apiKey, setApiKey, provider, setProvider } = useStudio();
+    const { apiKeys, setApiKeyForProvider, provider, setProvider } = useStudio();
 
-    const [localProvider, setLocalProvider] = useState<Provider>(provider);
-    const [localKey, setLocalKey] = useState("");
     const [isOpen, setIsOpen] = useState(false);
 
-    useEffect(() => {
-        if (isOpen) {
-            setLocalProvider(provider);
-        }
-    }, [isOpen, provider]);
-
-    useEffect(() => {
-        setLocalKey(apiKey);
-    }, [apiKey]);
+    const handleKeyChange = (target: Provider) => (event: ChangeEvent<HTMLInputElement>) => {
+        setApiKeyForProvider(target, event.target.value);
+    };
 
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -58,13 +50,10 @@ export function SettingsDialog() {
                                 (entry) => (
                                     <Button
                                         key={entry}
-                                        variant={
-                                            localProvider === entry ? "default" : "outline"
-                                        }
+                                        variant={provider === entry ? "default" : "outline"}
                                         size="sm"
                                         onClick={() => {
                                             setProvider(entry);
-                                            setLocalProvider(entry);
                                         }}
                                         className="capitalize"
                                     >
@@ -75,19 +64,55 @@ export function SettingsDialog() {
                         </div>
                     </div>
                     <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="apiKey" className="text-right">
-                            API Key
+                        <Label htmlFor="apiKeyGemini" className="text-right">
+                            Gemini Key
                         </Label>
                         <Input
-                            id="apiKey"
+                            id="apiKeyGemini"
                             type="password"
-                            value={localKey}
-                            onChange={(event) => {
-                                setLocalKey(event.target.value);
-                                setApiKey(event.target.value);
-                            }}
+                            value={apiKeys.gemini}
+                            onChange={handleKeyChange("gemini")}
                             className="col-span-3 font-mono text-sm"
-                            placeholder="sk-..."
+                            placeholder="Gemini API key"
+                        />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="apiKeyNavy" className="text-right">
+                            NavyAI Key
+                        </Label>
+                        <Input
+                            id="apiKeyNavy"
+                            type="password"
+                            value={apiKeys.navy}
+                            onChange={handleKeyChange("navy")}
+                            className="col-span-3 font-mono text-sm"
+                            placeholder="NavyAI API key"
+                        />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="apiKeyOpenRouter" className="text-right">
+                            OpenRouter Key
+                        </Label>
+                        <Input
+                            id="apiKeyOpenRouter"
+                            type="password"
+                            value={apiKeys.openrouter}
+                            onChange={handleKeyChange("openrouter")}
+                            className="col-span-3 font-mono text-sm"
+                            placeholder="OpenRouter API key"
+                        />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="apiKeyChutes" className="text-right">
+                            Chutes Key
+                        </Label>
+                        <Input
+                            id="apiKeyChutes"
+                            type="password"
+                            value={apiKeys.chutes}
+                            onChange={handleKeyChange("chutes")}
+                            className="col-span-3 font-mono text-sm"
+                            placeholder="Chutes API key"
                         />
                     </div>
                 </div>

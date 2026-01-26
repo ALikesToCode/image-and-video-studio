@@ -12,8 +12,8 @@ import {
   SelectValue,
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
-import { type ModelOption } from "@/lib/constants";
-import { dataUrlFromBase64, cn } from "@/lib/utils";
+import { type ModelOption, type ChatProvider } from "@/lib/constants";
+import { dataUrlFromBase64, fetchAsDataUrl, cn } from "@/lib/utils";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "@/lib/chutes-prompts";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "./ui/avatar";
@@ -48,6 +48,8 @@ type ChatMessage = {
 
 type ChutesChatProps = {
   apiKey: string;
+  provider: ChatProvider;
+  setProvider: (value: ChatProvider) => void;
   models: ModelOption[];
   model: string;
   setModel: (value: string) => void;
@@ -65,7 +67,13 @@ type ChutesChatProps = {
   }) => Promise<void> | void;
 };
 
-const CHAT_STORAGE_KEY = "studio_chat_chutes_history";
+const NAVY_IMAGE_GUIDE_PROMPT = `# Prompt Guide for NavyAI Image Generation
+
+Use concise, vivid descriptions with clear subjects, styles, and lighting. Ask for missing details.
+Summarize the final prompt before generating, and prefer sizes like 1024x1024 unless specified.`;
+
+const getChatStorageKey = (provider: ChatProvider) =>
+  `studio_chat_${provider}_history`;
 const MAX_CHAT_MESSAGES = 120;
 
 const createId = () => {
@@ -188,6 +196,8 @@ function ThinkingBlock({ content }: { content: string }) {
 
 export function ChutesChat({
   apiKey,
+  provider,
+  setProvider,
   models,
   model,
   setModel,
@@ -205,6 +215,8 @@ export function ChutesChat({
   const [busy, setBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const storageKey = useMemo(() => getChatStorageKey(provider), [provider]);
+  const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
 
   useEffect(() => {
     let cancelled = false;
@@ -214,7 +226,7 @@ export function ChutesChat({
 
       if (isStudioStateAvailable()) {
         try {
-          const fromDb = await getStudioState<ChatMessage[]>(CHAT_STORAGE_KEY);
+          const fromDb = await getStudioState<ChatMessage[]>(storageKey);
           storedMessages = sanitizeChatMessages(fromDb);
         } catch {
           storedMessages = [];
@@ -223,25 +235,26 @@ export function ChutesChat({
 
       if (!storedMessages.length) {
         storedMessages = sanitizeChatMessages(
-          readLocalStorage<ChatMessage[]>(CHAT_STORAGE_KEY, [])
+          readLocalStorage<ChatMessage[]>(storageKey, [])
         );
       }
 
-      if (!cancelled && storedMessages.length) {
+      if (!cancelled) {
         setMessages(storedMessages);
       }
     };
 
+    setMessages([]);
     void loadMessages();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [storageKey]);
 
   useEffect(() => {
     if (messages.length <= MAX_CHAT_MESSAGES) return;
     setMessages((prev) => prev.slice(-MAX_CHAT_MESSAGES));
-  }, [messages]);
+  }, [messages, storageKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -249,14 +262,14 @@ export function ChutesChat({
     const persist = async () => {
       if (isStudioStateAvailable()) {
         try {
-          await putStudioState(CHAT_STORAGE_KEY, trimmed);
+          await putStudioState(storageKey, trimmed);
           return;
         } catch {
           // fall through to localStorage
         }
       }
       try {
-        writeLocalStorage(CHAT_STORAGE_KEY, JSON.stringify(trimmed));
+        writeLocalStorage(storageKey, JSON.stringify(trimmed));
       } catch {
         // ignore storage failures
       }
@@ -267,7 +280,7 @@ export function ChutesChat({
     }, 300);
 
     return () => window.clearTimeout(handle);
-  }, [messages]);
+  }, [messages, storageKey]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -276,8 +289,44 @@ export function ChutesChat({
     }
   }, [messages, busy]);
 
-  const toolSpec = useMemo(
-    () => [
+  const toolSpec = useMemo(() => {
+    if (provider === "navy") {
+      return [
+        {
+          type: "function",
+          function: {
+            name: "generate_image",
+            description:
+              "Generate an image. Use the default model unless the user asks for a specific one.",
+            parameters: {
+              type: "object",
+              properties: {
+                prompt: { type: "string", description: "Image description." },
+                model: { type: "string", description: "Image model id." },
+                size: {
+                  type: "string",
+                  description: "Image size like 1024x1024.",
+                },
+                quality: {
+                  type: "string",
+                  description: "DALL-E 3 quality: standard or hd.",
+                },
+                style: {
+                  type: "string",
+                  description: "DALL-E 3 style: vivid or natural.",
+                },
+                n: {
+                  type: "integer",
+                  description: "Number of images to generate.",
+                },
+              },
+              required: ["prompt"],
+            },
+          },
+        },
+      ];
+    }
+    return [
       {
         type: "function",
         function: {
@@ -310,18 +359,19 @@ export function ChutesChat({
           },
         },
       },
-    ],
-    []
-  );
+    ];
+  }, [provider]);
 
   const systemPrompt = useMemo(() => {
     const modelList = imageModels.map((item) => item.id).join(", ");
-    return `${CHUTES_IMAGE_GUIDE_PROMPT}
+    const promptGuide =
+      provider === "navy" ? NAVY_IMAGE_GUIDE_PROMPT : CHUTES_IMAGE_GUIDE_PROMPT;
+    return `${promptGuide}
 
 You are an image generation assistant. Use the guide above to help craft prompts, ask for missing details when needed, and summarize the final prompt before generating.
 
 You can call the generate_image tool. Default image model: ${toolImageModel}. Available image models: ${modelList}.`;
-  }, [toolImageModel, imageModels]);
+  }, [toolImageModel, imageModels, provider]);
 
   const toApiMessages = (items: ChatMessage[]) =>
     items.map((message) => {
@@ -345,7 +395,8 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
     items: ChatMessage[],
     onUpdate: (update: { content?: string; toolCalls?: ToolCall[]; role?: string }) => void
   ) => {
-    const response = await fetch("/api/chutes/chat", {
+    const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -468,54 +519,74 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
       typeof args.model === "string" && args.model.trim().length
         ? args.model.trim()
         : toolImageModel;
-    const response = await fetch("/api/chutes/image", {
+    const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
+    const body: Record<string, unknown> = {
+      apiKey,
+      model: modelOverride,
+      prompt,
+    };
+    if (provider === "navy") {
+      if (typeof args.size === "string") body.size = args.size;
+      if (typeof args.quality === "string") body.quality = args.quality;
+      if (typeof args.style === "string") body.style = args.style;
+      if (typeof args.n === "number") body.numberOfImages = args.n;
+    } else {
+      body.negativePrompt =
+        typeof args.negative_prompt === "string" ? args.negative_prompt : undefined;
+      body.guidanceScale =
+        typeof args.guidance_scale === "number" ? args.guidance_scale : undefined;
+      body.width = typeof args.width === "number" ? args.width : undefined;
+      body.height = typeof args.height === "number" ? args.height : undefined;
+      body.resolution =
+        typeof args.resolution === "string" ? args.resolution : undefined;
+      body.numInferenceSteps =
+        typeof args.num_inference_steps === "number"
+          ? args.num_inference_steps
+          : undefined;
+      body.seed = typeof args.seed === "number" ? args.seed : null;
+    }
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        apiKey,
-        model: modelOverride,
-        prompt,
-        negativePrompt:
-          typeof args.negative_prompt === "string" ? args.negative_prompt : undefined,
-        guidanceScale:
-          typeof args.guidance_scale === "number" ? args.guidance_scale : undefined,
-        width: typeof args.width === "number" ? args.width : undefined,
-        height: typeof args.height === "number" ? args.height : undefined,
-        resolution:
-          typeof args.resolution === "string" ? args.resolution : undefined,
-        numInferenceSteps:
-          typeof args.num_inference_steps === "number"
-            ? args.num_inference_steps
-            : undefined,
-        seed: typeof args.seed === "number" ? args.seed : null,
-      }),
+      body: JSON.stringify(body),
     });
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload?.error ?? "Image tool failed.");
     }
     const images = Array.isArray(payload?.images)
-      ? (payload.images as Array<{ data?: unknown; mimeType?: unknown }>)
+      ? (payload.images as Array<{ data?: unknown; mimeType?: unknown; url?: unknown }>)
       : [];
     if (!images.length) {
       throw new Error("No images returned by tool.");
     }
-    const parsedImages = images
-      .map((image) => {
-        const data = typeof image?.data === "string" ? image.data : "";
-        const mimeType =
-          typeof image?.mimeType === "string" ? image.mimeType : "image/png";
-        if (!data) return null;
-        return {
-          id: createId(),
-          dataUrl: dataUrlFromBase64(data, mimeType),
-          mimeType,
-        };
-      })
-      .filter(
-        (item): item is { id: string; dataUrl: string; mimeType: string } =>
-          !!item
-      );
+    const parsedImages = (
+      await Promise.all(
+        images.map(async (image) => {
+          const data = typeof image?.data === "string" ? image.data : "";
+          const mimeType =
+            typeof image?.mimeType === "string" ? image.mimeType : "image/png";
+          if (data) {
+            return {
+              id: createId(),
+              dataUrl: dataUrlFromBase64(data, mimeType),
+              mimeType,
+            };
+          }
+          if (typeof image?.url === "string") {
+            const dataUrl = await fetchAsDataUrl(image.url);
+            return {
+              id: createId(),
+              dataUrl,
+              mimeType,
+            };
+          }
+          return null;
+        })
+      )
+    ).filter(
+      (item): item is { id: string; dataUrl: string; mimeType: string } => !!item
+    );
     if (!parsedImages.length) {
       throw new Error("No usable images returned by tool.");
     }
@@ -586,7 +657,7 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
     const trimmed = input.trim();
     if (!trimmed || busy) return;
     if (!apiKey.trim()) {
-      setChatError("Add your Chutes API key in settings.");
+      setChatError(`Add your ${providerLabel} API key in settings.`);
       return;
     }
     if (!model) {
@@ -681,10 +752,10 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
     setMessages([]);
     setChatError(null);
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(CHAT_STORAGE_KEY);
+      window.localStorage.removeItem(storageKey);
     }
     if (isStudioStateAvailable()) {
-      void deleteStudioState(CHAT_STORAGE_KEY);
+      void deleteStudioState(storageKey);
     }
   };
 
@@ -702,7 +773,9 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
               <Bot className="h-6 w-6" />
             </motion.div>
             <div>
-              <h2 className="font-semibold text-lg leading-none">Chutes Agent</h2>
+              <h2 className="font-semibold text-lg leading-none">
+                {provider === "navy" ? "NavyAI Chat" : "Chutes Agent"}
+              </h2>
               <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                 Online
@@ -711,6 +784,16 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Select value={provider} onValueChange={(value) => setProvider(value as ChatProvider)}>
+              <SelectTrigger className="w-full sm:w-[140px] h-9 glass-card border-0 bg-secondary/50">
+                <SelectValue placeholder="Provider" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="chutes">Chutes</SelectItem>
+                <SelectItem value="navy">NavyAI</SelectItem>
+              </SelectContent>
+            </Select>
+
             <Select value={model} onValueChange={setModel}>
               <SelectTrigger className="w-full sm:w-[200px] h-9 glass-card border-0 bg-secondary/50">
                 <SelectValue placeholder="Select a model" />

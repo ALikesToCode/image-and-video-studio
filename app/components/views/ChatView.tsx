@@ -4,8 +4,9 @@ import { CHUTES_IMAGE_MODELS } from "@/lib/constants";
 
 export function ChatView() {
     const {
-        apiKey,
-        chutesChatKey,
+        apiKeys,
+        chatProvider,
+        setChatProvider,
         chutesChatModels,
         chutesChatModel,
         setChutesChatModel,
@@ -14,32 +15,50 @@ export function ChatView() {
         chutesChatModelsLoading,
         chutesChatModelsError,
         refreshChutesChatModels,
+        navyChatModels,
+        navyChatModel,
+        setNavyChatModel,
+        navyToolImageModel,
+        setNavyToolImageModel,
+        navyChatModelsLoading,
+        navyChatModelsError,
+        refreshNavyChatModels,
+        navyImageModels,
         saveChatImages,
         saveToGallery,
     } = useStudio();
 
-    const chatApiKey = chutesChatKey || apiKey;
-
-    // Use global key if set, assuming Chutes provider
-    // Ideally, we should check which provider is capable of chat or if Chat is always Chutes here?
-    // The user request said "full screen chat dashboard where you can chat and create image... using chat and agent".
-    // ChutesChat seems to be the agent component.
+    const isNavyChat = chatProvider === "navy";
+    const chatApiKey = isNavyChat ? apiKeys.navy : apiKeys.chutes;
+    const chatModels = isNavyChat ? navyChatModels : chutesChatModels;
+    const chatModel = isNavyChat ? navyChatModel : chutesChatModel;
+    const setChatModel = isNavyChat ? setNavyChatModel : setChutesChatModel;
+    const imageModels = isNavyChat ? navyImageModels : CHUTES_IMAGE_MODELS;
+    const toolImageModel = isNavyChat ? navyToolImageModel : chutesToolImageModel;
+    const setToolImageModel = isNavyChat ? setNavyToolImageModel : setChutesToolImageModel;
+    const modelsLoading = isNavyChat ? navyChatModelsLoading : chutesChatModelsLoading;
+    const modelsError = isNavyChat ? navyChatModelsError : chutesChatModelsError;
+    const onRefreshModels = isNavyChat ? refreshNavyChatModels : refreshChutesChatModels;
+    const handleSaveImages = (payload: { images: { id: string; dataUrl: string; mimeType: string }[]; prompt: string; model: string }) =>
+        saveChatImages({ ...payload, provider: chatProvider });
 
     return (
         <div className="h-full w-full flex flex-col">
             <ChutesChat
                 apiKey={chatApiKey}
-                models={chutesChatModels}
-                model={chutesChatModel}
-                setModel={setChutesChatModel}
-                imageModels={CHUTES_IMAGE_MODELS}
-                toolImageModel={chutesToolImageModel}
-                setToolImageModel={setChutesToolImageModel}
-                modelsLoading={chutesChatModelsLoading}
-                modelsError={chutesChatModelsError}
-                onRefreshModels={refreshChutesChatModels}
+                provider={chatProvider}
+                setProvider={setChatProvider}
+                models={chatModels}
+                model={chatModel}
+                setModel={setChatModel}
+                imageModels={imageModels}
+                toolImageModel={toolImageModel}
+                setToolImageModel={setToolImageModel}
+                modelsLoading={modelsLoading}
+                modelsError={modelsError}
+                onRefreshModels={onRefreshModels}
                 saveToGallery={saveToGallery}
-                onSaveImages={saveChatImages}
+                onSaveImages={handleSaveImages}
             />
         </div>
     );
