@@ -74,6 +74,8 @@ Summarize the final prompt before generating, and prefer sizes like 1024x1024 un
 
 const getChatStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_history`;
+const getSystemPromptStorageKey = (provider: ChatProvider) =>
+  `studio_chat_${provider}_system_prompt`;
 const MAX_CHAT_MESSAGES = 120;
 
 const createId = () => {
@@ -212,10 +214,16 @@ export function ChutesChat({
 }: ChutesChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [customSystemPrompt, setCustomSystemPrompt] = useState("");
+  const [systemPromptHydrated, setSystemPromptHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const storageKey = useMemo(() => getChatStorageKey(provider), [provider]);
+  const systemPromptStorageKey = useMemo(
+    () => getSystemPromptStorageKey(provider),
+    [provider]
+  );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
 
   useEffect(() => {
@@ -255,6 +263,83 @@ export function ChutesChat({
     if (messages.length <= MAX_CHAT_MESSAGES) return;
     setMessages((prev) => prev.slice(-MAX_CHAT_MESSAGES));
   }, [messages, storageKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSystemPrompt = async () => {
+      if (typeof window === "undefined") return;
+      let storedPrompt = "";
+
+      if (isStudioStateAvailable()) {
+        try {
+          const fromDb = await getStudioState<string>(systemPromptStorageKey);
+          if (typeof fromDb === "string") {
+            storedPrompt = fromDb;
+          }
+        } catch {
+          storedPrompt = "";
+        }
+      }
+
+      if (!storedPrompt) {
+        const fromStorage = readLocalStorage<string>(systemPromptStorageKey, "");
+        if (typeof fromStorage === "string") {
+          storedPrompt = fromStorage;
+        }
+      }
+
+      if (!cancelled) {
+        setCustomSystemPrompt(storedPrompt);
+        setSystemPromptHydrated(true);
+      }
+    };
+
+    setSystemPromptHydrated(false);
+    setCustomSystemPrompt("");
+    void loadSystemPrompt();
+    return () => {
+      cancelled = true;
+    };
+  }, [systemPromptStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!systemPromptHydrated) return;
+    const persist = async () => {
+      const hasValue = customSystemPrompt.trim().length > 0;
+
+      if (isStudioStateAvailable()) {
+        try {
+          if (hasValue) {
+            await putStudioState(systemPromptStorageKey, customSystemPrompt);
+          } else {
+            await deleteStudioState(systemPromptStorageKey);
+          }
+        } catch {
+          // fall through to localStorage
+        }
+      }
+
+      try {
+        if (hasValue) {
+          writeLocalStorage(
+            systemPromptStorageKey,
+            JSON.stringify(customSystemPrompt)
+          );
+        } else {
+          window.localStorage.removeItem(systemPromptStorageKey);
+        }
+      } catch {
+        // ignore storage failures
+      }
+    };
+
+    const handle = window.setTimeout(() => {
+      void persist();
+    }, 300);
+
+    return () => window.clearTimeout(handle);
+  }, [customSystemPrompt, systemPromptStorageKey, systemPromptHydrated]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -366,12 +451,17 @@ export function ChutesChat({
     const modelList = imageModels.map((item) => item.id).join(", ");
     const promptGuide =
       provider === "navy" ? NAVY_IMAGE_GUIDE_PROMPT : CHUTES_IMAGE_GUIDE_PROMPT;
-    return `${promptGuide}
+    const defaultPrompt = `${promptGuide}
 
 You are an image generation assistant. Use the guide above to help craft prompts, ask for missing details when needed, and summarize the final prompt before generating.
 
 You can call the generate_image tool. Default image model: ${toolImageModel}. Available image models: ${modelList}.`;
-  }, [toolImageModel, imageModels, provider]);
+    const customPrompt = customSystemPrompt.trim();
+    if (!customPrompt) return defaultPrompt;
+    return `${customPrompt}
+
+${defaultPrompt}`;
+  }, [toolImageModel, imageModels, provider, customSystemPrompt]);
 
   const toApiMessages = (items: ChatMessage[]) =>
     items.map((message) => {
@@ -759,6 +849,10 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
     }
   };
 
+  const clearSystemPrompt = () => {
+    setCustomSystemPrompt("");
+  };
+
   return (
     <div className="flex flex-col h-full bg-background/50 isolate">
       {/* Header */}
@@ -828,6 +922,31 @@ You can call the generate_image tool. Default image model: ${toolImageModel}. Av
             <p className="text-xs text-destructive">{modelsError}</p>
           </div>
         ) : null}
+        <div className="max-w-5xl mx-auto w-full pt-2">
+          <div className="glass-card border-0 bg-secondary/30 p-2.5">
+            <div className="flex items-center justify-between gap-2 pb-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                System Prompt (sent with every message)
+              </p>
+              {customSystemPrompt.trim() ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearSystemPrompt}
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                >
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+            <Textarea
+              value={customSystemPrompt}
+              onChange={(event) => setCustomSystemPrompt(event.target.value)}
+              placeholder="Optional: Add custom behavior/instructions for the assistant."
+              className="min-h-[76px] resize-y border-0 bg-background/70 text-xs focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+        </div>
       </header>
 
       {/* Messages Area */}
