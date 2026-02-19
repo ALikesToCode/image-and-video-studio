@@ -11,6 +11,7 @@ import {
   Sparkles,
   Image as ImageIcon,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   BrainCircuit,
   Video,
@@ -55,6 +56,7 @@ type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  thinking?: string;
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
@@ -100,6 +102,8 @@ const getToolVideoModelStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_tool_video_model`;
 const getToolAudioModelStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_tool_audio_model`;
+const getHeaderCollapsedStorageKey = (provider: ChatProvider) =>
+  `studio_chat_${provider}_header_collapsed`;
 const MAX_CHAT_MESSAGES = 120;
 
 const createId = () => {
@@ -125,6 +129,41 @@ const writeLocalStorage = (key: string, value: string) => {
   window.localStorage.setItem(key, value);
 };
 
+const extractTextFragment = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => extractTextFragment(item)).join("");
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return (
+      extractTextFragment(record.text) ||
+      extractTextFragment(record.content) ||
+      extractTextFragment(record.output_text) ||
+      ""
+    );
+  }
+  return "";
+};
+
+const extractReasoningFragment = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => extractReasoningFragment(item)).join("");
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return (
+      extractTextFragment(record.reasoning_text) ||
+      extractTextFragment(record.reasoning) ||
+      extractTextFragment(record.summary) ||
+      extractTextFragment(record.text) ||
+      ""
+    );
+  }
+  return "";
+};
+
 const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
   if (!Array.isArray(value)) return [];
   return value
@@ -138,6 +177,9 @@ const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
       if (role !== "user" && role !== "assistant" && role !== "tool") return null;
 
       const message: ChatMessage = { id, role, content };
+      if (typeof record.thinking === "string") {
+        message.thinking = record.thinking;
+      }
       if (typeof record.toolCallId === "string") message.toolCallId = record.toolCallId;
       if (typeof record.name === "string") message.name = record.name;
 
@@ -330,7 +372,12 @@ export function ChutesChat({
     () => getToolAudioModelStorageKey(provider),
     [provider]
   );
+  const headerCollapsedStorageKey = useMemo(
+    () => getHeaderCollapsedStorageKey(provider),
+    [provider]
+  );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
+  const [headerCollapsed, setHeaderCollapsed] = useState(true);
   const [toolVideoModel, setToolVideoModel] = useState(
     videoModels[0]?.id ?? ""
   );
@@ -532,6 +579,17 @@ export function ChutesChat({
       window.localStorage.removeItem(toolAudioModelStorageKey);
     }
   }, [toolAudioModel, toolAudioModelStorageKey, toolSettingsHydrated]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = readLocalStorage<boolean>(headerCollapsedStorageKey, true);
+    setHeaderCollapsed(typeof stored === "boolean" ? stored : true);
+  }, [headerCollapsedStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    writeLocalStorage(headerCollapsedStorageKey, JSON.stringify(headerCollapsed));
+  }, [headerCollapsed, headerCollapsedStorageKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -833,7 +891,7 @@ ${defaultPrompt}`;
 
   const callChatStreaming = async (
     items: ChatMessage[],
-    onUpdate: (update: { content?: string; toolCalls?: ToolCall[]; role?: string }) => void
+    onUpdate: (update: { content?: string; thinking?: string; toolCalls?: ToolCall[] }) => void
   ) => {
     const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
     const hasEnabledTools = toolSpec.length > 0;
@@ -867,11 +925,24 @@ ${defaultPrompt}`;
 
     // Accumulators
     let contentAcc = "";
+    let thinkingAcc = "";
     const toolCallsMap = new Map<
       number,
       { id?: string; type?: string; name?: string; args: string }
     >();
-    const buildToolCalls = () =>
+    const buildToolCallsForUpdates = () =>
+      Array.from(toolCallsMap.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([index, tc]) => ({
+          id: tc.id || `pending-tool-${index}`,
+          type: tc.type || "function",
+          function: {
+            name: tc.name || "",
+            arguments: tc.args || "",
+          },
+        }))
+        .filter((tc) => tc.function.name);
+    const buildExecutableToolCalls = () =>
       Array.from(toolCallsMap.entries())
         .sort(([a], [b]) => a - b)
         .map(([, tc]) => ({
@@ -892,31 +963,58 @@ ${defaultPrompt}`;
           const choice = json.choices?.[0];
           if (!choice) return;
 
-          const delta = choice.delta;
+          const delta =
+            choice.delta && typeof choice.delta === "object"
+              ? (choice.delta as Record<string, unknown>)
+              : {};
 
-          // Debugging aid
-          // console.log("delta", delta);
-
-          if (delta.content) {
-            contentAcc += delta.content;
+          const deltaContent = extractTextFragment(delta.content);
+          if (deltaContent) {
+            contentAcc += deltaContent;
             onUpdate({ content: contentAcc });
           }
 
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const index = typeof tc.index === "number" ? tc.index : 0;
+          const reasoningText =
+            extractReasoningFragment(delta.reasoning_content) ||
+            extractReasoningFragment(delta.reasoning);
+          if (reasoningText) {
+            thinkingAcc += reasoningText;
+            onUpdate({ thinking: thinkingAcc });
+          }
+
+          const rawToolCalls = Array.isArray(delta.tool_calls)
+            ? delta.tool_calls
+            : [];
+          if (rawToolCalls.length) {
+            for (const tc of rawToolCalls) {
+              if (!tc || typeof tc !== "object") continue;
+              const toolRecord = tc as Record<string, unknown>;
+              const fn =
+                toolRecord.function && typeof toolRecord.function === "object"
+                  ? (toolRecord.function as Record<string, unknown>)
+                  : {};
+              const index =
+                typeof toolRecord.index === "number" ? toolRecord.index : 0;
               if (!toolCallsMap.has(index)) {
                 toolCallsMap.set(index, { args: "" });
               }
               const current = toolCallsMap.get(index);
               if (!current) continue;
 
-              if (tc.id) current.id = tc.id;
-              if (tc.type) current.type = tc.type;
-              if (tc.function?.name) current.name = tc.function.name;
-              if (tc.function?.arguments) current.args += tc.function.arguments;
+              if (typeof toolRecord.id === "string" && toolRecord.id) {
+                current.id = toolRecord.id;
+              }
+              if (typeof toolRecord.type === "string" && toolRecord.type) {
+                current.type = toolRecord.type;
+              }
+              if (typeof fn.name === "string" && fn.name) {
+                current.name = fn.name;
+              }
+              if (typeof fn.arguments === "string" && fn.arguments) {
+                current.args += fn.arguments;
+              }
             }
-            const toolCalls = buildToolCalls();
+            const toolCalls = buildToolCallsForUpdates();
 
             if (toolCalls.length > 0) {
               onUpdate({ toolCalls });
@@ -932,8 +1030,9 @@ ${defaultPrompt}`;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        parser.feed(decoder.decode(value));
+        parser.feed(decoder.decode(value, { stream: true }));
       }
+      parser.feed(decoder.decode());
     } finally {
       reader.releaseLock();
     }
@@ -941,7 +1040,8 @@ ${defaultPrompt}`;
     // Final result return could be useful, but state is updated via callback
     return {
       content: contentAcc,
-      toolCalls: buildToolCalls(),
+      thinking: thinkingAcc,
+      toolCalls: buildExecutableToolCalls(),
     };
   };
 
@@ -1355,7 +1455,10 @@ ${defaultPrompt}`;
     return parsed as Record<string, unknown>;
   };
 
-  const handleToolCalls = async (toolCalls: ToolCall[]) => {
+  const handleToolCalls = async (
+    toolCalls: ToolCall[],
+    onProgress?: (message: ChatMessage) => void
+  ) => {
     const toolMessages: ChatMessage[] = [];
     for (const toolCall of toolCalls) {
       const toolName = toolCall.function?.name ?? "";
@@ -1390,6 +1493,16 @@ ${defaultPrompt}`;
       }
 
       try {
+        if (toolName) {
+          onProgress?.({
+            id: createId(),
+            role: "tool",
+            content: `Invoking ${toolName}...`,
+            toolCallId: toolCall.id,
+            name: toolName,
+          });
+        }
+
         if (toolName === "generate_image") {
           const result = await runGenerateImage(args);
           if (saveToGallery && onSaveImages) {
@@ -1419,7 +1532,7 @@ ${defaultPrompt}`;
           toolMessages.push({
             id: createId(),
             role: "tool",
-            content: `Generated 1 video using ${result.model}.`,
+            content: `Video generated using ${result.model}.`,
             toolCallId: toolCall.id,
             name: toolName,
             media: result.media,
@@ -1432,7 +1545,7 @@ ${defaultPrompt}`;
           toolMessages.push({
             id: createId(),
             role: "tool",
-            content: `Generated audio using ${result.model}.`,
+            content: `Audio generated using ${result.model}.`,
             toolCallId: toolCall.id,
             name: toolName,
             media: result.media,
@@ -1508,6 +1621,7 @@ ${defaultPrompt}`;
                 return {
                   ...msg,
                   content: update.content ?? msg.content,
+                  thinking: update.thinking ?? msg.thinking,
                   toolCalls: update.toolCalls ?? msg.toolCalls,
                 };
               }
@@ -1524,6 +1638,7 @@ ${defaultPrompt}`;
           id: assistantId,
           role: "assistant",
           content: finalResult.content,
+          thinking: finalResult.thinking || undefined,
           toolCalls: finalToolCalls.length ? finalToolCalls : undefined
         };
 
@@ -1535,7 +1650,10 @@ ${defaultPrompt}`;
         if (!finalToolCalls.length) break;
 
         // Run tools
-        const toolMessages = await handleToolCalls(finalToolCalls);
+        const toolMessages = await handleToolCalls(finalToolCalls, (progressMessage) => {
+          currentMessages = [...currentMessages, progressMessage];
+          setMessages(currentMessages);
+        });
         currentMessages = [...currentMessages, ...toolMessages];
         setMessages(currentMessages);
       }
@@ -1666,103 +1784,126 @@ ${defaultPrompt}`;
                 <Sparkles className={cn("h-4 w-4", modelsLoading && "animate-spin")} />
               </Button>
             )}
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setHeaderCollapsed((prev) => !prev)}
+              className="h-9 w-9"
+              title={headerCollapsed ? "Expand header controls" : "Collapse header controls"}
+            >
+              {headerCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </Button>
           </div>
         </div>
-        {modelsError ? (
-          <div className="max-w-5xl mx-auto w-full pt-2">
-            <p className="text-xs text-destructive">{modelsError}</p>
-          </div>
-        ) : null}
-        <div className="max-w-5xl mx-auto w-full pt-2">
-          <div className="glass-card border-0 bg-secondary/30 p-2.5">
-            <div className="flex items-center justify-between gap-2 pb-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                Generation Tools
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                Enable/disable tool invocation
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={toolSettings.image ? "secondary" : "ghost"}
-                onClick={() =>
-                  setToolSettings((prev) => ({ ...prev, image: !prev.image }))
-                }
-                className="h-8 gap-1.5"
-              >
-                {toolSettings.image ? (
-                  <ToggleRight className="h-4 w-4" />
-                ) : (
-                  <ToggleLeft className="h-4 w-4" />
-                )}
-                <ImageIcon className="h-3.5 w-3.5" />
-                Image
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={toolSettings.video ? "secondary" : "ghost"}
-                onClick={() =>
-                  setToolSettings((prev) => ({ ...prev, video: !prev.video }))
-                }
-                className="h-8 gap-1.5"
-              >
-                {toolSettings.video ? (
-                  <ToggleRight className="h-4 w-4" />
-                ) : (
-                  <ToggleLeft className="h-4 w-4" />
-                )}
-                <Video className="h-3.5 w-3.5" />
-                Video
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={toolSettings.audio ? "secondary" : "ghost"}
-                onClick={() =>
-                  setToolSettings((prev) => ({ ...prev, audio: !prev.audio }))
-                }
-                className="h-8 gap-1.5"
-              >
-                {toolSettings.audio ? (
-                  <ToggleRight className="h-4 w-4" />
-                ) : (
-                  <ToggleLeft className="h-4 w-4" />
-                )}
-                <AudioLines className="h-3.5 w-3.5" />
-                Audio
-              </Button>
-            </div>
-          </div>
-        </div>
-        <div className="max-w-5xl mx-auto w-full pt-2">
-          <div className="glass-card border-0 bg-secondary/30 p-2.5">
-            <div className="flex items-center justify-between gap-2 pb-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                System Prompt (sent with every message)
-              </p>
-              {customSystemPrompt.trim() ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearSystemPrompt}
-                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                >
-                  Clear
-                </Button>
+        <AnimatePresence initial={false}>
+          {!headerCollapsed ? (
+            <motion.div
+              key="header-controls"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              {modelsError ? (
+                <div className="max-w-5xl mx-auto w-full pt-2">
+                  <p className="text-xs text-destructive">{modelsError}</p>
+                </div>
               ) : null}
-            </div>
-            <Textarea
-              value={customSystemPrompt}
-              onChange={(event) => setCustomSystemPrompt(event.target.value)}
-              placeholder="Optional: Add custom behavior/instructions for the assistant."
-              className="min-h-[76px] resize-y border-0 bg-background/70 text-xs focus-visible:ring-1 focus-visible:ring-ring"
-            />
-          </div>
-        </div>
+              <div className="max-w-5xl mx-auto w-full pt-2">
+                <div className="glass-card border-0 bg-secondary/30 p-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Generation Tools
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Enable/disable tool invocation
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={toolSettings.image ? "secondary" : "ghost"}
+                      onClick={() =>
+                        setToolSettings((prev) => ({ ...prev, image: !prev.image }))
+                      }
+                      className="h-8 gap-1.5"
+                    >
+                      {toolSettings.image ? (
+                        <ToggleRight className="h-4 w-4" />
+                      ) : (
+                        <ToggleLeft className="h-4 w-4" />
+                      )}
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      Image
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={toolSettings.video ? "secondary" : "ghost"}
+                      onClick={() =>
+                        setToolSettings((prev) => ({ ...prev, video: !prev.video }))
+                      }
+                      className="h-8 gap-1.5"
+                    >
+                      {toolSettings.video ? (
+                        <ToggleRight className="h-4 w-4" />
+                      ) : (
+                        <ToggleLeft className="h-4 w-4" />
+                      )}
+                      <Video className="h-3.5 w-3.5" />
+                      Video
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={toolSettings.audio ? "secondary" : "ghost"}
+                      onClick={() =>
+                        setToolSettings((prev) => ({ ...prev, audio: !prev.audio }))
+                      }
+                      className="h-8 gap-1.5"
+                    >
+                      {toolSettings.audio ? (
+                        <ToggleRight className="h-4 w-4" />
+                      ) : (
+                        <ToggleLeft className="h-4 w-4" />
+                      )}
+                      <AudioLines className="h-3.5 w-3.5" />
+                      Audio
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="max-w-5xl mx-auto w-full pt-2">
+                <div className="glass-card border-0 bg-secondary/30 p-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      System Prompt (sent with every message)
+                    </p>
+                    {customSystemPrompt.trim() ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearSystemPrompt}
+                        className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      >
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                  <Textarea
+                    value={customSystemPrompt}
+                    onChange={(event) => setCustomSystemPrompt(event.target.value)}
+                    placeholder="Optional: Add custom behavior/instructions for the assistant."
+                    className="min-h-[76px] resize-y border-0 bg-background/70 text-xs focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                </div>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </header>
 
       {/* Messages Area */}
@@ -1802,20 +1943,25 @@ ${defaultPrompt}`;
                 if (
                   isTool &&
                   !mediaItems.length &&
-                  !message.content.toLowerCase().includes("error")
+                  !message.content.trim()
                 ) {
-                  // Collapse purely technical tool outputs unless they have images or errors
+                  // Hide empty tool messages only.
                   return null;
                 }
 
                 // Parse content for <think> blocks
-                let thoughtContent: string | null = null;
+                let thoughtContent: string | null =
+                  typeof message.thinking === "string" && message.thinking.trim()
+                    ? message.thinking
+                    : null;
                 let displayContent = message.content;
 
                 if (isAssistant) {
                   const thinkMatch = message.content.match(/<think>([\s\S]*?)<\/think>/);
                   if (thinkMatch) {
-                    thoughtContent = thinkMatch[1];
+                    thoughtContent = thoughtContent
+                      ? `${thoughtContent}\n${thinkMatch[1]}`
+                      : thinkMatch[1];
                     displayContent = message.content.replace(/<think>[\s\S]*?<\/think>/, "").trim();
                   }
                 }
@@ -1869,10 +2015,15 @@ ${defaultPrompt}`;
                               </ReactMarkdown>
                             </div>
                           )
-                        ) : message.toolCalls?.length ? (
+                        ) : isAssistant ? (
                           <div className="flex items-center gap-2 text-muted-foreground italic text-xs">
-                            <Sparkles className="h-3 w-3" />
-                            Generating content...
+                            <Sparkles className="h-3 w-3 animate-pulse" />
+                            {message.toolCalls?.length
+                              ? `Invoking ${message.toolCalls
+                                  .map((tc) => tc.function.name)
+                                  .filter(Boolean)
+                                  .join(", ")}...`
+                              : "Thinking..."}
                           </div>
                         ) : null}
 
