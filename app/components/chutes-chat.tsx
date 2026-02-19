@@ -18,6 +18,8 @@ import {
   AudioLines,
   ToggleLeft,
   ToggleRight,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import {
@@ -57,6 +59,7 @@ type ChatMessage = {
   role: "user" | "assistant" | "tool";
   content: string;
   thinking?: string;
+  promptUsed?: string;
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
@@ -92,6 +95,24 @@ const NAVY_IMAGE_GUIDE_PROMPT = `# Prompt Guide for NavyAI Image Generation
 Use concise, vivid descriptions with clear subjects, styles, and lighting. Ask for missing details.
 Summarize the final prompt before generating, and prefer sizes like 1024x1024 unless specified.`;
 
+const FLUX_CROSS_MODAL_GUIDE = `# Flux Cross-Modal Prompt Protocol
+
+When generating image prompts for Flux models, optimize for downstream video and audio:
+
+1. Keep one primary subject with stable identity details (face, outfit, props).
+2. Use a cinematic frame with clear foreground, midground, and background.
+3. Include an action-ready pose and a motion-friendly scene (good for later video animation).
+4. Specify camera + lens + composition (shot type, angle, depth of field).
+5. Specify lighting + color palette + atmosphere.
+6. Include emotional tone so voice/audio style can match.
+7. Add quality constraints: sharp focus, clean anatomy, clear silhouette, no text/logo/watermark.
+
+Output format before tool call:
+- Final Flux prompt
+- Optional negative prompt
+- One-line video readiness note
+- One-line audio mood note`;
+
 const getChatStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_history`;
 const getSystemPromptStorageKey = (provider: ChatProvider) =>
@@ -102,8 +123,6 @@ const getToolVideoModelStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_tool_video_model`;
 const getToolAudioModelStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_tool_audio_model`;
-const getHeaderCollapsedStorageKey = (provider: ChatProvider) =>
-  `studio_chat_${provider}_header_collapsed`;
 const MAX_CHAT_MESSAGES = 120;
 
 const createId = () => {
@@ -179,6 +198,9 @@ const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
       const message: ChatMessage = { id, role, content };
       if (typeof record.thinking === "string") {
         message.thinking = record.thinking;
+      }
+      if (typeof record.promptUsed === "string") {
+        message.promptUsed = record.promptUsed;
       }
       if (typeof record.toolCallId === "string") message.toolCallId = record.toolCallId;
       if (typeof record.name === "string") message.name = record.name;
@@ -354,6 +376,7 @@ export function ChutesChat({
   const [systemPromptHydrated, setSystemPromptHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [copiedPromptMessageId, setCopiedPromptMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const storageKey = useMemo(() => getChatStorageKey(provider), [provider]);
   const systemPromptStorageKey = useMemo(
@@ -370,10 +393,6 @@ export function ChutesChat({
   );
   const toolAudioModelStorageKey = useMemo(
     () => getToolAudioModelStorageKey(provider),
-    [provider]
-  );
-  const headerCollapsedStorageKey = useMemo(
-    () => getHeaderCollapsedStorageKey(provider),
     [provider]
   );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
@@ -579,17 +598,6 @@ export function ChutesChat({
       window.localStorage.removeItem(toolAudioModelStorageKey);
     }
   }, [toolAudioModel, toolAudioModelStorageKey, toolSettingsHydrated]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = readLocalStorage<boolean>(headerCollapsedStorageKey, true);
-    setHeaderCollapsed(typeof stored === "boolean" ? stored : true);
-  }, [headerCollapsedStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    writeLocalStorage(headerCollapsedStorageKey, JSON.stringify(headerCollapsed));
-  }, [headerCollapsed, headerCollapsedStorageKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -822,6 +830,7 @@ export function ChutesChat({
     const modelList = imageModels.map((item) => item.id).join(", ");
     const videoModelList = videoModels.map((item) => item.id).join(", ");
     const audioModelList = audioModels.map((item) => item.id).join(", ");
+    const fluxModelActive = /flux/i.test(toolImageModel);
     const promptGuide =
       provider === "navy" ? NAVY_IMAGE_GUIDE_PROMPT : CHUTES_IMAGE_GUIDE_PROMPT;
     const enabledToolLines: string[] = [];
@@ -849,9 +858,19 @@ export function ChutesChat({
         ? "For Chutes video generation, always ensure an image input is provided before calling generate_video."
         : "For Navy video generation, use generate_video for short clips and keep durations reasonable.";
 
+    const crossModalHint =
+      "When image generation is requested, optimize prompts so the output can also be used as a strong keyframe for video and as artwork aligned with narration/voice mood.";
+
+    const fluxHint = fluxModelActive
+      ? `Flux mode is active (default image model: ${toolImageModel}). Strictly follow the Flux Cross-Modal Prompt Protocol below.`
+      : "If the user asks for Flux or selects a Flux model, switch into Flux Cross-Modal Prompt Protocol.";
+
     const defaultPrompt = `${promptGuide}
+${FLUX_CROSS_MODAL_GUIDE}
 
 You are a generation assistant. Help craft prompts, ask for missing details when needed, and summarize the final prompt before calling a generation tool.
+${crossModalHint}
+${fluxHint}
 ${providerHint}
 ${toolInstruction}`;
     const customPrompt = customSystemPrompt.trim();
@@ -1455,6 +1474,20 @@ ${defaultPrompt}`;
     return parsed as Record<string, unknown>;
   };
 
+  const copyPromptText = async (messageId: string, promptText: string) => {
+    if (!promptText.trim()) return;
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setCopiedPromptMessageId(messageId);
+      window.setTimeout(
+        () => setCopiedPromptMessageId((prev) => (prev === messageId ? null : prev)),
+        1500
+      );
+    } catch {
+      // ignore clipboard failures
+    }
+  };
+
   const handleToolCalls = async (
     toolCalls: ToolCall[],
     onProgress?: (message: ChatMessage) => void
@@ -1477,6 +1510,8 @@ ${defaultPrompt}`;
         continue;
       }
 
+      const invocationPrompt = getStringArg(args, ["prompt", "input", "text"]);
+
       const disabledByUser =
         (toolName === "generate_image" && !toolSettings.image) ||
         (toolName === "generate_video" && !toolSettings.video) ||
@@ -1486,6 +1521,7 @@ ${defaultPrompt}`;
           id: createId(),
           role: "tool",
           content: `Tool error: ${toolName} is currently disabled.`,
+          promptUsed: invocationPrompt || undefined,
           toolCallId: toolCall.id,
           name: toolName || undefined,
         });
@@ -1498,6 +1534,7 @@ ${defaultPrompt}`;
             id: createId(),
             role: "tool",
             content: `Invoking ${toolName}...`,
+            promptUsed: invocationPrompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
           });
@@ -1516,6 +1553,7 @@ ${defaultPrompt}`;
             id: createId(),
             role: "tool",
             content: `Generated ${result.images.length} image(s) using ${result.model}.`,
+            promptUsed: result.prompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
             images: result.images,
@@ -1533,6 +1571,7 @@ ${defaultPrompt}`;
             id: createId(),
             role: "tool",
             content: `Video generated using ${result.model}.`,
+            promptUsed: result.prompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
             media: result.media,
@@ -1546,6 +1585,7 @@ ${defaultPrompt}`;
             id: createId(),
             role: "tool",
             content: `Audio generated using ${result.model}.`,
+            promptUsed: result.prompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
             media: result.media,
@@ -1557,6 +1597,7 @@ ${defaultPrompt}`;
           id: createId(),
           role: "tool",
           content: "Tool error: Unknown tool call.",
+          promptUsed: invocationPrompt || undefined,
           toolCallId: toolCall.id,
           name: toolName || undefined,
         });
@@ -1565,6 +1606,7 @@ ${defaultPrompt}`;
           id: createId(),
           role: "tool",
           content: `Tool error: ${error instanceof Error ? error.message : "Tool failed."}`,
+          promptUsed: invocationPrompt || undefined,
           toolCallId: toolCall.id,
           name: toolName || undefined,
         });
@@ -2024,6 +2066,38 @@ ${defaultPrompt}`;
                                   .filter(Boolean)
                                   .join(", ")}...`
                               : "Thinking..."}
+                          </div>
+                        ) : null}
+
+                        {isTool && message.promptUsed ? (
+                          <div className="mt-2 rounded-md border border-border/50 bg-background/50 p-2">
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                                Prompt Used
+                              </p>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void copyPromptText(message.id, message.promptUsed ?? "")}
+                                className="h-6 px-2 text-[10px]"
+                                disabled={!message.promptUsed?.trim()}
+                              >
+                                {copiedPromptMessageId === message.id ? (
+                                  <>
+                                    <Check className="mr-1 h-3 w-3" />
+                                    Copied
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="mr-1 h-3 w-3" />
+                                    Copy
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                            <p className="max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed">
+                              {message.promptUsed}
+                            </p>
                           </div>
                         ) : null}
 

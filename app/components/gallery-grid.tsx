@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { StoredMedia } from "@/lib/types";
-import { Download, Maximize2, Trash2, AudioLines, Video } from "lucide-react";
+import { Download, Maximize2, Trash2, AudioLines, Video, Copy, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { motion, AnimatePresence } from "framer-motion";
@@ -16,6 +16,20 @@ interface GalleryGridProps {
 
 export function GalleryGrid({ items, onClear }: GalleryGridProps) {
     const [activeItem, setActiveItem] = useState<StoredMedia | null>(null);
+    const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+
+    const resolveKind = (
+        kind: StoredMedia["kind"] | undefined,
+        mimeType?: string
+    ): StoredMedia["kind"] => {
+        if (kind === "image" || kind === "video" || kind === "audio") {
+            return kind;
+        }
+        const normalized = (mimeType ?? "").toLowerCase();
+        if (normalized.startsWith("video/")) return "video";
+        if (normalized.startsWith("audio/")) return "audio";
+        return "image";
+    };
 
     const extensionFromMime = (mimeType?: string, kind?: StoredMedia["kind"]) => {
         if (mimeType) {
@@ -48,6 +62,17 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
         document.body.removeChild(link);
     };
 
+    const handleCopyPrompt = async (item: StoredMedia) => {
+        if (!item.prompt?.trim()) return;
+        try {
+            await navigator.clipboard.writeText(item.prompt);
+            setCopiedPromptId(item.id);
+            window.setTimeout(() => setCopiedPromptId((prev) => (prev === item.id ? null : prev)), 1600);
+        } catch {
+            // ignore clipboard failures
+        }
+    };
+
     const closeViewer = (open: boolean) => {
         if (!open) {
             setActiveItem(null);
@@ -76,7 +101,7 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4">
                 <AnimatePresence mode="popLayout">
                     {items.map((item) => {
-                        const kind = item.kind ?? "image";
+                        const kind = resolveKind(item.kind, item.mimeType);
                         return (
                             <motion.div
                                 key={item.id}
@@ -128,16 +153,34 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
                                             </Button>
                                         </div>
                                     </div>
-                                    <div className="p-2 text-xs text-muted-foreground truncate bg-card border-t">
-                                        <span className="mr-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest">
-                                            {kind === "video" ? (
-                                                <Video className="h-3 w-3" />
-                                            ) : kind === "audio" ? (
-                                                <AudioLines className="h-3 w-3" />
-                                            ) : null}
-                                            {kind}
-                                        </span>
-                                        {item.prompt}
+                                    <div className="p-2 text-xs text-muted-foreground bg-card border-t">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="mr-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest">
+                                                {kind === "video" ? (
+                                                    <Video className="h-3 w-3" />
+                                                ) : kind === "audio" ? (
+                                                    <AudioLines className="h-3 w-3" />
+                                                ) : null}
+                                                {kind}
+                                            </span>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => void handleCopyPrompt(item)}
+                                                className="h-6 w-6"
+                                                title="Copy prompt"
+                                                disabled={!item.prompt?.trim()}
+                                            >
+                                                {copiedPromptId === item.id ? (
+                                                    <Check className="h-3.5 w-3.5" />
+                                                ) : (
+                                                    <Copy className="h-3.5 w-3.5" />
+                                                )}
+                                            </Button>
+                                        </div>
+                                        <p className="truncate">
+                                            {item.prompt}
+                                        </p>
                                     </div>
                                 </Card>
                             </motion.div>
@@ -152,7 +195,7 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
                 prompt={activeItem?.prompt ?? ""}
                 model={activeItem?.model ?? ""}
                 provider={activeItem?.provider ?? ""}
-                kind={activeItem?.kind}
+                kind={activeItem ? resolveKind(activeItem.kind, activeItem.mimeType) : undefined}
                 mimeType={activeItem?.mimeType ?? null}
             />
         </div>
