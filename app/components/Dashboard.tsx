@@ -94,7 +94,9 @@ export function Dashboard() {
             {/* Main Content */}
             <main className="flex-1 relative overflow-hidden bg-muted/10">
                 <div className="absolute inset-0 overflow-y-auto no-scrollbar p-0">
-                    {activeTab === "chat" && <ChatView />}
+                    <div className={cn("h-full", activeTab === "chat" ? "block" : "hidden")}>
+                        <ChatView />
+                    </div>
                     {activeTab === "image" && <ImageGenView />}
                     {activeTab === "video" && <VideoGenView />}
                     {activeTab === "audio" && <AudioGenView />}

@@ -124,6 +124,7 @@ const getToolVideoModelStorageKey = (provider: ChatProvider) =>
 const getToolAudioModelStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_tool_audio_model`;
 const MAX_CHAT_MESSAGES = 120;
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -378,6 +379,7 @@ export function ChutesChat({
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedPromptMessageId, setCopiedPromptMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const storageKey = useMemo(() => getChatStorageKey(provider), [provider]);
   const systemPromptStorageKey = useMemo(
     () => getSystemPromptStorageKey(provider),
@@ -625,11 +627,29 @@ export function ChutesChat({
     return () => window.clearTimeout(handle);
   }, [messages, storageKey]);
 
-  // Auto-scroll to bottom
+  // Track if user is near bottom; if they scroll up during streaming we stop forcing scroll.
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const element = scrollRef.current;
+    if (!element) return;
+
+    const updateAutoScroll = () => {
+      const distanceFromBottom =
+        element.scrollHeight - element.scrollTop - element.clientHeight;
+      shouldAutoScrollRef.current =
+        distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+    };
+
+    updateAutoScroll();
+    element.addEventListener("scroll", updateAutoScroll, { passive: true });
+    return () => element.removeEventListener("scroll", updateAutoScroll);
+  }, []);
+
+  // Auto-scroll only when user is already near bottom.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    if (!shouldAutoScrollRef.current) return;
+    element.scrollTop = element.scrollHeight;
   }, [messages, busy]);
 
   const toolSpec = useMemo(() => {
