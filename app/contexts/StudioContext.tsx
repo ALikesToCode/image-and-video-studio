@@ -554,26 +554,44 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     const refreshNavyCatalog = useCallback(async () => {
         const key = apiKeys.navy.trim();
-        if (!key) {
-            throw new Error("Missing NavyAI API key.");
-        }
         const response = await fetch("/api/navy/models", {
-            headers: {
-                "x-user-api-key": key,
-            },
+            headers: key
+                ? {
+                    "x-user-api-key": key,
+                }
+                : undefined,
         });
         const payload = await response.json();
         if (!response.ok) {
             throw new Error(payload?.error ?? "Failed to fetch NavyAI models");
         }
+        const rawModels = sanitizeModelOptions(payload?.data ?? []);
         const imageModels = sanitizeModelOptions(payload?.image ?? payload?.images ?? []);
         const videoModels = sanitizeModelOptions(payload?.video ?? payload?.videos ?? []);
         const audioModels = sanitizeModelOptions(payload?.audio ?? payload?.tts ?? []);
         const chatModels = sanitizeModelOptions(payload?.chat ?? payload?.llm ?? payload?.text ?? []);
-        setNavyImageModels(imageModels);
-        setNavyVideoModels(videoModels);
-        setNavyTtsModels(audioModels);
-        setNavyChatModels(chatModels);
+
+        const hasBucketedPayload =
+            imageModels.length > 0 ||
+            videoModels.length > 0 ||
+            audioModels.length > 0 ||
+            chatModels.length > 0;
+
+        if (hasBucketedPayload) {
+            setNavyImageModels(imageModels.length ? imageModels : NAVY_IMAGE_MODELS);
+            setNavyVideoModels(videoModels.length ? videoModels : NAVY_VIDEO_MODELS);
+            setNavyTtsModels(audioModels.length ? audioModels : NAVY_TTS_MODELS);
+            setNavyChatModels(chatModels.length ? chatModels : NAVY_CHAT_MODELS);
+            return;
+        }
+
+        // Fallback for unexpected unbucketed responses.
+        if (rawModels.length) {
+            setNavyChatModels(rawModels);
+            return;
+        }
+
+        throw new Error("No models returned by NavyAI.");
     }, [apiKeys.navy]);
 
     const modelSuggestions = useMemo(() => {

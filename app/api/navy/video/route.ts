@@ -4,6 +4,10 @@ type VideoRequest = {
   apiKey: string;
   model: string;
   prompt: string;
+  size?: string;
+  imageUrl?: string;
+  seconds?: number;
+  seed?: number;
 };
 
 export async function POST(req: Request) {
@@ -14,7 +18,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, prompt } = body;
+  const { apiKey, model, prompt, size, imageUrl, seconds, seed } = body;
   if (!apiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
@@ -29,6 +33,16 @@ export async function POST(req: Request) {
       model,
       prompt,
       sync: false,
+      ...(typeof size === "string" && size.trim().length
+        ? { size: size.trim() }
+        : {}),
+      ...(typeof imageUrl === "string" && imageUrl.trim().length
+        ? { image_url: imageUrl.trim() }
+        : {}),
+      ...(typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
+        ? { seconds }
+        : {}),
+      ...(typeof seed === "number" && Number.isFinite(seed) ? { seed } : {}),
     }),
   });
 
@@ -75,12 +89,30 @@ export async function GET(req: Request) {
     );
   }
 
-  if (data.status && data.status !== "completed") {
+  const status =
+    typeof data?.status === "string" ? data.status.toLowerCase() : null;
+  if (status && status !== "completed") {
+    if (status === "failed" || status === "error" || status === "cancelled" || status === "canceled") {
+      return Response.json(
+        {
+          done: true,
+          error:
+            data?.error?.message ??
+            data?.error ??
+            `Video generation ended with status: ${status}`,
+        },
+        { status: 502 }
+      );
+    }
     return Response.json({ done: false, status: data.status });
   }
 
   const result = data.result ?? data;
-  const url = result?.data?.[0]?.url;
+  const url =
+    result?.data?.[0]?.url ??
+    result?.output?.[0]?.url ??
+    result?.video?.url ??
+    null;
 
   if (!url) {
     return Response.json(

@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ChutesChat } from "../chutes-chat";
-import { CHUTES_IMAGE_MODELS } from "@/lib/constants";
+import { CHUTES_IMAGE_MODELS, CHUTES_TTS_MODELS, CHUTES_VIDEO_MODELS } from "@/lib/constants";
 
 export function ChatView() {
     const {
@@ -47,6 +47,8 @@ export function ChatView() {
     const chatModel = isNavyChat ? navyChatModel : chutesChatModel;
     const setChatModel = isNavyChat ? setNavyChatModel : setChutesChatModel;
     const imageModels = isNavyChat ? navyImageModels : CHUTES_IMAGE_MODELS;
+    const videoModels = isNavyChat ? navyVideoModels : CHUTES_VIDEO_MODELS;
+    const audioModels = isNavyChat ? navyTtsModels : CHUTES_TTS_MODELS;
     const toolImageModel = isNavyChat ? navyToolImageModel : chutesToolImageModel;
     const setToolImageModel = isNavyChat ? setNavyToolImageModel : setChutesToolImageModel;
     const modelsLoading = isNavyChat ? navyChatModelsLoading : chutesChatModelsLoading;
@@ -81,6 +83,8 @@ export function ChatView() {
                 model={chatModel}
                 setModel={setChatModel}
                 imageModels={imageModels}
+                videoModels={videoModels}
+                audioModels={audioModels}
                 toolImageModel={toolImageModel}
                 setToolImageModel={setToolImageModel}
                 modelsLoading={modelsLoading}

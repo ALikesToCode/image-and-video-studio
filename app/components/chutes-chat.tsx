@@ -2,7 +2,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Send, Trash2, Bot, User, Sparkles, Image as ImageIcon, ChevronDown, ChevronRight, BrainCircuit } from "lucide-react";
+import {
+  Loader2,
+  Send,
+  Trash2,
+  Bot,
+  User,
+  Sparkles,
+  Image as ImageIcon,
+  ChevronDown,
+  ChevronRight,
+  BrainCircuit,
+  Video,
+  AudioLines,
+  ToggleLeft,
+  ToggleRight,
+} from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import {
   Select,
@@ -44,6 +59,7 @@ type ChatMessage = {
   toolCallId?: string;
   name?: string;
   images?: { id: string; dataUrl: string; mimeType: string }[];
+  media?: { id: string; kind: "image" | "video" | "audio"; dataUrl: string; mimeType: string }[];
 };
 
 type ChutesChatProps = {
@@ -54,6 +70,8 @@ type ChutesChatProps = {
   model: string;
   setModel: (value: string) => void;
   imageModels: ModelOption[];
+  videoModels: ModelOption[];
+  audioModels: ModelOption[];
   toolImageModel: string;
   setToolImageModel: (value: string) => void;
   onRefreshModels?: () => void;
@@ -76,6 +94,12 @@ const getChatStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_history`;
 const getSystemPromptStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_system_prompt`;
+const getToolSettingsStorageKey = (provider: ChatProvider) =>
+  `studio_chat_${provider}_tool_settings`;
+const getToolVideoModelStorageKey = (provider: ChatProvider) =>
+  `studio_chat_${provider}_tool_video_model`;
+const getToolAudioModelStorageKey = (provider: ChatProvider) =>
+  `studio_chat_${provider}_tool_audio_model`;
 const MAX_CHAT_MESSAGES = 120;
 
 const createId = () => {
@@ -158,6 +182,50 @@ const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
         if (images.length) message.images = images;
       }
 
+      if (Array.isArray(record.media)) {
+        const media = record.media
+          .map((item) => {
+            if (!item || typeof item !== "object") return null;
+            const mediaRecord = item as Record<string, unknown>;
+            const mediaId = typeof mediaRecord.id === "string" ? mediaRecord.id : "";
+            const kind = mediaRecord.kind;
+            const dataUrl = typeof mediaRecord.dataUrl === "string" ? mediaRecord.dataUrl : "";
+            const mimeType = typeof mediaRecord.mimeType === "string" ? mediaRecord.mimeType : "";
+            if (!mediaId || !dataUrl) return null;
+            if (kind !== "image" && kind !== "video" && kind !== "audio") return null;
+            return {
+              id: mediaId,
+              kind,
+              dataUrl,
+              mimeType:
+                mimeType ||
+                (kind === "video"
+                  ? "video/mp4"
+                  : kind === "audio"
+                    ? "audio/mpeg"
+                    : "image/png"),
+            };
+          })
+          .filter(
+            (
+              entry
+            ): entry is {
+              id: string;
+              kind: "image" | "video" | "audio";
+              dataUrl: string;
+              mimeType: string;
+            } => !!entry
+          );
+        if (media.length) message.media = media;
+      } else if (message.images?.length) {
+        message.media = message.images.map((image) => ({
+          id: image.id,
+          kind: "image" as const,
+          dataUrl: image.dataUrl,
+          mimeType: image.mimeType,
+        }));
+      }
+
       return message;
     })
     .filter((entry): entry is ChatMessage => !!entry)
@@ -196,6 +264,30 @@ function ThinkingBlock({ content }: { content: string }) {
   );
 }
 
+type ToolSettings = {
+  image: boolean;
+  video: boolean;
+  audio: boolean;
+};
+
+const DEFAULT_TOOL_SETTINGS: ToolSettings = {
+  image: true,
+  video: true,
+  audio: true,
+};
+
+const sanitizeToolSettings = (value: unknown): ToolSettings => {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_TOOL_SETTINGS };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    image: typeof record.image === "boolean" ? record.image : DEFAULT_TOOL_SETTINGS.image,
+    video: typeof record.video === "boolean" ? record.video : DEFAULT_TOOL_SETTINGS.video,
+    audio: typeof record.audio === "boolean" ? record.audio : DEFAULT_TOOL_SETTINGS.audio,
+  };
+};
+
 export function ChutesChat({
   apiKey,
   provider,
@@ -204,6 +296,8 @@ export function ChutesChat({
   model,
   setModel,
   imageModels,
+  videoModels,
+  audioModels,
   toolImageModel,
   setToolImageModel,
   onRefreshModels,
@@ -224,7 +318,29 @@ export function ChutesChat({
     () => getSystemPromptStorageKey(provider),
     [provider]
   );
+  const toolSettingsStorageKey = useMemo(
+    () => getToolSettingsStorageKey(provider),
+    [provider]
+  );
+  const toolVideoModelStorageKey = useMemo(
+    () => getToolVideoModelStorageKey(provider),
+    [provider]
+  );
+  const toolAudioModelStorageKey = useMemo(
+    () => getToolAudioModelStorageKey(provider),
+    [provider]
+  );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
+  const [toolVideoModel, setToolVideoModel] = useState(
+    videoModels[0]?.id ?? ""
+  );
+  const [toolAudioModel, setToolAudioModel] = useState(
+    audioModels[0]?.id ?? ""
+  );
+  const [toolSettings, setToolSettings] = useState<ToolSettings>({
+    ...DEFAULT_TOOL_SETTINGS,
+  });
+  const [toolSettingsHydrated, setToolSettingsHydrated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -343,6 +459,82 @@ export function ChutesChat({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const nextToolSettings = sanitizeToolSettings(
+      readLocalStorage<unknown>(toolSettingsStorageKey, DEFAULT_TOOL_SETTINGS)
+    );
+    const storedToolVideoModel = readLocalStorage<string>(
+      toolVideoModelStorageKey,
+      ""
+    );
+    const storedToolAudioModel = readLocalStorage<string>(
+      toolAudioModelStorageKey,
+      ""
+    );
+
+    const fallbackVideoModel = videoModels[0]?.id ?? "";
+    const fallbackAudioModel = audioModels[0]?.id ?? "";
+    const hasStoredVideoModel = videoModels.some(
+      (entry) => entry.id === storedToolVideoModel
+    );
+    const hasStoredAudioModel = audioModels.some(
+      (entry) => entry.id === storedToolAudioModel
+    );
+
+    setToolSettings(nextToolSettings);
+    setToolVideoModel(hasStoredVideoModel ? storedToolVideoModel : fallbackVideoModel);
+    setToolAudioModel(hasStoredAudioModel ? storedToolAudioModel : fallbackAudioModel);
+    setToolSettingsHydrated(true);
+  }, [
+    provider,
+    toolSettingsStorageKey,
+    toolVideoModelStorageKey,
+    toolAudioModelStorageKey,
+    videoModels,
+    audioModels,
+  ]);
+
+  useEffect(() => {
+    if (!videoModels.length) return;
+    if (!videoModels.some((entry) => entry.id === toolVideoModel)) {
+      setToolVideoModel(videoModels[0].id);
+    }
+  }, [videoModels, toolVideoModel]);
+
+  useEffect(() => {
+    if (!audioModels.length) return;
+    if (!audioModels.some((entry) => entry.id === toolAudioModel)) {
+      setToolAudioModel(audioModels[0].id);
+    }
+  }, [audioModels, toolAudioModel]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!toolSettingsHydrated) return;
+    writeLocalStorage(toolSettingsStorageKey, JSON.stringify(toolSettings));
+  }, [toolSettings, toolSettingsStorageKey, toolSettingsHydrated]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!toolSettingsHydrated) return;
+    if (toolVideoModel) {
+      writeLocalStorage(toolVideoModelStorageKey, JSON.stringify(toolVideoModel));
+    } else {
+      window.localStorage.removeItem(toolVideoModelStorageKey);
+    }
+  }, [toolVideoModel, toolVideoModelStorageKey, toolSettingsHydrated]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!toolSettingsHydrated) return;
+    if (toolAudioModel) {
+      writeLocalStorage(toolAudioModelStorageKey, JSON.stringify(toolAudioModel));
+    } else {
+      window.localStorage.removeItem(toolAudioModelStorageKey);
+    }
+  }, [toolAudioModel, toolAudioModelStorageKey, toolSettingsHydrated]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const trimmed = messages.slice(-MAX_CHAT_MESSAGES);
     const persist = async () => {
       if (isStudioStateAvailable()) {
@@ -375,93 +567,251 @@ export function ChutesChat({
   }, [messages, busy]);
 
   const toolSpec = useMemo(() => {
-    if (provider === "navy") {
-      return [
-        {
-          type: "function",
-          function: {
-            name: "generate_image",
-            description:
-              "Generate an image. Use the default model unless the user asks for a specific one.",
-            parameters: {
-              type: "object",
-              properties: {
-                prompt: { type: "string", description: "Image description." },
-                model: { type: "string", description: "Image model id." },
-                size: {
-                  type: "string",
-                  description: "Image size like 1024x1024.",
-                },
-                quality: {
-                  type: "string",
-                  description: "DALL-E 3 quality: standard or hd.",
-                },
-                style: {
-                  type: "string",
-                  description: "DALL-E 3 style: vivid or natural.",
-                },
-                n: {
-                  type: "integer",
-                  description: "Number of images to generate.",
+    const specs: Array<Record<string, unknown>> = [];
+
+    if (toolSettings.image) {
+      specs.push(
+        provider === "navy"
+          ? {
+              type: "function",
+              function: {
+                name: "generate_image",
+                description:
+                  "Generate an image. Use the default model unless the user asks for a specific one.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    prompt: { type: "string", description: "Image description." },
+                    model: { type: "string", description: "Image model id." },
+                    size: {
+                      type: "string",
+                      description: "Image size like 1024x1024.",
+                    },
+                    quality: {
+                      type: "string",
+                      description: "DALL-E 3 quality: standard or hd.",
+                    },
+                    style: {
+                      type: "string",
+                      description: "DALL-E 3 style: vivid or natural.",
+                    },
+                    n: {
+                      type: "integer",
+                      description: "Number of images to generate.",
+                    },
+                  },
+                  required: ["prompt"],
                 },
               },
-              required: ["prompt"],
-            },
-          },
-        },
-      ];
+            }
+          : {
+              type: "function",
+              function: {
+                name: "generate_image",
+                description:
+                  "Generate an image. Use the default model unless the user asks for a specific one.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    prompt: { type: "string", description: "Image description." },
+                    model: { type: "string", description: "Image model id." },
+                    negative_prompt: {
+                      type: "string",
+                      description: "What to avoid in the image.",
+                    },
+                    guidance_scale: { type: "number", description: "CFG guidance." },
+                    width: { type: "number", description: "Width in pixels." },
+                    height: { type: "number", description: "Height in pixels." },
+                    resolution: {
+                      type: "string",
+                      description: "Resolution like 1024x1024 (HiDream).",
+                    },
+                    num_inference_steps: {
+                      type: "number",
+                      description: "Diffusion steps.",
+                    },
+                    seed: { type: "integer", description: "Seed (optional)." },
+                  },
+                  required: ["prompt"],
+                },
+              },
+            }
+      );
     }
-    return [
-      {
-        type: "function",
-        function: {
-          name: "generate_image",
-          description:
-            "Generate an image. Use the default model unless the user asks for a specific one.",
-          parameters: {
-            type: "object",
-            properties: {
-              prompt: { type: "string", description: "Image description." },
-              model: { type: "string", description: "Image model id." },
-              negative_prompt: {
-                type: "string",
-                description: "What to avoid in the image.",
+
+    if (toolSettings.video) {
+      specs.push(
+        provider === "navy"
+          ? {
+              type: "function",
+              function: {
+                name: "generate_video",
+                description:
+                  "Generate a short video. Use the default video model unless the user asks for a specific one.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    prompt: { type: "string", description: "Video description." },
+                    model: { type: "string", description: "Video model id." },
+                    size: {
+                      type: "string",
+                      description: "Output size or aspect ratio such as 16:9.",
+                    },
+                    seconds: {
+                      type: "number",
+                      description: "Video duration in seconds (if supported).",
+                    },
+                    image_url: {
+                      type: "string",
+                      description:
+                        "Optional start frame as URL or data URI when supported.",
+                    },
+                    seed: {
+                      type: "integer",
+                      description: "Optional seed for reproducibility.",
+                    },
+                  },
+                  required: ["prompt"],
+                },
               },
-              guidance_scale: { type: "number", description: "CFG guidance." },
-              width: { type: "number", description: "Width in pixels." },
-              height: { type: "number", description: "Height in pixels." },
-              resolution: {
-                type: "string",
-                description: "Resolution like 1024x1024 (HiDream).",
+            }
+          : {
+              type: "function",
+              function: {
+                name: "generate_video",
+                description:
+                  "Generate a video from an input image using Chutes i2v. Requires an image URL or data URI.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    prompt: { type: "string", description: "Video description." },
+                    model: { type: "string", description: "Video model id." },
+                    image: {
+                      type: "string",
+                      description:
+                        "Source image as URL or data URI. Required for Chutes video.",
+                    },
+                    fps: {
+                      type: "number",
+                      description: "Frames per second.",
+                    },
+                    guidance_scale_2: {
+                      type: "number",
+                      description: "Secondary guidance scale.",
+                    },
+                  },
+                  required: ["prompt", "image"],
+                },
               },
-              num_inference_steps: {
-                type: "number",
-                description: "Diffusion steps.",
+            }
+      );
+    }
+
+    if (toolSettings.audio) {
+      specs.push(
+        provider === "navy"
+          ? {
+              type: "function",
+              function: {
+                name: "generate_audio",
+                description:
+                  "Generate speech audio from text. Use the default TTS model unless the user asks for a specific one.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    input: { type: "string", description: "Text to synthesize." },
+                    model: { type: "string", description: "TTS model id." },
+                    voice: { type: "string", description: "Voice preset." },
+                    speed: { type: "number", description: "Playback speed." },
+                    response_format: {
+                      type: "string",
+                      description: "Audio format: mp3, opus, aac, flac.",
+                    },
+                  },
+                  required: ["input"],
+                },
               },
-              seed: { type: "integer", description: "Seed (optional)." },
-            },
-            required: ["prompt"],
-          },
-        },
-      },
-    ];
-  }, [provider]);
+            }
+          : {
+              type: "function",
+              function: {
+                name: "generate_audio",
+                description:
+                  "Generate speech audio from text with Chutes voice models.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string", description: "Text to synthesize." },
+                    model: { type: "string", description: "Audio model id." },
+                    speed: { type: "number", description: "Playback speed." },
+                    speaker: { type: "integer", description: "Speaker id (CSM-1B)." },
+                    max_duration_ms: {
+                      type: "integer",
+                      description: "Maximum duration in milliseconds (CSM-1B).",
+                    },
+                  },
+                  required: ["text"],
+                },
+              },
+            }
+      );
+    }
+
+    return specs;
+  }, [provider, toolSettings]);
 
   const systemPrompt = useMemo(() => {
     const modelList = imageModels.map((item) => item.id).join(", ");
+    const videoModelList = videoModels.map((item) => item.id).join(", ");
+    const audioModelList = audioModels.map((item) => item.id).join(", ");
     const promptGuide =
       provider === "navy" ? NAVY_IMAGE_GUIDE_PROMPT : CHUTES_IMAGE_GUIDE_PROMPT;
+    const enabledToolLines: string[] = [];
+    if (toolSettings.image) {
+      enabledToolLines.push(
+        `- generate_image (default model: ${toolImageModel}; available image models: ${modelList})`
+      );
+    }
+    if (toolSettings.video) {
+      enabledToolLines.push(
+        `- generate_video (default model: ${toolVideoModel}; available video models: ${videoModelList})`
+      );
+    }
+    if (toolSettings.audio) {
+      enabledToolLines.push(
+        `- generate_audio (default model: ${toolAudioModel}; available audio models: ${audioModelList})`
+      );
+    }
+    const toolInstruction = enabledToolLines.length
+      ? `You can call these tools when appropriate:\n${enabledToolLines.join("\n")}`
+      : "No tools are enabled right now. Help the user with planning/prompts only.";
+
+    const providerHint =
+      provider === "chutes"
+        ? "For Chutes video generation, always ensure an image input is provided before calling generate_video."
+        : "For Navy video generation, use generate_video for short clips and keep durations reasonable.";
+
     const defaultPrompt = `${promptGuide}
 
-You are an image generation assistant. Use the guide above to help craft prompts, ask for missing details when needed, and summarize the final prompt before generating.
-
-You can call the generate_image tool. Default image model: ${toolImageModel}. Available image models: ${modelList}.`;
+You are a generation assistant. Help craft prompts, ask for missing details when needed, and summarize the final prompt before calling a generation tool.
+${providerHint}
+${toolInstruction}`;
     const customPrompt = customSystemPrompt.trim();
     if (!customPrompt) return defaultPrompt;
     return `${customPrompt}
 
 ${defaultPrompt}`;
-  }, [toolImageModel, imageModels, provider, customSystemPrompt]);
+  }, [
+    toolImageModel,
+    toolVideoModel,
+    toolAudioModel,
+    imageModels,
+    videoModels,
+    audioModels,
+    toolSettings,
+    provider,
+    customSystemPrompt,
+  ]);
 
   const toApiMessages = (items: ChatMessage[]) =>
     items.map((message) => {
@@ -486,6 +836,7 @@ ${defaultPrompt}`;
     onUpdate: (update: { content?: string; toolCalls?: ToolCall[]; role?: string }) => void
   ) => {
     const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
+    const hasEnabledTools = toolSpec.length > 0;
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -496,8 +847,7 @@ ${defaultPrompt}`;
           { role: "system", content: systemPrompt },
           ...toApiMessages(items),
         ],
-        tools: toolSpec,
-        toolChoice: "auto",
+        ...(hasEnabledTools ? { tools: toolSpec, toolChoice: "auto" } : { toolChoice: "none" }),
         maxTokens: 1024,
         temperature: 0.7,
       }),
@@ -517,9 +867,22 @@ ${defaultPrompt}`;
 
     // Accumulators
     let contentAcc = "";
-    // Tool calls are tricky because they come as deltas to specific indices
-    // We'll maintain a map or array of tool calls being built
-    const toolCallsMap: Record<number, { id?: string; type?: string; name?: string; args?: string }> = {};
+    const toolCallsMap = new Map<
+      number,
+      { id?: string; type?: string; name?: string; args: string }
+    >();
+    const buildToolCalls = () =>
+      Array.from(toolCallsMap.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, tc]) => ({
+          id: tc.id || "",
+          type: tc.type || "function",
+          function: {
+            name: tc.name || "",
+            arguments: tc.args || "",
+          },
+        }))
+        .filter((tc) => tc.function.name && tc.id);
 
     const parser = createParser({
       onEvent: (event: EventSourceMessage) => {
@@ -541,27 +904,19 @@ ${defaultPrompt}`;
 
           if (delta.tool_calls) {
             for (const tc of delta.tool_calls) {
-              const index = tc.index;
-              if (!toolCallsMap[index]) {
-                toolCallsMap[index] = { args: "" };
+              const index = typeof tc.index === "number" ? tc.index : 0;
+              if (!toolCallsMap.has(index)) {
+                toolCallsMap.set(index, { args: "" });
               }
-              const current = toolCallsMap[index];
+              const current = toolCallsMap.get(index);
+              if (!current) continue;
 
               if (tc.id) current.id = tc.id;
               if (tc.type) current.type = tc.type;
               if (tc.function?.name) current.name = tc.function.name;
               if (tc.function?.arguments) current.args += tc.function.arguments;
             }
-
-            // Reconstruct full tool calls array
-            const toolCalls: ToolCall[] = Object.values(toolCallsMap).map((tc) => ({
-              id: tc.id || "",
-              type: tc.type || "function",
-              function: {
-                name: tc.name || "",
-                arguments: tc.args || "",
-              }
-            })).filter(tc => tc.function.name && tc.id); // Only partial filter, might be incomplete
+            const toolCalls = buildToolCalls();
 
             if (toolCalls.length > 0) {
               onUpdate({ toolCalls });
@@ -586,29 +941,53 @@ ${defaultPrompt}`;
     // Final result return could be useful, but state is updated via callback
     return {
       content: contentAcc,
-      toolCalls: Object.values(toolCallsMap).map((tc) => ({
-        id: tc.id || "",
-        type: tc.type || "function",
-        function: {
-          name: tc.name || "",
-          arguments: tc.args || "",
-        }
-      }))
+      toolCalls: buildToolCalls(),
     };
   };
+
+  const getStringArg = (args: Record<string, unknown>, keys: string[]) => {
+    for (const key of keys) {
+      const value = args[key];
+      if (typeof value === "string" && value.trim().length) {
+        return value.trim();
+      }
+    }
+    return "";
+  };
+
+  const getNumberArg = (args: Record<string, unknown>, keys: string[]) => {
+    for (const key of keys) {
+      const value = args[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+      if (typeof value === "string" && value.trim().length) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+    }
+    return null;
+  };
+
+  const blobToDataUrl = async (blob: Blob) =>
+    await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Unable to read media output."));
+      reader.readAsDataURL(blob);
+    });
 
   const runGenerateImage = async (args: Record<string, unknown>) => {
     if (!apiKey.trim()) {
       throw new Error("Missing API key for image tool.");
     }
-    const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+    const prompt = getStringArg(args, ["prompt"]);
     if (!prompt) {
       throw new Error("Tool call missing prompt.");
     }
-    const modelOverride =
-      typeof args.model === "string" && args.model.trim().length
-        ? args.model.trim()
-        : toolImageModel;
+    const modelOverride = getStringArg(args, ["model"]) || toolImageModel;
     const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
     const body: Record<string, unknown> = {
       apiKey,
@@ -616,24 +995,31 @@ ${defaultPrompt}`;
       prompt,
     };
     if (provider === "navy") {
-      if (typeof args.size === "string") body.size = args.size;
-      if (typeof args.quality === "string") body.quality = args.quality;
-      if (typeof args.style === "string") body.style = args.style;
-      if (typeof args.n === "number") body.numberOfImages = args.n;
+      const numberOfImages = getNumberArg(args, ["n"]);
+      const size = getStringArg(args, ["size"]);
+      const quality = getStringArg(args, ["quality"]);
+      const style = getStringArg(args, ["style"]);
+      if (size) body.size = size;
+      if (quality) body.quality = quality;
+      if (style) body.style = style;
+      if (numberOfImages && numberOfImages > 0) {
+        body.numberOfImages = Math.max(1, Math.round(numberOfImages));
+      }
     } else {
-      body.negativePrompt =
-        typeof args.negative_prompt === "string" ? args.negative_prompt : undefined;
-      body.guidanceScale =
-        typeof args.guidance_scale === "number" ? args.guidance_scale : undefined;
-      body.width = typeof args.width === "number" ? args.width : undefined;
-      body.height = typeof args.height === "number" ? args.height : undefined;
-      body.resolution =
-        typeof args.resolution === "string" ? args.resolution : undefined;
-      body.numInferenceSteps =
-        typeof args.num_inference_steps === "number"
-          ? args.num_inference_steps
-          : undefined;
-      body.seed = typeof args.seed === "number" ? args.seed : null;
+      const guidanceScale = getNumberArg(args, ["guidance_scale"]);
+      const width = getNumberArg(args, ["width"]);
+      const height = getNumberArg(args, ["height"]);
+      const steps = getNumberArg(args, ["num_inference_steps"]);
+      const seed = getNumberArg(args, ["seed"]);
+      const negativePrompt = getStringArg(args, ["negative_prompt"]);
+      const resolution = getStringArg(args, ["resolution"]);
+      body.negativePrompt = negativePrompt || undefined;
+      body.guidanceScale = guidanceScale ?? undefined;
+      body.width = width ? Math.round(width) : undefined;
+      body.height = height ? Math.round(height) : undefined;
+      body.resolution = resolution || undefined;
+      body.numInferenceSteps = steps ? Math.round(steps) : undefined;
+      body.seed = seed !== null ? Math.round(seed) : null;
     }
     const response = await fetch(endpoint, {
       method: "POST",
@@ -680,55 +1066,386 @@ ${defaultPrompt}`;
     if (!parsedImages.length) {
       throw new Error("No usable images returned by tool.");
     }
-    return { images: parsedImages, model: modelOverride };
+    return { images: parsedImages, model: modelOverride, prompt };
+  };
+
+  const runGenerateVideo = async (args: Record<string, unknown>) => {
+    if (!apiKey.trim()) {
+      throw new Error("Missing API key for video tool.");
+    }
+    const prompt = getStringArg(args, ["prompt"]);
+    if (!prompt) {
+      throw new Error("Tool call missing prompt.");
+    }
+    const modelOverride = getStringArg(args, ["model"]) || toolVideoModel;
+
+    if (provider === "navy") {
+      const size = getStringArg(args, ["size"]);
+      const imageUrl = getStringArg(args, ["image_url", "image"]);
+      const seconds = getNumberArg(args, ["seconds"]);
+      const seed = getNumberArg(args, ["seed"]);
+      const createResponse = await fetch("/api/navy/video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey,
+          model: modelOverride,
+          prompt,
+          size: size || undefined,
+          imageUrl: imageUrl || undefined,
+          seconds: seconds ?? undefined,
+          seed: seed ?? undefined,
+        }),
+      });
+      const createPayload = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(createPayload?.error ?? "Unable to start video generation.");
+      }
+
+      const jobId =
+        typeof createPayload?.id === "string" ? createPayload.id : "";
+      if (!jobId) {
+        throw new Error("No video job id returned by provider.");
+      }
+
+      let videoUrl = "";
+      const maxAttempts = 120;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const pollResponse = await fetch(
+          `/api/navy/video?id=${encodeURIComponent(jobId)}`,
+          {
+            headers: {
+              "x-user-api-key": apiKey,
+            },
+          }
+        );
+        const pollPayload = await pollResponse.json();
+        if (!pollResponse.ok) {
+          throw new Error(
+            pollPayload?.error ?? "Unable to check video generation status."
+          );
+        }
+        if (!pollPayload?.done) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          continue;
+        }
+        if (typeof pollPayload?.error === "string" && pollPayload.error.length) {
+          throw new Error(pollPayload.error);
+        }
+        if (typeof pollPayload?.videoUrl === "string" && pollPayload.videoUrl.length) {
+          videoUrl = pollPayload.videoUrl;
+          break;
+        }
+      }
+      if (!videoUrl) {
+        throw new Error("Video generation timed out before a result was available.");
+      }
+      let resolvedVideoUrl = videoUrl;
+      let resolvedMimeType = "video/mp4";
+      const downloadResponse = await fetch("/api/navy/video/download", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": apiKey,
+        },
+        body: JSON.stringify({ url: videoUrl }),
+      });
+      if (downloadResponse.ok) {
+        const blob = await downloadResponse.blob();
+        resolvedMimeType = blob.type || "video/mp4";
+        resolvedVideoUrl = await blobToDataUrl(blob);
+      }
+      return {
+        media: [
+          {
+            id: createId(),
+            kind: "video" as const,
+            dataUrl: resolvedVideoUrl,
+            mimeType: resolvedMimeType,
+          },
+        ],
+        model: modelOverride,
+        prompt,
+      };
+    }
+
+    const sourceImage = getStringArg(args, ["image", "image_url"]);
+    if (!sourceImage) {
+      throw new Error("Chutes video generation requires an image URL or data URI.");
+    }
+    const fps = getNumberArg(args, ["fps"]);
+    const guidanceScale = getNumberArg(args, ["guidance_scale_2"]);
+    const response = await fetch("/api/chutes/video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey,
+        prompt,
+        model: modelOverride,
+        image: sourceImage,
+        fps: fps ?? undefined,
+        guidance_scale_2: guidanceScale ?? undefined,
+      }),
+    });
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        throw new Error(payload?.error ?? "Video tool failed.");
+      }
+      const message = await response.text();
+      throw new Error(message || "Video tool failed.");
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const payload = await response.json();
+      if (typeof payload?.error === "string" && payload.error.length) {
+        throw new Error(payload.error);
+      }
+      if (typeof payload?.url === "string" && payload.url.length) {
+        return {
+          media: [
+            {
+              id: createId(),
+              kind: "video" as const,
+              dataUrl: payload.url,
+              mimeType: "video/mp4",
+            },
+          ],
+          model: modelOverride,
+          prompt,
+        };
+      }
+      if (typeof payload?.data === "string" && payload.data.length) {
+        const mimeType =
+          typeof payload?.mimeType === "string"
+            ? payload.mimeType
+            : "video/mp4";
+        return {
+          media: [
+            {
+              id: createId(),
+              kind: "video" as const,
+              dataUrl: dataUrlFromBase64(payload.data, mimeType),
+              mimeType,
+            },
+          ],
+          model: modelOverride,
+          prompt,
+        };
+      }
+      throw new Error("No usable video output returned by tool.");
+    }
+
+    const blob = await response.blob();
+    const mimeType = blob.type || "video/mp4";
+    return {
+      media: [
+        {
+          id: createId(),
+          kind: "video" as const,
+          dataUrl: await blobToDataUrl(blob),
+          mimeType,
+        },
+      ],
+      model: modelOverride,
+      prompt,
+    };
+  };
+
+  const runGenerateAudio = async (args: Record<string, unknown>) => {
+    if (!apiKey.trim()) {
+      throw new Error("Missing API key for audio tool.");
+    }
+    const prompt = getStringArg(args, ["input", "text", "prompt"]);
+    if (!prompt) {
+      throw new Error("Tool call missing input text.");
+    }
+    const modelOverride = getStringArg(args, ["model"]) || toolAudioModel;
+
+    if (provider === "navy") {
+      const speed = getNumberArg(args, ["speed"]);
+      const voice = getStringArg(args, ["voice"]) || "alloy";
+      const responseFormat = getStringArg(args, ["response_format"]);
+      const response = await fetch("/api/navy/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey,
+          model: modelOverride,
+          input: prompt,
+          voice,
+          speed: speed ?? undefined,
+          responseFormat: responseFormat || undefined,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Audio tool failed.");
+      }
+      const audioData = payload?.audio?.data;
+      const mimeType =
+        typeof payload?.audio?.mimeType === "string"
+          ? payload.audio.mimeType
+          : "audio/mpeg";
+      if (typeof audioData !== "string" || !audioData.length) {
+        throw new Error("No audio data returned by tool.");
+      }
+      return {
+        media: [
+          {
+            id: createId(),
+            kind: "audio" as const,
+            dataUrl: dataUrlFromBase64(audioData, mimeType),
+            mimeType,
+          },
+        ],
+        model: modelOverride,
+        prompt,
+      };
+    }
+
+    const speed = getNumberArg(args, ["speed"]);
+    const speaker = getNumberArg(args, ["speaker"]);
+    const maxDuration = getNumberArg(args, ["max_duration_ms", "maxDuration"]);
+    const response = await fetch("/api/chutes/audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey,
+        prompt,
+        model: modelOverride,
+        speed: speed ?? undefined,
+        speaker: speaker ?? undefined,
+        maxDuration: maxDuration ?? undefined,
+      }),
+    });
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        throw new Error(payload?.error ?? "Audio tool failed.");
+      }
+      const message = await response.text();
+      throw new Error(message || "Audio tool failed.");
+    }
+    const blob = await response.blob();
+    const mimeType = blob.type || "audio/mpeg";
+    return {
+      media: [
+        {
+          id: createId(),
+          kind: "audio" as const,
+          dataUrl: await blobToDataUrl(blob),
+          mimeType,
+        },
+      ],
+      model: modelOverride,
+      prompt,
+    };
+  };
+
+  const parseToolArgs = (rawArgs: string) => {
+    if (!rawArgs) return {};
+    const parsed = JSON.parse(rawArgs);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Invalid tool arguments.");
+    }
+    return parsed as Record<string, unknown>;
   };
 
   const handleToolCalls = async (toolCalls: ToolCall[]) => {
     const toolMessages: ChatMessage[] = [];
     for (const toolCall of toolCalls) {
-      if (toolCall.function?.name !== "generate_image") {
-        toolMessages.push({
-          id: createId(),
-          role: "tool",
-          content: "Tool error: Unknown tool call.",
-          toolCallId: toolCall.id,
-          name: toolCall.function?.name,
-        });
-        continue;
-      }
+      const toolName = toolCall.function?.name ?? "";
       let args: Record<string, unknown> = {};
+
       try {
-        args = toolCall.function?.arguments
-          ? (JSON.parse(toolCall.function.arguments) as Record<string, unknown>)
-          : {};
+        args = parseToolArgs(toolCall.function?.arguments ?? "");
       } catch {
         toolMessages.push({
           id: createId(),
           role: "tool",
           content: "Tool error: Invalid tool arguments.",
           toolCallId: toolCall.id,
-          name: toolCall.function?.name,
+          name: toolName || undefined,
         });
         continue;
       }
-      try {
-        const prompt =
-          typeof args.prompt === "string" ? args.prompt.trim() : "";
-        const result = await runGenerateImage(args);
-        if (saveToGallery && onSaveImages) {
-          await onSaveImages({
-            images: result.images,
-            prompt,
-            model: result.model,
-          });
-        }
+
+      const disabledByUser =
+        (toolName === "generate_image" && !toolSettings.image) ||
+        (toolName === "generate_video" && !toolSettings.video) ||
+        (toolName === "generate_audio" && !toolSettings.audio);
+      if (disabledByUser) {
         toolMessages.push({
           id: createId(),
           role: "tool",
-          content: `Generated ${result.images.length} image(s) using ${result.model}.`,
+          content: `Tool error: ${toolName} is currently disabled.`,
           toolCallId: toolCall.id,
-          name: toolCall.function?.name,
-          images: result.images,
+          name: toolName || undefined,
+        });
+        continue;
+      }
+
+      try {
+        if (toolName === "generate_image") {
+          const result = await runGenerateImage(args);
+          if (saveToGallery && onSaveImages) {
+            await onSaveImages({
+              images: result.images,
+              prompt: result.prompt,
+              model: result.model,
+            });
+          }
+          toolMessages.push({
+            id: createId(),
+            role: "tool",
+            content: `Generated ${result.images.length} image(s) using ${result.model}.`,
+            toolCallId: toolCall.id,
+            name: toolName,
+            images: result.images,
+            media: result.images.map((image) => ({
+              ...image,
+              kind: "image" as const,
+            })),
+          });
+          continue;
+        }
+
+        if (toolName === "generate_video") {
+          const result = await runGenerateVideo(args);
+          toolMessages.push({
+            id: createId(),
+            role: "tool",
+            content: `Generated 1 video using ${result.model}.`,
+            toolCallId: toolCall.id,
+            name: toolName,
+            media: result.media,
+          });
+          continue;
+        }
+
+        if (toolName === "generate_audio") {
+          const result = await runGenerateAudio(args);
+          toolMessages.push({
+            id: createId(),
+            role: "tool",
+            content: `Generated audio using ${result.model}.`,
+            toolCallId: toolCall.id,
+            name: toolName,
+            media: result.media,
+          });
+          continue;
+        }
+
+        toolMessages.push({
+          id: createId(),
+          role: "tool",
+          content: "Tool error: Unknown tool call.",
+          toolCallId: toolCall.id,
+          name: toolName || undefined,
         });
       } catch (error) {
         toolMessages.push({
@@ -736,7 +1453,7 @@ ${defaultPrompt}`;
           role: "tool",
           content: `Tool error: ${error instanceof Error ? error.message : "Tool failed."}`,
           toolCallId: toolCall.id,
-          name: toolCall.function?.name,
+          name: toolName || undefined,
         });
       }
     }
@@ -899,12 +1616,46 @@ ${defaultPrompt}`;
               </SelectContent>
             </Select>
 
-            <Select value={toolImageModel} onValueChange={setToolImageModel}>
-              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Image Model">
+            <Select
+              value={toolImageModel}
+              onValueChange={setToolImageModel}
+              disabled={!toolSettings.image || !imageModels.length}
+            >
+              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Image Tool Model">
                 <ImageIcon className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
                 {imageModels.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={toolVideoModel}
+              onValueChange={setToolVideoModel}
+              disabled={!toolSettings.video || !videoModels.length}
+            >
+              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Video Tool Model">
+                <Video className="h-4 w-4" />
+              </SelectTrigger>
+              <SelectContent>
+                {videoModels.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={toolAudioModel}
+              onValueChange={setToolAudioModel}
+              disabled={!toolSettings.audio || !audioModels.length}
+            >
+              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Audio Tool Model">
+                <AudioLines className="h-4 w-4" />
+              </SelectTrigger>
+              <SelectContent>
+                {audioModels.map((m) => (
                   <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
                 ))}
               </SelectContent>
@@ -922,6 +1673,71 @@ ${defaultPrompt}`;
             <p className="text-xs text-destructive">{modelsError}</p>
           </div>
         ) : null}
+        <div className="max-w-5xl mx-auto w-full pt-2">
+          <div className="glass-card border-0 bg-secondary/30 p-2.5">
+            <div className="flex items-center justify-between gap-2 pb-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Generation Tools
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Enable/disable tool invocation
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={toolSettings.image ? "secondary" : "ghost"}
+                onClick={() =>
+                  setToolSettings((prev) => ({ ...prev, image: !prev.image }))
+                }
+                className="h-8 gap-1.5"
+              >
+                {toolSettings.image ? (
+                  <ToggleRight className="h-4 w-4" />
+                ) : (
+                  <ToggleLeft className="h-4 w-4" />
+                )}
+                <ImageIcon className="h-3.5 w-3.5" />
+                Image
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={toolSettings.video ? "secondary" : "ghost"}
+                onClick={() =>
+                  setToolSettings((prev) => ({ ...prev, video: !prev.video }))
+                }
+                className="h-8 gap-1.5"
+              >
+                {toolSettings.video ? (
+                  <ToggleRight className="h-4 w-4" />
+                ) : (
+                  <ToggleLeft className="h-4 w-4" />
+                )}
+                <Video className="h-3.5 w-3.5" />
+                Video
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={toolSettings.audio ? "secondary" : "ghost"}
+                onClick={() =>
+                  setToolSettings((prev) => ({ ...prev, audio: !prev.audio }))
+                }
+                className="h-8 gap-1.5"
+              >
+                {toolSettings.audio ? (
+                  <ToggleRight className="h-4 w-4" />
+                ) : (
+                  <ToggleLeft className="h-4 w-4" />
+                )}
+                <AudioLines className="h-3.5 w-3.5" />
+                Audio
+              </Button>
+            </div>
+          </div>
+        </div>
         <div className="max-w-5xl mx-auto w-full pt-2">
           <div className="glass-card border-0 bg-secondary/30 p-2.5">
             <div className="flex items-center justify-between gap-2 pb-2">
@@ -966,7 +1782,7 @@ ${defaultPrompt}`;
                 <div className="space-y-2">
                   <h3 className="text-xl font-medium">How can I help you create?</h3>
                   <p className="text-sm text-muted-foreground max-w-sm">
-                    Ask me to generate images, refine prompts, or brainstorm ideas.
+                    Ask me to generate images, videos, audio, refine prompts, or brainstorm ideas.
                   </p>
                 </div>
               </motion.div>
@@ -975,8 +1791,19 @@ ${defaultPrompt}`;
                 const isUser = message.role === "user";
                 const isTool = message.role === "tool";
                 const isAssistant = message.role === "assistant";
+                const mediaItems =
+                  message.media ??
+                  (message.images?.map((image) => ({
+                    ...image,
+                    kind: "image" as const,
+                  })) ??
+                    []);
 
-                if (isTool && !message.images?.length && !message.content.includes("error")) {
+                if (
+                  isTool &&
+                  !mediaItems.length &&
+                  !message.content.toLowerCase().includes("error")
+                ) {
                   // Collapse purely technical tool outputs unless they have images or errors
                   return null;
                 }
@@ -1049,25 +1876,41 @@ ${defaultPrompt}`;
                           </div>
                         ) : null}
 
-                        {/* Images Grid */}
-                        {message.images?.length ? (
-                          <div className="grid grid-cols-2 gap-2 mt-3 w-full">
-                            {message.images.map((image) => (
+                        {/* Media Grid */}
+                        {mediaItems.length ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 w-full">
+                            {mediaItems.map((item) => (
                               <motion.div
-                                key={image.id}
-                                layoutId={image.id}
-                                className="relative aspect-square rounded-lg overflow-hidden border bg-background/50 group/image"
+                                key={item.id}
+                                layoutId={item.id}
+                                className="relative rounded-lg overflow-hidden border bg-background/50 group/image p-1.5"
                               >
-                                <img
-                                  src={image.dataUrl}
-                                  alt="Generated"
-                                  className="w-full h-full object-cover transition-transform duration-500 group-hover/image:scale-110"
-                                />
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                  <Button size="icon" variant="secondary" className="h-8 w-8 rounded-full" onClick={() => window.open(image.dataUrl, '_blank')}>
-                                    <ChevronDown className="h-4 w-4" />
-                                  </Button>
-                                </div>
+                                {item.kind === "image" ? (
+                                  <div className="relative aspect-square rounded-md overflow-hidden">
+                                    <img
+                                      src={item.dataUrl}
+                                      alt="Generated"
+                                      className="w-full h-full object-cover transition-transform duration-500 group-hover/image:scale-110"
+                                    />
+                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                      <Button size="icon" variant="secondary" className="h-8 w-8 rounded-full" onClick={() => window.open(item.dataUrl, "_blank")}>
+                                        <ChevronDown className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : item.kind === "video" ? (
+                                  <video
+                                    src={item.dataUrl}
+                                    controls
+                                    className="w-full rounded-md max-h-64 bg-black"
+                                  />
+                                ) : (
+                                  <audio
+                                    src={item.dataUrl}
+                                    controls
+                                    className="w-full"
+                                  />
+                                )}
                               </motion.div>
                             ))}
                           </div>
@@ -1128,7 +1971,7 @@ ${defaultPrompt}`;
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message Chutes Agent..."
+                placeholder={`Message ${providerLabel} Agent...`}
                 className="min-h-[48px] max-h-[200px] w-full resize-none border-0 bg-transparent py-3 px-4 focus-visible:ring-0 text-base"
                 rows={1}
               />
