@@ -93,7 +93,7 @@ export function ImageViewer({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-none w-[96vw] h-[92vh] p-0 overflow-hidden">
+            <DialogContent className="max-w-none w-[96vw] h-[92dvh] p-0 overflow-hidden">
                 <DialogHeader className="sr-only">
                     <DialogTitle>
                         {resolvedKind === "video"
@@ -107,7 +107,7 @@ export function ImageViewer({
                     </DialogDescription>
                 </DialogHeader>
                 <div className="flex h-full flex-col lg:flex-row">
-                    <div className="flex-1 bg-black/90 flex items-center justify-center p-4">
+                    <div className="flex-1 bg-black/90 flex items-center justify-center p-3 sm:p-4">
                         {resolvedKind === "video" ? (
                             <video
                                 src={imageUrl}
@@ -130,7 +130,7 @@ export function ImageViewer({
                             />
                         )}
                     </div>
-                    <div className="w-full lg:w-[360px] border-t lg:border-t-0 lg:border-l border-border/50 bg-background/80 backdrop-blur-xl p-6 overflow-y-auto">
+                    <div className="w-full lg:w-[360px] border-t lg:border-t-0 lg:border-l border-border/50 bg-background/80 backdrop-blur-xl p-4 sm:p-6 overflow-y-auto">
                         <div className="space-y-4">
                             <div>
                                 <div className="flex items-center justify-between gap-2">

@@ -5,8 +5,10 @@ import { useEffect, useRef } from "react";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "@/app/components/prompt-input";
 import { Button } from "@/app/components/ui/button";
-import { Loader2, Music, Download, AudioLines } from "lucide-react";
+import { Loader2, Music, Download, AudioLines, Settings2 } from "lucide-react";
 import { Card } from "@/app/components/ui/card";
+import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 
 export function AudioGenView() {
     const context = useStudio();
@@ -18,6 +20,7 @@ export function AudioGenView() {
     } = context;
 
     const audioRef = useRef<HTMLAudioElement>(null);
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     useEffect(() => {
         if (mode !== "tts") setMode("tts");
@@ -31,9 +34,9 @@ export function AudioGenView() {
     }, [audioUrl]);
 
     return (
-        <div className="flex h-full">
+        <div className="flex h-full flex-col lg:flex-row">
             {/* Sidebar Settings */}
-            <div className="w-[340px] flex-none border-r bg-background/50 p-6 overflow-y-auto hidden xl:block">
+            <div className="hidden w-[320px] flex-none border-r bg-background/50 p-6 overflow-y-auto lg:block">
                 <ImgGenSettings
                     {...context}
                     onRefreshModels={context.refreshModels}
@@ -44,16 +47,44 @@ export function AudioGenView() {
 
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-h-0 bg-background/50 relative isolate">
-                <header className="flex-none p-6 border-b glass flex items-center justify-between">
+                <header className="flex-none p-4 sm:p-6 border-b glass flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                         <div className="p-2 rounded-xl bg-primary/10 text-primary">
                             <AudioLines className="h-5 w-5" />
                         </div>
                         <h2 className="font-semibold text-lg">Audio / TTS</h2>
                     </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="lg:hidden"
+                        onClick={() => setSettingsOpen((prev) => !prev)}
+                    >
+                        <Settings2 className="mr-2 h-4 w-4" />
+                        {settingsOpen ? "Hide Settings" : "Show Settings"}
+                    </Button>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center justify-center space-y-8">
+                <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center justify-center space-y-6 md:space-y-8">
+                    <AnimatePresence initial={false}>
+                        {settingsOpen ? (
+                            <motion.div
+                                key="mobile-settings"
+                                initial={{ opacity: 0, y: -8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                className="w-full max-w-3xl lg:hidden"
+                            >
+                                <ImgGenSettings
+                                    {...context}
+                                    onRefreshModels={context.refreshModels}
+                                    modelsLoading={context.modelsLoading}
+                                    modelsError={context.modelsError}
+                                />
+                            </motion.div>
+                        ) : null}
+                    </AnimatePresence>
+
                     {hasActiveJobs ? (
                         <div className="flex flex-col items-center justify-center space-y-4 animate-pulse">
                             <div className="rounded-full bg-primary/10 p-8">
@@ -62,7 +93,7 @@ export function AudioGenView() {
                             <p className="text-lg font-medium text-muted-foreground">{statusMessage || "Generating audio..."}</p>
                         </div>
                     ) : audioUrl ? (
-                        <Card className="glass-card p-8 w-full max-w-2xl flex flex-col items-center space-y-6">
+                        <Card className="glass-card p-5 sm:p-8 w-full max-w-2xl flex flex-col items-center space-y-5 sm:space-y-6">
                             <div className="rounded-full bg-primary/10 p-6">
                                 <Music className="h-12 w-12 text-primary" />
                             </div>

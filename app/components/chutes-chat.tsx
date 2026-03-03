@@ -1841,7 +1841,7 @@ ${defaultPrompt}`;
     <div className="flex flex-col h-full bg-background/50 isolate">
       {/* Header */}
       <header className="flex-none p-4 glass border-b sticky top-0 z-10">
-        <div className="flex flex-col sm:flex-row gap-3 justify-between items-center max-w-5xl mx-auto w-full">
+        <div className="flex flex-col gap-3 justify-between items-start sm:flex-row sm:items-center max-w-5xl mx-auto w-full">
           <div className="flex items-center gap-2">
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
@@ -1861,9 +1861,9 @@ ${defaultPrompt}`;
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
             <Select value={provider} onValueChange={(value) => setProvider(value as ChatProvider)}>
-              <SelectTrigger className="w-full sm:w-[140px] h-9 glass-card border-0 bg-secondary/50">
+              <SelectTrigger className="h-9 min-w-0 flex-1 sm:w-[140px] sm:flex-none glass-card border-0 bg-secondary/50">
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
@@ -1873,7 +1873,7 @@ ${defaultPrompt}`;
             </Select>
 
             <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className="w-full sm:w-[200px] h-9 glass-card border-0 bg-secondary/50">
+              <SelectTrigger className="h-9 min-w-[10rem] flex-[1.6] sm:w-[200px] sm:flex-none glass-card border-0 bg-secondary/50">
                 <SelectValue placeholder="Select a model" />
               </SelectTrigger>
               <SelectContent>
@@ -1888,7 +1888,7 @@ ${defaultPrompt}`;
               onValueChange={setToolImageModel}
               disabled={!toolSettings.image || !imageModels.length}
             >
-              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Image Tool Model">
+              <SelectTrigger className="h-9 w-9 flex-none px-0 justify-center glass-card border-0 bg-secondary/50" title="Image Tool Model">
                 <ImageIcon className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
@@ -1903,7 +1903,7 @@ ${defaultPrompt}`;
               onValueChange={setToolVideoModel}
               disabled={!toolSettings.video || !videoModels.length}
             >
-              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Video Tool Model">
+              <SelectTrigger className="h-9 w-9 flex-none px-0 justify-center glass-card border-0 bg-secondary/50" title="Video Tool Model">
                 <Video className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
@@ -1918,7 +1918,7 @@ ${defaultPrompt}`;
               onValueChange={setToolAudioModel}
               disabled={!toolSettings.audio || !audioModels.length}
             >
-              <SelectTrigger className="w-full sm:w-[40px] px-0 justify-center h-9 glass-card border-0 bg-secondary/50" title="Audio Tool Model">
+              <SelectTrigger className="h-9 w-9 flex-none px-0 justify-center glass-card border-0 bg-secondary/50" title="Audio Tool Model">
                 <AudioLines className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
@@ -1929,7 +1929,7 @@ ${defaultPrompt}`;
             </Select>
 
             {onRefreshModels && (
-              <Button variant="ghost" size="icon" onClick={onRefreshModels} disabled={modelsLoading} className="h-9 w-9">
+              <Button variant="ghost" size="icon" onClick={onRefreshModels} disabled={modelsLoading} className="h-9 w-9 flex-none">
                 <Sparkles className={cn("h-4 w-4", modelsLoading && "animate-spin")} />
               </Button>
             )}
@@ -1938,7 +1938,7 @@ ${defaultPrompt}`;
               variant="ghost"
               size="icon"
               onClick={() => setHeaderCollapsed((prev) => !prev)}
-              className="h-9 w-9"
+              className="h-9 w-9 flex-none"
               title={headerCollapsed ? "Expand header controls" : "Collapse header controls"}
             >
               {headerCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -2122,18 +2122,18 @@ ${defaultPrompt}`;
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     transition={{ duration: 0.3 }}
                     className={cn(
-                      "flex gap-4 group",
+                      "flex gap-2 sm:gap-4 group",
                       isUser ? "flex-row-reverse" : "flex-row"
                     )}
                   >
-                    <Avatar className={cn("h-8 w-8 border", isUser ? "bg-primary text-primary-foreground" : "bg-card")}>
+                    <Avatar className={cn("h-7 w-7 sm:h-8 sm:w-8 border", isUser ? "bg-primary text-primary-foreground" : "bg-card")}>
                       <AvatarFallback className={isUser ? "bg-primary text-primary-foreground" : "bg-secondary"}>
                         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                       </AvatarFallback>
                     </Avatar>
 
                     <div className={cn(
-                      "flex flex-col gap-2 max-w-[85%]",
+                      "flex flex-col gap-2 max-w-[92%] sm:max-w-[85%]",
                       isUser ? "items-end" : "items-start",
                       "w-full"
                     )}>
@@ -2144,7 +2144,7 @@ ${defaultPrompt}`;
 
                       {/* Content */}
                       <div className={cn(
-                        "relative rounded-2xl px-5 py-3.5 text-sm shadow-sm w-full transition-all duration-300",
+                        "relative rounded-2xl px-3.5 py-2.5 sm:px-5 sm:py-3.5 text-sm shadow-sm w-full transition-all duration-300",
                         isUser
                           ? "bg-primary text-primary-foreground rounded-tr-sm"
                           : isTool
@@ -2224,7 +2224,7 @@ ${defaultPrompt}`;
                                       alt="Generated"
                                       className="w-full h-full object-cover transition-transform duration-500 group-hover/image:scale-110"
                                     />
-                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                    <div className="absolute inset-0 bg-black/50 opacity-100 sm:opacity-0 sm:group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                       <Button size="icon" variant="secondary" className="h-8 w-8 rounded-full" onClick={() => window.open(item.dataUrl, "_blank")}>
                                         <ChevronDown className="h-4 w-4" />
                                       </Button>
@@ -2274,7 +2274,7 @@ ${defaultPrompt}`;
       </div>
 
       {/* Input Area */}
-      <footer className="flex-none p-4 glass border-t mt-auto">
+      <footer className="flex-none p-3 sm:p-4 glass border-t mt-auto">
         <div className="max-w-3xl mx-auto w-full relative">
           <AnimatePresence>
             {messages.length > 0 && (
@@ -2282,7 +2282,7 @@ ${defaultPrompt}`;
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
-                className="absolute -top-12 right-0"
+                className="absolute -top-10 sm:-top-12 right-0"
               >
                 <Button
                   variant="ghost"

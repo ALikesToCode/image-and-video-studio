@@ -6,7 +6,7 @@ import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Download, Video as VideoIcon, Upload, X } from "lucide-react";
+import { Sparkles, Download, Video as VideoIcon, Upload, X, Settings2 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +25,7 @@ export function VideoGenView() {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDragging, setIsDragging] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     useEffect(() => {
         if (mode !== "video") setMode("video");
@@ -64,9 +65,9 @@ export function VideoGenView() {
     };
 
     return (
-        <div className="flex h-full">
+        <div className="flex h-full flex-col lg:flex-row">
             {/* Sidebar Settings - Pass all props from context */}
-            <div className="w-[340px] flex-none border-r bg-background/50 p-6 overflow-y-auto hidden xl:block">
+            <div className="hidden w-[320px] flex-none border-r bg-background/50 p-6 overflow-y-auto lg:block">
                 <ImgGenSettings
                     {...context}
                     onRefreshModels={context.refreshModels}
@@ -78,16 +79,44 @@ export function VideoGenView() {
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-h-0 bg-background/50 relative isolate">
                 {/* Header (Mobile Settings Toggle could go here) */}
-                <header className="flex-none p-6 border-b glass flex items-center justify-between">
+                <header className="flex-none border-b glass p-4 sm:p-6 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                         <div className="p-2 rounded-xl bg-primary/10 text-primary">
                             <VideoIcon className="h-5 w-5" />
                         </div>
                         <h2 className="font-semibold text-lg">Video Generation</h2>
                     </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="lg:hidden"
+                        onClick={() => setSettingsOpen((prev) => !prev)}
+                    >
+                        <Settings2 className="mr-2 h-4 w-4" />
+                        {settingsOpen ? "Hide Settings" : "Show Settings"}
+                    </Button>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8">
+                    <AnimatePresence initial={false}>
+                        {settingsOpen ? (
+                            <motion.div
+                                key="mobile-settings"
+                                initial={{ opacity: 0, y: -8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                className="lg:hidden max-w-3xl mx-auto"
+                            >
+                                <ImgGenSettings
+                                    {...context}
+                                    onRefreshModels={context.refreshModels}
+                                    modelsLoading={context.modelsLoading}
+                                    modelsError={context.modelsError}
+                                />
+                            </motion.div>
+                        ) : null}
+                    </AnimatePresence>
+
                     {/* Source Image Uploader (Required for Chutes) */}
                     {provider === "chutes" && (
                         <div className="max-w-3xl mx-auto space-y-4">
@@ -114,7 +143,7 @@ export function VideoGenView() {
                                 {videoImage ? (
                                     <div className="relative group">
                                         <img src={videoImage} alt="Source" className="w-full h-auto max-h-[400px] object-contain mx-auto" />
-                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                        <div className="absolute inset-0 bg-black/50 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                             <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
                                                 Change
                                             </Button>
@@ -201,7 +230,7 @@ export function VideoGenView() {
                 </div>
 
                 {/* Footer Input */}
-                <div className="flex-none p-6 glass border-t">
+                <div className="flex-none p-4 sm:p-6 glass border-t">
                     <div className="max-w-3xl mx-auto w-full">
                         <PromptInput
                             prompt={context.prompt}

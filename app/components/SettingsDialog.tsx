@@ -33,7 +33,7 @@ export function SettingsDialog() {
                     <Settings className="h-5 w-5" />
                 </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent className="w-[95vw] sm:max-w-[425px]">
                 <DialogHeader>
                     <DialogTitle>Settings</DialogTitle>
                     <DialogDescription>
@@ -41,11 +41,11 @@ export function SettingsDialog() {
                     </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="provider" className="text-right">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+                        <Label htmlFor="provider" className="sm:text-right">
                             Provider
                         </Label>
-                        <div className="col-span-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                        <div className="sm:col-span-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
                             {(["gemini", "navy", "openrouter", "chutes"] as const).map(
                                 (entry) => (
                                     <Button
@@ -63,8 +63,8 @@ export function SettingsDialog() {
                             )}
                         </div>
                     </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="apiKeyGemini" className="text-right">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+                        <Label htmlFor="apiKeyGemini" className="sm:text-right">
                             Gemini Key
                         </Label>
                         <Input
@@ -72,12 +72,12 @@ export function SettingsDialog() {
                             type="password"
                             value={apiKeys.gemini}
                             onChange={handleKeyChange("gemini")}
-                            className="col-span-3 font-mono text-sm"
+                            className="sm:col-span-3 font-mono text-sm"
                             placeholder="Gemini API key"
                         />
                     </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="apiKeyNavy" className="text-right">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+                        <Label htmlFor="apiKeyNavy" className="sm:text-right">
                             NavyAI Key
                         </Label>
                         <Input
@@ -85,12 +85,12 @@ export function SettingsDialog() {
                             type="password"
                             value={apiKeys.navy}
                             onChange={handleKeyChange("navy")}
-                            className="col-span-3 font-mono text-sm"
+                            className="sm:col-span-3 font-mono text-sm"
                             placeholder="NavyAI API key"
                         />
                     </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="apiKeyOpenRouter" className="text-right">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+                        <Label htmlFor="apiKeyOpenRouter" className="sm:text-right">
                             OpenRouter Key
                         </Label>
                         <Input
@@ -98,12 +98,12 @@ export function SettingsDialog() {
                             type="password"
                             value={apiKeys.openrouter}
                             onChange={handleKeyChange("openrouter")}
-                            className="col-span-3 font-mono text-sm"
+                            className="sm:col-span-3 font-mono text-sm"
                             placeholder="OpenRouter API key"
                         />
                     </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="apiKeyChutes" className="text-right">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+                        <Label htmlFor="apiKeyChutes" className="sm:text-right">
                             Chutes Key
                         </Label>
                         <Input
@@ -111,7 +111,7 @@ export function SettingsDialog() {
                             type="password"
                             value={apiKeys.chutes}
                             onChange={handleKeyChange("chutes")}
-                            className="col-span-3 font-mono text-sm"
+                            className="sm:col-span-3 font-mono text-sm"
                             placeholder="Chutes API key"
                         />
                     </div>

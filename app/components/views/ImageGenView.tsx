@@ -34,14 +34,14 @@ export function ImageGenView() {
 
     return (
         <div className="h-full w-full overflow-y-auto bg-background/50">
-            <div className="mx-auto max-w-[1800px] grid grid-cols-1 lg:grid-cols-12 gap-6 p-4 lg:p-6 min-h-full items-start">
+            <div className="mx-auto max-w-[1800px] grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 p-3 sm:p-4 lg:p-6 min-h-full items-start">
                 {/* Settings Column - Collapsible/Sticky */}
                 <motion.div
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="lg:col-span-3 xl:col-span-3 space-y-4 lg:sticky lg:top-6"
                 >
-                    <div className="glass-card rounded-2xl p-5 shadow-lg space-y-6">
+                    <div className="glass-card rounded-2xl p-4 sm:p-5 shadow-lg space-y-6">
                         <div className="flex items-center gap-2 pb-4 border-b border-border/50">
                             <div className="p-2 rounded-lg bg-primary/10 text-primary">
                                 <ImageIcon className="h-5 w-5" />
@@ -114,7 +114,7 @@ export function ImageGenView() {
                     <motion.div
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="glass-card rounded-2xl p-6 shadow-xl relative overflow-hidden group"
+                        className="glass-card rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden group"
                     >
                         <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                         <PromptInput
@@ -128,7 +128,7 @@ export function ImageGenView() {
                         />
 
                         {context.jobs.length > 0 && (
-                            <div className="absolute top-4 right-4 flex items-center gap-2 text-xs font-medium text-muted-foreground bg-background/50 px-2 py-1 rounded-full border">
+                            <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-2 text-[10px] sm:text-xs font-medium text-muted-foreground bg-background/50 px-2 py-1 rounded-full border">
                                 <span className="relative flex h-2 w-2">
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
@@ -139,7 +139,7 @@ export function ImageGenView() {
                     </motion.div>
 
                     {/* Output Grid */}
-                    <div className="flex-1 min-h-[400px] glass p-6 rounded-2xl border flex flex-col gap-4">
+                    <div className="flex-1 min-h-[320px] sm:min-h-[400px] glass p-4 sm:p-6 rounded-2xl border flex flex-col gap-4">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 text-muted-foreground">
                                 <Sparkles className="h-4 w-4" />
@@ -184,7 +184,7 @@ export function ImageGenView() {
                                                 className="w-full h-full object-contain bg-checkered"
                                             />
                                             {/* Overlay Actions */}
-                                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-[2px]">
+                                            <div className="absolute inset-0 bg-black/60 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-[2px]">
                                                 <Button
                                                     size="icon"
                                                     variant="secondary"

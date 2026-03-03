@@ -240,6 +240,7 @@ export function ImgGenSettings({
                                 size="sm"
                                 onClick={onRefreshModels}
                                 disabled={modelsLoading}
+                                className="h-8 px-2 text-xs"
                             >
                                 {modelsLoading ? "Refreshing..." : "Refresh models"}
                             </Button>
@@ -265,7 +266,7 @@ export function ImgGenSettings({
 
                 {/* Dynamic Options */}
                 {mode === "image" && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {provider === "navy" ? (
                             <div className="space-y-2">
                                 <Label>Size</Label>
@@ -328,7 +329,7 @@ export function ImgGenSettings({
                 )}
 
                 {mode === "image" && provider === "chutes" && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Guidance Scale</Label>
                             <Input
@@ -399,7 +400,7 @@ export function ImgGenSettings({
                 )}
 
                 {mode === "video" && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {provider === "chutes" ? (
                             <>
                                 <div className="space-y-2">
@@ -466,7 +467,7 @@ export function ImgGenSettings({
                 )}
 
                 {mode === "tts" && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {provider === "chutes" ? (
                             <>
                                 {isChutesCsm ? (
@@ -596,7 +597,7 @@ export function ImgGenSettings({
                         {navyUsageError ? (
                             <p className="mt-2 text-destructive">{navyUsageError}</p>
                         ) : navyUsage ? (
-                            <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-muted-foreground">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-2 text-muted-foreground">
                                 <div>
                                     <div className="text-[10px] uppercase tracking-wide opacity-70">Plan</div>
                                     <div className="text-foreground font-medium">{navyUsage.plan}</div>

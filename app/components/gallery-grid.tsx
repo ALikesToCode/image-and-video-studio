@@ -90,15 +90,15 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h3 className="text-lg font-semibold">Gallery</h3>
-                <Button variant="outline" size="sm" onClick={onClear}>
+                <Button variant="outline" size="sm" onClick={onClear} className="w-full sm:w-auto">
                     <Trash2 className="mr-2 h-4 w-4" />
                     Clear Gallery
                 </Button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 <AnimatePresence mode="popLayout">
                     {items.map((item) => {
                         const kind = resolveKind(item.kind, item.mimeType);
@@ -134,7 +134,7 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
                                                 <span className="text-xs uppercase tracking-widest">Audio</span>
                                             </div>
                                         )}
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                        <div className="absolute inset-0 bg-black/40 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                             <Button
                                                 size="icon"
                                                 variant="secondary"
