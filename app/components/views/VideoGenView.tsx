@@ -14,7 +14,7 @@ export function VideoGenView() {
     const context = useStudio();
     const {
         videoUrl,
-        jobs,
+        hasActiveJobs,
         statusMessage,
         videoImage,
         setVideoImage,
@@ -31,7 +31,7 @@ export function VideoGenView() {
         if (mode !== "video") setMode("video");
     }, [mode, setMode]);
 
-    const isRunning = jobs.some((job) => job.status === "running" || job.status === "queued");
+    const isRunning = hasActiveJobs;
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -238,7 +238,7 @@ export function VideoGenView() {
                             negativePrompt={context.negativePrompt}
                             setNegativePrompt={context.setNegativePrompt}
                             onGenerate={context.handleGenerate}
-                            busy={context.jobs.length > 0}
+                            busy={context.hasActiveJobs}
                             mode={context.mode}
                         />
                     </div>

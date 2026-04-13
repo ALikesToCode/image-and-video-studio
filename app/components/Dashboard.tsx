@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
 import { Button } from "@/app/components/ui/button";
 import {
@@ -13,11 +14,6 @@ import {
     type LucideIcon,
 } from "lucide-react";
 import { SettingsDialog } from "@/app/components/SettingsDialog";
-import { ChatView } from "./views/ChatView";
-import { ImageGenView } from "./views/ImageGenView";
-import { VideoGenView } from "./views/VideoGenView";
-import { AudioGenView } from "./views/AudioGenView";
-import { GalleryView } from "./views/GalleryView";
 
 type Tab = "chat" | "image" | "video" | "audio" | "gallery";
 
@@ -28,6 +24,25 @@ const TAB_META: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: "audio", label: "Audio", icon: Music },
     { id: "gallery", label: "Gallery", icon: Grid },
 ];
+const ChatView = dynamic(() => import("./views/ChatView").then((mod) => mod.ChatView), {
+    loading: () => <ViewLoading label="Loading chat" />,
+});
+const ImageGenView = dynamic(
+    () => import("./views/ImageGenView").then((mod) => mod.ImageGenView),
+    { loading: () => <ViewLoading label="Loading image studio" /> }
+);
+const VideoGenView = dynamic(
+    () => import("./views/VideoGenView").then((mod) => mod.VideoGenView),
+    { loading: () => <ViewLoading label="Loading video studio" /> }
+);
+const AudioGenView = dynamic(
+    () => import("./views/AudioGenView").then((mod) => mod.AudioGenView),
+    { loading: () => <ViewLoading label="Loading audio studio" /> }
+);
+const GalleryView = dynamic(
+    () => import("./views/GalleryView").then((mod) => mod.GalleryView),
+    { loading: () => <ViewLoading label="Loading gallery" /> }
+);
 
 export function Dashboard() {
     const [activeTab, setActiveTab] = useState<Tab>("chat");
@@ -158,6 +173,14 @@ export function Dashboard() {
                     </div>
                 </nav>
             </div>
+        </div>
+    );
+}
+
+function ViewLoading({ label }: { label: string }) {
+    return (
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            {label}...
         </div>
     );
 }

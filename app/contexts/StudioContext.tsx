@@ -33,6 +33,10 @@ import {
 } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
 import {
+    extractOpenRouterImageModels,
+    getActiveJobCount,
+} from "@/lib/studio-generation";
+import {
     clearGalleryStore,
     getGalleryBlob,
     isIndexedDbAvailable,
@@ -49,6 +53,7 @@ export type GenerationJob = {
     mode: Mode;
     provider: Provider;
     model: string;
+    outputModalities?: string[];
     prompt: string;
     apiKey: string;
     createdAt: string;
@@ -195,7 +200,20 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
             const id = typeof record.id === "string" ? record.id : "";
             const label = typeof record.label === "string" ? record.label : id;
             if (!id) return null;
-            return { id, label };
+            const outputModalities = Array.isArray(record.outputModalities)
+                ? record.outputModalities.filter(
+                    (value): value is string => typeof value === "string"
+                )
+                : Array.isArray(record.output_modalities)
+                    ? record.output_modalities.filter(
+                        (value): value is string => typeof value === "string"
+                    )
+                    : [];
+            return {
+                id,
+                label,
+                ...(outputModalities.length ? { outputModalities } : {}),
+            };
         })
         .filter((item): item is ModelOption => !!item)
         .slice(0, MAX_CACHED_MODELS);
@@ -209,6 +227,9 @@ const createId = () => {
     }
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
+
+const sleep = (ms: number) =>
+    new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 
 
@@ -411,6 +432,7 @@ interface StudioContextType {
     // Jobs
     jobs: GenerationJob[];
     updateJobs: (param: GenerationJob[] | ((prev: GenerationJob[]) => GenerationJob[])) => void;
+    activeJobCount: number;
     hasActiveJobs: boolean;
     runningJobs: GenerationJob[];
     queuedJobs: GenerationJob[];
@@ -503,7 +525,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [chutesChatModelsError, setChutesChatModelsError] = useState<string | null>(null);
     const [navyChatModels, setNavyChatModels] = useState<ModelOption[]>(NAVY_CHAT_MODELS);
     const [navyChatModel, setNavyChatModel] = useState(NAVY_CHAT_MODELS[0]?.id ?? "");
-    const [navyToolImageModel, setNavyToolImageModel] = useState(NAVY_IMAGE_MODELS[0]?.id ?? "flux.1-schnell");
+    const [navyToolImageModel, setNavyToolImageModel] = useState(NAVY_IMAGE_MODELS[0]?.id ?? "flux");
     const [navyChatModelsLoading, setNavyChatModelsLoading] = useState(false);
     const [navyChatModelsError, setNavyChatModelsError] = useState<string | null>(null);
 
@@ -529,6 +551,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [navyUsageError, setNavyUsageError] = useState<string | null>(null);
     const [navyUsageLoading, setNavyUsageLoading] = useState(false);
     const [navyUsageUpdatedAt, setNavyUsageUpdatedAt] = useState<string | null>(null);
+    const [queueTick, setQueueTick] = useState(0);
 
     // --- Refs ---
     const galleryUrlsRef = useRef(new Map<string, string>());
@@ -614,7 +637,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     const runningJobs = jobs.filter((job) => job.status === "running");
     const queuedJobs = jobs.filter((job) => job.status === "queued");
-    const hasActiveJobs = runningJobs.length > 0 || queuedJobs.length > 0;
+    const activeJobCount = getActiveJobCount(jobs);
+    const hasActiveJobs = activeJobCount > 0;
     const recentJobs = jobs.slice(-4).reverse();
 
     // --- Actions ---
@@ -718,64 +742,154 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     };
 
     const generateImages = async (job: GenerationJob) => {
-        // Placeholder for full logic to save space, assuming generic fetch implemented
-        // RE-IMPLEMENTING simplified version for patch
-        startJob(job, "Generating...");
+        startJob(job, "Generating image...");
         try {
             let images: GeneratedImage[] = [];
             let url = `/api/${job.provider}/image`;
-            let body: Record<string, unknown> = { apiKey: job.apiKey, model: job.model, prompt: job.prompt };
+            let body: Record<string, unknown> = {
+                apiKey: job.apiKey,
+                model: job.model,
+                prompt: job.prompt,
+            };
 
-            if (job.provider === "gemini" || job.provider === "openrouter") {
-                body = { ...body, aspectRatio: job.imageAspect, imageSize: job.imageSize, numberOfImages: job.imageCount };
+            if (job.provider === "gemini") {
+                body = {
+                    ...body,
+                    aspectRatio: job.imageAspect,
+                    imageSize: job.imageSize,
+                    numberOfImages: job.imageCount,
+                };
+            } else if (job.provider === "openrouter") {
+                body = {
+                    ...body,
+                    aspectRatio: job.imageAspect,
+                    imageSize: job.imageSize,
+                    outputModalities: job.outputModalities,
+                };
             } else if (job.provider === "navy") {
-                body = { ...body, size: job.navyImageSize, numberOfImages: job.imageCount };
+                body = {
+                    ...body,
+                    size: job.navyImageSize,
+                    numberOfImages: job.imageCount,
+                    negativePrompt: job.negativePrompt,
+                    aspectRatio: job.imageAspect,
+                };
             } else {
-                url = `/api/chutes/image`;
-                body = { ...body, guidanceScale: Number(job.chutesGuidanceScale), width: Number(job.chutesWidth), height: Number(job.chutesHeight), numInferenceSteps: Number(job.chutesSteps), resolution: job.chutesResolution, seed: Number(job.chutesSeed) || null };
+                url = "/api/chutes/image";
+                body = {
+                    ...body,
+                    negativePrompt: job.negativePrompt,
+                    guidanceScale: Number(job.chutesGuidanceScale),
+                    width: Number(job.chutesWidth),
+                    height: Number(job.chutesHeight),
+                    numInferenceSteps: Number(job.chutesSteps),
+                    resolution: job.chutesResolution,
+                    seed: Number(job.chutesSeed) || null,
+                };
             }
 
-            const res = await fetch(url, { method: "POST", body: JSON.stringify(body) });
-            const payload = await res.json();
-            if (!res.ok) throw new Error(payload.error || "Failed");
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload?.error ?? "Image generation failed.");
+            }
 
             if (job.provider === "navy") {
-                for (const img of payload.images) {
-                    const dataUrl = await fetchAsDataUrl(img.url);
+                let navyPayload = payload;
+                if (typeof payload?.id === "string") {
+                    for (let attempt = 0; attempt < 60; attempt += 1) {
+                        updateJob(job.id, {
+                            progress: `Waiting for Navy image render (${attempt + 1}/60)...`,
+                        });
+                        await sleep(5000);
+                        const pollResponse = await fetch(
+                            `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
+                            {
+                                headers: {
+                                    "x-user-api-key": job.apiKey,
+                                },
+                            }
+                        );
+                        navyPayload = await pollResponse.json();
+                        if (!pollResponse.ok) {
+                            throw new Error(
+                                navyPayload?.error ?? "Unable to poll Navy image job."
+                            );
+                        }
+                        if (navyPayload?.done) {
+                            break;
+                        }
+                    }
+                }
+
+                const navyImages = Array.isArray(navyPayload?.images)
+                    ? (navyPayload.images as Array<{ url?: string; b64_json?: string }>)
+                    : [];
+                for (const image of navyImages) {
+                    if (typeof image?.b64_json === "string" && image.b64_json) {
+                        images.push({
+                            id: createId(),
+                            dataUrl: dataUrlFromBase64(image.b64_json, "image/png"),
+                            mimeType: "image/png",
+                        });
+                        continue;
+                    }
+                    if (!image?.url) continue;
+                    const dataUrl = await fetchAsDataUrl(image.url);
                     images.push({ id: createId(), dataUrl, mimeType: "image/png" });
                 }
             } else {
                 images = buildGeneratedImages(payload);
             }
 
+            if (!images.length) {
+                throw new Error("No images were returned by the model.");
+            }
+
             setGeneratedImages(images);
             const galleryEntries = await addMediaToGallery(
-                images.map(img => ({ url: img.dataUrl, mimeType: img.mimeType })),
-                { prompt: job.prompt, model: job.model, provider: job.provider, saveToGallery: job.saveToGallery, kind: "image" }
+                images.map((image) => ({ url: image.dataUrl, mimeType: image.mimeType })),
+                {
+                    prompt: job.prompt,
+                    model: job.model,
+                    provider: job.provider,
+                    saveToGallery: job.saveToGallery,
+                    kind: "image",
+                }
             );
             setLastOutput({
                 mode: "image",
                 prompt: job.prompt,
                 model: job.model,
                 provider: job.provider,
-                mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
+                mediaIds: galleryEntries.length
+                    ? galleryEntries.map((entry) => entry.id)
+                    : undefined,
             });
-            completeJob(job.id);
-        } catch (e) {
-            failJob(job.id, e instanceof Error ? e.message : "Failed");
+            completeJob(
+                job.id,
+                {},
+                `Generated ${images.length} image${images.length === 1 ? "" : "s"}.`
+            );
+        } catch (error) {
+            failJob(
+                job.id,
+                error instanceof Error ? error.message : "Image generation failed"
+            );
         }
     };
 
     const generateVideo = async (job: GenerationJob) => {
         startJob(job, "Generating Video...");
         try {
-            console.log("Generating video with model:", job.model);
-            let videoUrl: string | null = null;
-            let videoBlob: Blob | undefined;
-            let videoMimeType: string | undefined;
+            let response: Response;
 
             if (job.provider === "chutes") {
-                const response = await fetch("/api/chutes/video", {
+                response = await fetch("/api/chutes/video", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -784,98 +898,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         model: job.model,
                         image: job.videoImage,
                         fps: job.chutesVideoFps,
-                        guidance_scale_2: job.chutesVideoGuidanceScale
+                        guidance_scale_2: job.chutesVideoGuidanceScale,
                     }),
                 });
-
-                if (!response.ok) {
-                    const err = await response.text();
-                    throw new Error(err || "Failed to generate video");
-                }
-
-                const contentType = response.headers.get("content-type") ?? "";
-                if (contentType.includes("application/json")) {
-                    const data = await response.json();
-                    if (data?.error) throw new Error(data.error);
-                    if (typeof data?.url === "string") {
-                        videoUrl = data.url;
-                    } else if (typeof data?.data === "string") {
-                        const mimeType =
-                            typeof data?.mimeType === "string"
-                                ? data.mimeType
-                                : "video/mp4";
-                        videoMimeType = mimeType;
-                        videoUrl = dataUrlFromBase64(data.data, mimeType);
-                    }
-                } else {
-                    const blob = await response.blob();
-                    videoBlob = blob;
-                    videoMimeType = blob.type || "video/mp4";
-                    videoUrl = URL.createObjectURL(blob);
-                }
-            } else if (job.provider === "navy") {
-                const response = await fetch("/api/navy/video", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        apiKey: job.apiKey,
-                        model: job.model,
-                        prompt: job.prompt,
-                    }),
-                });
-
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data?.error ?? "Failed to generate video");
-                }
-                if (!data?.id) {
-                    throw new Error("No job id returned by NavyAI.");
-                }
-
-                const jobId = data.id as string;
-                const maxAttempts = 120;
-                for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-                    setStatusMessage(`Rendering (NavyAI)...`);
-                    const poll = await fetch(`/api/navy/video?id=${encodeURIComponent(jobId)}`, {
-                        headers: {
-                            "x-user-api-key": job.apiKey,
-                        },
-                    });
-                    const pollData = await poll.json();
-                    if (!poll.ok) {
-                        throw new Error(pollData?.error ?? "Unable to fetch video status");
-                    }
-                    if (!pollData.done) {
-                        await new Promise((resolve) => setTimeout(resolve, 2000));
-                        continue;
-                    }
-                    if (pollData.error) {
-                        throw new Error(pollData.error);
-                    }
-                    if (typeof pollData.videoUrl === "string") {
-                        videoUrl = pollData.videoUrl;
-                        break;
-                    }
-                }
-
-                if (videoUrl) {
-                    const downloadResponse = await fetch("/api/navy/video/download", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "x-user-api-key": job.apiKey,
-                        },
-                        body: JSON.stringify({ url: videoUrl }),
-                    });
-                    if (downloadResponse.ok) {
-                        const blob = await downloadResponse.blob();
-                        videoBlob = blob;
-                        videoMimeType = blob.type || "video/mp4";
-                        videoUrl = URL.createObjectURL(blob);
-                    }
-                }
             } else if (job.provider === "gemini") {
-                const response = await fetch("/api/gemini/video", {
+                const submitResponse = await fetch("/api/gemini/video", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -888,77 +915,181 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         negativePrompt: job.negativePrompt,
                     }),
                 });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data?.error ?? "Failed to start video generation");
-                }
-                if (!data?.name) {
-                    throw new Error("No operation name returned by Gemini.");
+                const submitPayload = await submitResponse.json();
+                if (!submitResponse.ok) {
+                    throw new Error(submitPayload?.error ?? "Video generation failed.");
                 }
 
-                const operationName = data.name as string;
-                const maxAttempts = 120;
-                for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-                    setStatusMessage(`Rendering (Gemini)...`);
-                    const poll = await fetch(`/api/gemini/video?name=${encodeURIComponent(operationName)}`, {
-                        headers: {
-                            "x-user-api-key": job.apiKey,
-                        },
+                const operationName =
+                    typeof submitPayload?.name === "string" ? submitPayload.name : "";
+                if (!operationName) {
+                    throw new Error("No Veo operation name returned.");
+                }
+
+                let videoUri = "";
+                for (let attempt = 0; attempt < 60; attempt += 1) {
+                    updateJob(job.id, {
+                        progress: `Waiting for Veo render (${attempt + 1}/60)...`,
                     });
-                    const pollData = await poll.json();
-                    if (!poll.ok) {
-                        throw new Error(pollData?.error ?? "Unable to fetch video status");
-                    }
-                    if (!pollData.done) {
-                        await new Promise((resolve) => setTimeout(resolve, 2000));
-                        continue;
-                    }
-                    if (pollData.error) {
-                        throw new Error(pollData.error);
-                    }
-                    if (typeof pollData.videoUri === "string") {
-                        const downloadResponse = await fetch("/api/gemini/video/download", {
-                            method: "POST",
+                    await sleep(10000);
+                    const pollResponse = await fetch(
+                        `/api/gemini/video?name=${encodeURIComponent(operationName)}`,
+                        {
                             headers: {
-                                "Content-Type": "application/json",
+                                "x-user-api-key": job.apiKey,
                             },
-                            body: JSON.stringify({
-                                apiKey: job.apiKey,
-                                uri: pollData.videoUri,
-                            }),
-                        });
-                        if (!downloadResponse.ok) {
-                            const err = await downloadResponse.text();
-                            throw new Error(err || "Unable to download Gemini video");
                         }
-                        const blob = await downloadResponse.blob();
-                        videoBlob = blob;
-                        videoMimeType = blob.type || "video/mp4";
-                        videoUrl = URL.createObjectURL(blob);
+                    );
+                    const pollPayload = await pollResponse.json();
+                    if (!pollResponse.ok) {
+                        throw new Error(pollPayload?.error ?? "Unable to poll Veo job.");
+                    }
+                    if (pollPayload?.done && typeof pollPayload?.videoUri === "string") {
+                        videoUri = pollPayload.videoUri;
                         break;
                     }
                 }
+
+                if (!videoUri) {
+                    throw new Error("Timed out waiting for the Veo render.");
+                }
+
+                response = await fetch("/api/gemini/video/download", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: job.apiKey,
+                        uri: videoUri,
+                    }),
+                });
+            } else if (job.provider === "navy") {
+                const submitResponse = await fetch("/api/navy/video", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        apiKey: job.apiKey,
+                        prompt: job.prompt,
+                        model: job.model,
+                        imageUrl: job.videoImage,
+                        negativePrompt: job.negativePrompt,
+                        seconds: Number(job.videoDuration),
+                        aspectRatio: job.videoAspect,
+                    }),
+                });
+                const submitPayload = await submitResponse.json();
+                if (!submitResponse.ok) {
+                    throw new Error(submitPayload?.error ?? "Video generation failed.");
+                }
+
+                let remoteVideoUrl =
+                    typeof submitPayload?.videoUrl === "string"
+                        ? submitPayload.videoUrl
+                        : "";
+                const generationId =
+                    typeof submitPayload?.id === "string" ? submitPayload.id : "";
+                if (!generationId && !remoteVideoUrl) {
+                    throw new Error("No Navy generation id returned.");
+                }
+
+                if (!remoteVideoUrl) {
+                    for (let attempt = 0; attempt < 60; attempt += 1) {
+                        updateJob(job.id, {
+                            progress: `Waiting for Navy render (${attempt + 1}/60)...`,
+                        });
+                        await sleep(5000);
+                        const pollResponse = await fetch(
+                            `/api/navy/video?id=${encodeURIComponent(generationId)}`,
+                            {
+                                headers: {
+                                    "x-user-api-key": job.apiKey,
+                                },
+                            }
+                        );
+                        const pollPayload = await pollResponse.json();
+                        if (!pollResponse.ok) {
+                            throw new Error(
+                                pollPayload?.error ?? "Unable to poll Navy video job."
+                            );
+                        }
+                        if (pollPayload?.done && typeof pollPayload?.videoUrl === "string") {
+                            remoteVideoUrl = pollPayload.videoUrl;
+                            break;
+                        }
+                    }
+                }
+
+                if (!remoteVideoUrl) {
+                    throw new Error("Timed out waiting for the Navy render.");
+                }
+
+                response = await fetch("/api/navy/video/download", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-user-api-key": job.apiKey,
+                    },
+                    body: JSON.stringify({
+                        url: remoteVideoUrl,
+                    }),
+                });
             } else {
-                throw new Error("Video generation not implemented for this provider");
+                throw new Error("Video generation is not available for this provider.");
+            }
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(errText || "Failed to generate video");
+            }
+
+            const contentType = response.headers.get("content-type") ?? "";
+            let videoUrl: string | null = null;
+            let videoBlob: Blob | undefined;
+            let videoMimeType: string | undefined;
+
+            if (contentType.includes("application/json")) {
+                const data = await response.json();
+                if (data?.error) throw new Error(data.error);
+                if (typeof data?.url === "string") {
+                    videoUrl = data.url;
+                } else if (typeof data?.data === "string") {
+                    const mimeType =
+                        typeof data?.mimeType === "string"
+                            ? data.mimeType
+                            : "video/mp4";
+                    videoMimeType = mimeType;
+                    videoUrl = dataUrlFromBase64(data.data, mimeType);
+                }
+            } else {
+                const blob = await response.blob();
+                videoBlob = blob;
+                videoMimeType = blob.type || "video/mp4";
+                videoUrl = URL.createObjectURL(blob);
             }
 
             if (!videoUrl) throw new Error("No video data received.");
+
             setVideoUrl(videoUrl);
-            completeJob(job.id, { videoUrl });
             const galleryEntries = await addMediaToGallery(
                 [{ url: videoUrl, mimeType: videoMimeType, blob: videoBlob }],
-                { prompt: job.prompt, model: job.model, provider: job.provider, saveToGallery: job.saveToGallery, kind: "video" }
+                {
+                    prompt: job.prompt,
+                    model: job.model,
+                    provider: job.provider,
+                    saveToGallery: job.saveToGallery,
+                    kind: "video",
+                }
             );
             setLastOutput({
                 mode: "video",
                 prompt: job.prompt,
                 model: job.model,
                 provider: job.provider,
-                mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
+                mediaIds: galleryEntries.length
+                    ? galleryEntries.map((entry) => entry.id)
+                    : undefined,
             });
-
+            completeJob(job.id, { videoUrl }, "Video ready.");
         } catch (error) {
-            console.error("Video generation error:", error);
             failJob(job.id, error instanceof Error ? error.message : "Video generation failed");
         }
     };
@@ -974,8 +1105,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const generateAudio = async (job: GenerationJob) => {
         startJob(job, "Generating Audio...");
         try {
-            console.log("Generating audio with model:", job.model);
-
             if (job.provider === "chutes") {
                 const normalizedModel = (job.model || "").toLowerCase();
                 const isCsm = normalizedModel === "csm-1b";
@@ -1038,10 +1167,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     ttsVoice: job.ttsVoice,
                     mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
                 });
-                completeJob(job.id, { audioUrl: audioDataUrl, audioData: audioDataUrl.startsWith("data:") ? audioDataUrl : undefined }); // Store dataUrl in job for history
+                completeJob(job.id, {
+                    audioUrl: audioDataUrl,
+                    audioData: audioDataUrl.startsWith("data:") ? audioDataUrl : undefined,
+                });
                 return;
             }
-
+            
             if (job.provider === "navy") {
                 const response = await fetch("/api/navy/tts", {
                     method: "POST",
@@ -1051,26 +1183,35 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         model: job.model,
                         input: job.prompt,
                         voice: job.ttsVoice,
-                        speed: Number(job.ttsSpeed) || undefined,
+                        speed: Number(job.ttsSpeed),
                         responseFormat: job.ttsFormat,
                     }),
                 });
-
-                const data = await response.json();
+                const payload = await response.json();
                 if (!response.ok) {
-                    throw new Error(data?.error ?? "Failed to generate audio");
+                    throw new Error(payload?.error ?? "Speech generation failed.");
                 }
-                const audioData = data?.audio?.data;
-                const mimeType = data?.audio?.mimeType ?? "audio/mpeg";
-                if (typeof audioData !== "string" || !audioData.length) {
+                const audio = payload?.audio;
+                if (
+                    !audio ||
+                    typeof audio?.data !== "string" ||
+                    typeof audio?.mimeType !== "string"
+                ) {
                     throw new Error("No audio data received.");
                 }
-                const audioDataUrl = dataUrlFromBase64(audioData, mimeType);
+
+                const audioDataUrl = dataUrlFromBase64(audio.data, audio.mimeType);
                 setAudioUrl(audioDataUrl);
-                setAudioMimeType(mimeType);
+                setAudioMimeType(audio.mimeType);
                 const galleryEntries = await addMediaToGallery(
-                    [{ url: audioDataUrl, mimeType }],
-                    { prompt: job.prompt, model: job.model, provider: job.provider, saveToGallery: job.saveToGallery, kind: "audio" }
+                    [{ url: audioDataUrl, mimeType: audio.mimeType }],
+                    {
+                        prompt: job.prompt,
+                        model: job.model,
+                        provider: job.provider,
+                        saveToGallery: job.saveToGallery,
+                        kind: "audio",
+                    }
                 );
                 setLastOutput({
                     mode: "tts",
@@ -1078,16 +1219,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     model: job.model,
                     provider: job.provider,
                     ttsVoice: job.ttsVoice,
-                    mediaIds: galleryEntries.length ? galleryEntries.map((entry) => entry.id) : undefined,
+                    mediaIds: galleryEntries.length
+                        ? galleryEntries.map((entry) => entry.id)
+                        : undefined,
                 });
-                completeJob(job.id, { audioUrl: audioDataUrl, audioData: audioDataUrl });
+                completeJob(job.id, {
+                    audioUrl: audioDataUrl,
+                    audioData: audioDataUrl,
+                });
                 return;
             }
 
             throw new Error("Audio generation not implemented for this provider");
-
         } catch (error) {
-            console.error("Audio generation error:", error);
             failJob(job.id, error instanceof Error ? error.message : "Audio generation failed");
         }
     };
@@ -1100,15 +1244,24 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const nextJob = jobs.find(j => j.status === "queued");
         if (!nextJob) return;
         processingRef.current = true;
-        runJob(nextJob).finally(() => { processingRef.current = false; });
+        runJob(nextJob).finally(() => {
+            processingRef.current = false;
+            setQueueTick((value) => value + 1);
+        });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [jobs, hydrated]);
+    }, [jobs, hydrated, queueTick]);
 
     const handleGenerate = () => {
         if (!apiKey.trim()) { setErrorMessage("API Key required"); return; }
         if (!prompt.trim()) { setErrorMessage("Prompt required"); return; }
+        if (mode === "video" && provider === "chutes" && !videoImage) {
+            setErrorMessage("Chutes video generation requires a source image.");
+            return;
+        }
+        const selectedModel = modelSuggestions.find((entry) => entry.id === model);
         const job: GenerationJob = {
             id: createId(), status: "queued", mode, provider, model, prompt, apiKey, createdAt: new Date().toISOString(),
+            outputModalities: selectedModel?.outputModalities,
             imageCount, imageAspect, imageSize, navyImageSize, chutesGuidanceScale, chutesWidth, chutesHeight, chutesSteps, chutesResolution, chutesSeed,
             chutesVideoFps, chutesVideoGuidanceScale, videoImage: videoImage || undefined,
             videoAspect, videoResolution, videoDuration, ttsVoice, ttsFormat, ttsSpeed, saveToGallery,
@@ -1202,22 +1355,26 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     const refreshModels = useCallback(async () => {
         if (provider !== "openrouter" && provider !== "navy") return;
+        if (!apiKey.trim()) {
+            setModelsError("Add the provider API key before refreshing models.");
+            return;
+        }
         setModelsLoading(true);
         setModelsError(null);
         try {
             if (provider === "openrouter") {
-                const key = apiKeys.openrouter;
+                const key = apiKeys.openrouter.trim() || apiKey.trim();
                 if (!key.trim()) {
                     throw new Error("Missing OpenRouter API key.");
                 }
-                const response = await fetch("/api/openrouter/models", {
+                const response = await fetch("/api/openrouter/models?output_modalities=image", {
                     headers: {
                         "x-user-api-key": key,
                     },
                 });
                 const payload = await response.json();
                 if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch models from openrouter");
-                const models = sanitizeModelOptions(payload);
+                const models = extractOpenRouterImageModels(payload);
                 setOpenRouterImageModels(models);
             } else {
                 await refreshNavyCatalog();
@@ -1227,7 +1384,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         } finally {
             setModelsLoading(false);
         }
-    }, [provider, apiKeys.openrouter, refreshNavyCatalog]);
+    }, [apiKey, provider, apiKeys.openrouter, refreshNavyCatalog]);
 
     const refreshChutesChatModels = useCallback(async () => {
         setChutesChatModelsLoading(true);
@@ -1537,9 +1694,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             chutesTtsSpeaker,
             chutesTtsMaxDuration,
         };
-        try {
-            writeLocalStorage(STORAGE_KEYS.settings, JSON.stringify(payload));
-        } catch { }
+        const handle = window.setTimeout(() => {
+            try {
+                writeLocalStorage(STORAGE_KEYS.settings, JSON.stringify(payload));
+            } catch { }
+        }, 150);
+        return () => window.clearTimeout(handle);
     }, [
         prompt,
         negativePrompt,
@@ -1770,6 +1930,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         audioMimeType, setAudioMimeType,
         lastOutput, setLastOutput,
         jobs, updateJobs,
+        activeJobCount,
         hasActiveJobs, runningJobs, queuedJobs, recentJobs,
         supportsVideo, supportsTts,
         clearKey, clearGallery,

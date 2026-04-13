@@ -164,6 +164,7 @@ export function ImgGenSettings({
     const isOpenRouter = provider === "openrouter";
     const isImagenModel = model.startsWith("imagen-");
     const isOpenRouterGemini = isOpenRouter && model.includes("gemini");
+    const isFluxFamilyModel = model.toLowerCase().includes("flux");
     const isChutesHiDream =
         provider === "chutes" && model.toLowerCase().includes("hidream");
     const normalizedModel = model.toLowerCase();
@@ -175,7 +176,8 @@ export function ImgGenSettings({
         provider === "gemini"
             ? model.includes("gemini-3-pro") || isImagenModel
             : provider === "navy" || (isOpenRouter && isOpenRouterGemini);
-    const showImageAspect = provider === "gemini" || isOpenRouterGemini;
+    const showImageAspect =
+        provider === "gemini" || isOpenRouterGemini || provider === "navy";
     const availableImageSizes = isImagenModel ? IMAGEN_SIZES : IMAGE_SIZES;
     const galleryDisabled = false;
     const usagePercent =
@@ -258,7 +260,11 @@ export function ImgGenSettings({
                             ))}
                         </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">Select a model.</p>
+                    <p className="text-xs text-muted-foreground">
+                        {isFluxFamilyModel
+                            ? "Flux models work best with natural-language prompts and positive framing."
+                            : "Select a model."}
+                    </p>
                     {modelsError ? (
                         <p className="text-xs text-destructive">{modelsError}</p>
                     ) : null}
@@ -268,20 +274,32 @@ export function ImgGenSettings({
                 {mode === "image" && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {provider === "navy" ? (
-                            <div className="space-y-2">
-                                <Label>Size</Label>
-                                <Select value={navyImageSize} onValueChange={setNavyImageSize}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {/* Assuming Navy uses standard sizes or we need to fetch them. defaulting to 1024x1024 */}
-                                        <SelectItem value="1024x1024">1024x1024</SelectItem>
-                                        <SelectItem value="512x512">512x512</SelectItem>
-                                        <SelectItem value="768x768">768x768</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                            <>
+                                <div className="space-y-2">
+                                    <Label>Size</Label>
+                                    <Select value={navyImageSize} onValueChange={setNavyImageSize}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="1024x1024">1024x1024</SelectItem>
+                                            <SelectItem value="512x512">512x512</SelectItem>
+                                            <SelectItem value="768x768">768x768</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Aspect Ratio</Label>
+                                    <Select value={imageAspect} onValueChange={setImageAspect}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {IMAGE_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </>
                         ) : (
                             <>
                                 {showImageAspect && (

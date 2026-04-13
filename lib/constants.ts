@@ -4,6 +4,7 @@ export type ChatProvider = "chutes" | "navy";
 export type ModelOption = {
     id: string;
     label: string;
+    outputModalities?: string[];
 };
 
 export const GEMINI_IMAGE_MODELS: ModelOption[] = [
@@ -38,12 +39,16 @@ export const GEMINI_VIDEO_MODELS: ModelOption[] = [
 
 export const NAVY_IMAGE_MODELS: ModelOption[] = [
     {
-        id: "flux.1-schnell",
-        label: "Flux 1 Schnell",
+        id: "flux",
+        label: "Flux",
     },
     {
         id: "dall-e-3",
         label: "DALL-E 3",
+    },
+    {
+        id: "gpt-image-1.5",
+        label: "GPT Image 1.5",
     },
 ];
 
@@ -338,18 +343,22 @@ export const OPENROUTER_IMAGE_MODELS: ModelOption[] = [
     {
         id: "google/gemini-2.5-flash-image-preview",
         label: "Gemini 2.5 Flash Image Preview",
+        outputModalities: ["text", "image"],
     },
     {
         id: "black-forest-labs/flux.2-pro",
         label: "Flux 2 Pro",
+        outputModalities: ["image"],
     },
     {
         id: "black-forest-labs/flux.2-flex",
         label: "Flux 2 Flex",
+        outputModalities: ["image"],
     },
     {
         id: "sourceful/riverflow-v2-standard-preview",
         label: "Riverflow V2 Standard Preview",
+        outputModalities: ["image"],
     },
 ];
 
@@ -361,6 +370,18 @@ export const NAVY_TTS_MODELS: ModelOption[] = [
     {
         id: "tts-1-hd",
         label: "TTS 1 HD",
+    },
+    {
+        id: "gpt-4o-mini-tts",
+        label: "GPT-4o Mini TTS",
+    },
+    {
+        id: "gemini-2.5-flash-preview-tts",
+        label: "Gemini 2.5 Flash Preview TTS",
+    },
+    {
+        id: "eleven_v3",
+        label: "ElevenLabs v3",
     },
 ];
 
@@ -381,7 +402,27 @@ export const IMAGEN_SIZES = ["1K", "2K"];
 export const VIDEO_ASPECTS = ["16:9", "9:16"];
 export const VIDEO_RESOLUTIONS = ["720p", "1080p"];
 export const VIDEO_DURATIONS = ["4", "6", "8"];
-export const TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+export const TTS_VOICES = [
+    "alloy",
+    "ash",
+    "coral",
+    "echo",
+    "fable",
+    "nova",
+    "onyx",
+    "sage",
+    "shimmer",
+    "alice",
+    "aria",
+    "brian",
+    "charlie",
+    "jessica",
+    "Puck",
+    "Charon",
+    "Kore",
+    "Fenrir",
+    "Aoede",
+];
 export const TTS_FORMATS = ["mp3", "opus", "aac", "flac"];
 
 export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {

@@ -1,13 +1,18 @@
 export const runtime = "edge";
 
+import {
+  buildNavyImageGenerationPayload,
+  isNavyGenerationPending,
+} from "@/lib/studio-generation";
+
 type VideoRequest = {
   apiKey: string;
   model: string;
   prompt: string;
-  size?: string;
   imageUrl?: string;
+  negativePrompt?: string;
   seconds?: number;
-  seed?: number;
+  aspectRatio?: string;
 };
 
 export async function POST(req: Request) {
@@ -18,7 +23,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, prompt, size, imageUrl, seconds, seed } = body;
+  const { apiKey, model, prompt, imageUrl, negativePrompt, seconds, aspectRatio } =
+    body;
   if (!apiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
@@ -29,21 +35,17 @@ export async function POST(req: Request) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      prompt,
-      sync: false,
-      ...(typeof size === "string" && size.trim().length
-        ? { size: size.trim() }
-        : {}),
-      ...(typeof imageUrl === "string" && imageUrl.trim().length
-        ? { image_url: imageUrl.trim() }
-        : {}),
-      ...(typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
-        ? { seconds }
-        : {}),
-      ...(typeof seed === "number" && Number.isFinite(seed) ? { seed } : {}),
-    }),
+    body: JSON.stringify(
+      buildNavyImageGenerationPayload({
+        model,
+        prompt,
+        imageUrl,
+        negativePrompt,
+        seconds,
+        aspectRatio,
+        sync: false,
+      })
+    ),
   });
 
   const data = await response.json();
@@ -55,6 +57,10 @@ export async function POST(req: Request) {
   }
 
   if (!data?.id) {
+    const videoUrl = data?.data?.[0]?.url ?? data?.result?.data?.[0]?.url;
+    if (typeof videoUrl === "string" && videoUrl) {
+      return Response.json({ videoUrl, status: data?.status ?? null });
+    }
     return Response.json(
       { error: "No job id returned by NavyAI." },
       { status: 502 }
@@ -89,30 +95,16 @@ export async function GET(req: Request) {
     );
   }
 
-  const status =
-    typeof data?.status === "string" ? data.status.toLowerCase() : null;
-  if (status && status !== "completed") {
-    if (status === "failed" || status === "error" || status === "cancelled" || status === "canceled") {
-      return Response.json(
-        {
-          done: true,
-          error:
-            data?.error?.message ??
-            data?.error ??
-            `Video generation ended with status: ${status}`,
-        },
-        { status: 502 }
-      );
-    }
+  if (isNavyGenerationPending(typeof data?.status === "string" ? data.status : null)) {
     return Response.json({ done: false, status: data.status });
   }
 
   const result = data.result ?? data;
   const url =
     result?.data?.[0]?.url ??
-    result?.output?.[0]?.url ??
-    result?.video?.url ??
-    null;
+    result?.data?.[0]?.video_url ??
+    result?.video_url ??
+    result?.url;
 
   if (!url) {
     return Response.json(

@@ -1,11 +1,14 @@
 export const runtime = "edge";
 
+import { resolveOpenRouterModalities } from "@/lib/studio-generation";
+
 type ImageRequest = {
   apiKey: string;
   model: string;
   prompt: string;
   aspectRatio?: string;
   imageSize?: string;
+  outputModalities?: string[];
 };
 
 type ImagePayload = {
@@ -50,15 +53,17 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, prompt, aspectRatio, imageSize } = body;
+  const { apiKey, model, prompt, aspectRatio, imageSize, outputModalities } = body;
   if (!apiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
+  const modalities = resolveOpenRouterModalities(model, outputModalities);
+
   const payload = {
     model,
     messages: [{ role: "user", content: prompt }],
-    modalities: ["image", "text"],
+    modalities,
     ...(aspectRatio || imageSize
       ? {
           image_config: {

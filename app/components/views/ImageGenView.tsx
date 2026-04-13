@@ -125,15 +125,16 @@ export function ImageGenView() {
                             onGenerate={context.handleGenerate}
                             busy={context.hasActiveJobs}
                             mode={context.mode}
+                            showNegativePrompt={!context.model.toLowerCase().includes("flux")}
                         />
 
-                        {context.jobs.length > 0 && (
+                        {context.activeJobCount > 0 && (
                             <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-2 text-[10px] sm:text-xs font-medium text-muted-foreground bg-background/50 px-2 py-1 rounded-full border">
                                 <span className="relative flex h-2 w-2">
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                                 </span>
-                                Processing {context.jobs.length} job(s)
+                                Processing {context.activeJobCount} job(s)
                             </div>
                         )}
                     </motion.div>
