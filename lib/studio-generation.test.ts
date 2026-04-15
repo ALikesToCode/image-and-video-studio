@@ -7,6 +7,10 @@ import {
   buildChutesChatSystemPrompt,
   extractOpenRouterImageModels,
   getActiveJobCount,
+  getQueuedJobsToStart,
+  mergeGeneratedImagesInDisplayOrder,
+  prepareImagePromptForModel,
+  resolveImageGenerationModelPipeline,
   groupNavyModelsByCapability,
   isNavyGenerationPending,
   resolveOpenRouterModalities,
@@ -64,35 +68,120 @@ test("Only queued and running jobs count as active work", () => {
 });
 
 test("Navy image payload maps OpenAI-compatible fields to Navy API fields", () => {
+  const payload = buildNavyImageGenerationPayload({
+    model: "flux",
+    prompt: "A naval command room at dusk",
+    size: "1024x1024",
+    numberOfImages: 2,
+    quality: "medium",
+    imageUrl: "https://example.com/ref.png",
+    negativePrompt: "text artifacts",
+    seed: 42,
+    seconds: 6,
+    sync: false,
+    responseFormat: "url",
+    aspectRatio: "16:9",
+  });
+
+  assert.equal(payload.model, "flux");
+  assert.equal(payload.n, 2);
+  assert.equal(payload.quality, "medium");
+  assert.equal(payload.image_url, "https://example.com/ref.png");
+  assert.equal(payload.seed, 42);
+  assert.equal(payload.seconds, 6);
+  assert.equal(payload.sync, false);
+  assert.equal(payload.response_format, "url");
+  assert.equal(payload.aspect_ratio, "16:9");
+  assert.equal("size" in payload, false);
+  assert.equal("negative_prompt" in payload, false);
+  assert.match(payload.prompt, /^A naval command room at dusk\./);
+  assert.match(payload.prompt, /artifact-free rendering/i);
+  assert.match(payload.prompt, /clean surfaces without embedded typography or branding/i);
+});
+
+test("Flux prompt preparation rewrites structured prompts into positive natural language", () => {
+  const prepared = prepareImagePromptForModel(
+    "flux",
+    `Create a high-detail modern anime illustration.
+
+Background/setting: Narrow urban alley in Ginza, Tokyo during late autumn afternoon.
+Main character (focus): Satoru Gojo, very tall woman in late twenties.
+Lighting: Dramatic contrast between warm golden hour sunlight and cold blue glow from blindfold.`,
+    "blurry, text, watermark, extra fingers"
+  );
+
+  assert.equal(prepared.negativePrompt, undefined);
+  assert.match(prepared.prompt, /Artwork direction: a high-detail modern anime illustration/i);
+  assert.match(prepared.prompt, /Background and setting: Narrow urban alley in Ginza, Tokyo during late autumn afternoon\./i);
+  assert.match(prepared.prompt, /Main character: Satoru Gojo, very tall woman in late twenties\./i);
+  assert.match(prepared.prompt, /sharp focus and crisp detail/i);
+  assert.match(prepared.prompt, /coherent anatomy with natural hands and accurate proportions/i);
+});
+
+test("Image model pipeline keeps explicit order and removes duplicates", () => {
   assert.deepEqual(
-    buildNavyImageGenerationPayload({
-      model: "flux",
-      prompt: "A naval command room at dusk",
-      size: "1024x1024",
-      numberOfImages: 2,
-      quality: "medium",
-      imageUrl: "https://example.com/ref.png",
-      negativePrompt: "text artifacts",
-      seed: 42,
-      seconds: 6,
-      sync: false,
-      responseFormat: "url",
-      aspectRatio: "16:9",
-    }),
+    resolveImageGenerationModelPipeline(
+      ["black-forest-labs/flux.2-pro", "flux", "black-forest-labs/flux.2-pro"],
+      "gpt-image-1.5",
+      ["flux", "gpt-image-1.5", "black-forest-labs/flux.2-pro"]
+    ),
+    ["black-forest-labs/flux.2-pro", "flux"]
+  );
+
+  assert.deepEqual(
+    resolveImageGenerationModelPipeline([], "flux", ["flux", "gpt-image-1.5"]),
+    ["flux"]
+  );
+});
+
+test("Queue selection starts multiple image jobs without blocking on one queued image", () => {
+  const jobs = getQueuedJobsToStart(
+    [
+      { id: "img-running", status: "running", mode: "image" },
+      { id: "img-1", status: "queued", mode: "image" },
+      { id: "img-2", status: "queued", mode: "image" },
+      { id: "video-1", status: "queued", mode: "video" },
+      { id: "audio-1", status: "queued", mode: "tts" },
+    ],
     {
-      model: "flux",
-      prompt: "A naval command room at dusk",
-      size: "1024x1024",
-      n: 2,
-      quality: "medium",
-      image_url: "https://example.com/ref.png",
-      negative_prompt: "text artifacts",
-      seed: 42,
-      seconds: 6,
-      sync: false,
-      response_format: "url",
-      aspect_ratio: "16:9",
+      maxConcurrentImageJobs: 3,
+      maxConcurrentNonImageJobs: 1,
     }
+  );
+
+  assert.deepEqual(
+    jobs.map((job) => job.id),
+    ["img-1", "img-2", "video-1"]
+  );
+});
+
+test("Generated images are merged in requested model order instead of completion order", () => {
+  const ordered = mergeGeneratedImagesInDisplayOrder(
+    [
+      {
+        id: "late-finish",
+        dataUrl: "data:image/png;base64,bbb",
+        mimeType: "image/png",
+        batchCreatedAt: "2026-04-15T09:00:00.000Z",
+        batchOrder: 1,
+        imageOrder: 0,
+      },
+    ],
+    [
+      {
+        id: "early-order",
+        dataUrl: "data:image/png;base64,aaa",
+        mimeType: "image/png",
+        batchCreatedAt: "2026-04-15T09:00:00.000Z",
+        batchOrder: 0,
+        imageOrder: 0,
+      },
+    ]
+  );
+
+  assert.deepEqual(
+    ordered.map((image) => image.id),
+    ["early-order", "late-finish"]
   );
 });
 

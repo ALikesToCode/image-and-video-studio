@@ -1,6 +1,9 @@
 export const runtime = "edge";
 
-import { resolveOpenRouterModalities } from "@/lib/studio-generation";
+import {
+  prepareImagePromptForModel,
+  resolveOpenRouterModalities,
+} from "@/lib/studio-generation";
 
 type ImageRequest = {
   apiKey: string;
@@ -59,10 +62,11 @@ export async function POST(req: Request) {
   }
 
   const modalities = resolveOpenRouterModalities(model, outputModalities);
+  const preparedPrompt = prepareImagePromptForModel(model, prompt);
 
   const payload = {
     model,
-    messages: [{ role: "user", content: prompt }],
+    messages: [{ role: "user", content: preparedPrompt.prompt }],
     modalities,
     ...(aspectRatio || imageSize
       ? {

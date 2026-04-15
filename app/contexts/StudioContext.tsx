@@ -34,7 +34,10 @@ import {
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
 import {
     extractOpenRouterImageModels,
+    getQueuedJobsToStart,
     getActiveJobCount,
+    mergeGeneratedImagesInDisplayOrder,
+    resolveImageGenerationModelPipeline,
 } from "@/lib/studio-generation";
 import {
     clearGalleryStore,
@@ -57,6 +60,9 @@ export type GenerationJob = {
     prompt: string;
     apiKey: string;
     createdAt: string;
+    batchId?: string;
+    batchCreatedAt?: string;
+    batchOrder?: number;
     startedAt?: string;
     finishedAt?: string;
     error?: string;
@@ -136,6 +142,8 @@ const STORAGE_KEYS = {
 type StoredSettings = Partial<{
     prompt: string;
     negativePrompt: string;
+    imagePipelineEnabled: boolean;
+    imageModelOrder: string[];
     imageCount: number;
     imageAspect: string;
     imageSize: string;
@@ -265,7 +273,30 @@ const sanitizeGeneratedImages = (value: unknown): GeneratedImage[] => {
             if (!dataUrl) return null;
             const mimeType = getString(item.mimeType, "image/png");
             const id = getString(item.id, createId());
-            return { id, dataUrl, mimeType };
+            const model = getString(item.model);
+            const prompt = getString(item.prompt);
+            const provider = isProvider(item.provider) ? item.provider : undefined;
+            const batchId = getString(item.batchId);
+            const batchCreatedAt = getString(item.batchCreatedAt);
+            const batchOrder =
+                typeof item.batchOrder === "number" ? item.batchOrder : undefined;
+            const imageOrder =
+                typeof item.imageOrder === "number" ? item.imageOrder : undefined;
+            const createdAt = getString(item.createdAt);
+
+            return {
+                id,
+                dataUrl,
+                mimeType,
+                ...(model ? { model } : {}),
+                ...(prompt ? { prompt } : {}),
+                ...(provider ? { provider } : {}),
+                ...(batchId ? { batchId } : {}),
+                ...(batchCreatedAt ? { batchCreatedAt } : {}),
+                ...(typeof batchOrder === "number" ? { batchOrder } : {}),
+                ...(typeof imageOrder === "number" ? { imageOrder } : {}),
+                ...(createdAt ? { createdAt } : {}),
+            };
         })
         .filter((item): item is GeneratedImage => !!item)
         .slice(0, MAX_SAVED_MEDIA);
@@ -322,6 +353,10 @@ interface StudioContextType {
     setNegativePrompt: (s: string) => void;
     imageCount: number;
     setImageCount: (n: number) => void;
+    imagePipelineEnabled: boolean;
+    setImagePipelineEnabled: (enabled: boolean) => void;
+    imageModelOrder: string[];
+    setImageModelOrder: React.Dispatch<React.SetStateAction<string[]>>;
     imageAspect: string;
     setImageAspect: (s: string) => void;
     imageSize: string;
@@ -491,6 +526,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [prompt, setPrompt] = useState("");
     const [negativePrompt, setNegativePrompt] = useState("");
     const [imageCount, setImageCount] = useState(1);
+    const [imagePipelineEnabled, setImagePipelineEnabled] = useState(false);
+    const [imageModelOrder, setImageModelOrder] = useState<string[]>([]);
     const [imageAspect, setImageAspect] = useState(IMAGE_ASPECTS[0]);
     const [imageSize, setImageSize] = useState(IMAGE_SIZES[0]);
     const [navyImageSize, setNavyImageSize] = useState("1024x1024");
@@ -556,7 +593,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     // --- Refs ---
     const galleryUrlsRef = useRef(new Map<string, string>());
     const navyUsageLoadingRef = useRef(false);
-    const processingRef = useRef(false);
+    const processingRef = useRef(new Set<string>());
     const lastProviderModeRef = useRef(`${provider}:${mode}`);
 
     // --- Computed ---
@@ -640,6 +677,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const activeJobCount = getActiveJobCount(jobs);
     const hasActiveJobs = activeJobCount > 0;
     const recentJobs = jobs.slice(-4).reverse();
+    const resolvedImageModelOrder = useMemo(
+        () =>
+            resolveImageGenerationModelPipeline(
+                imageModelOrder,
+                model,
+                modelSuggestions.map((entry) => entry.id)
+            ),
+        [imageModelOrder, model, modelSuggestions]
+    );
 
     // --- Actions ---
 
@@ -850,7 +896,23 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 throw new Error("No images were returned by the model.");
             }
 
-            setGeneratedImages(images);
+            const finalizedImages = images.map((image, index) => ({
+                ...image,
+                model: job.model,
+                provider: job.provider,
+                prompt: job.prompt,
+                batchId: job.batchId,
+                batchCreatedAt: job.batchCreatedAt ?? job.createdAt,
+                batchOrder: job.batchOrder ?? 0,
+                imageOrder: index,
+                createdAt: new Date().toISOString(),
+            }));
+
+            React.startTransition(() => {
+                setGeneratedImages((prev) =>
+                    mergeGeneratedImagesInDisplayOrder(prev, finalizedImages)
+                );
+            });
             const galleryEntries = await addMediaToGallery(
                 images.map((image) => ({ url: image.dataUrl, mimeType: image.mimeType })),
                 {
@@ -873,7 +935,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             completeJob(
                 job.id,
                 {},
-                `Generated ${images.length} image${images.length === 1 ? "" : "s"}.`
+                `Generated ${images.length} image${images.length === 1 ? "" : "s"} with ${job.model}.`
             );
         } catch (error) {
             failJob(
@@ -1240,14 +1302,31 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     // Queue Processor
     useEffect(() => {
-        if (!hydrated || processingRef.current) return;
-        const nextJob = jobs.find(j => j.status === "queued");
-        if (!nextJob) return;
-        processingRef.current = true;
-        runJob(nextJob).finally(() => {
-            processingRef.current = false;
-            setQueueTick((value) => value + 1);
-        });
+        if (!hydrated) return;
+        const nextJobs = getQueuedJobsToStart(
+            jobs.map((job) => ({
+                id: job.id,
+                status: job.status,
+                mode: job.mode,
+            })),
+            {
+                activeIds: Array.from(processingRef.current),
+                maxConcurrentImageJobs: 3,
+                maxConcurrentNonImageJobs: 1,
+            }
+        );
+        if (!nextJobs.length) return;
+
+        for (const queuedJob of nextJobs) {
+            const nextJob = jobs.find((job) => job.id === queuedJob.id);
+            if (!nextJob) continue;
+
+            processingRef.current.add(nextJob.id);
+            runJob(nextJob).finally(() => {
+                processingRef.current.delete(nextJob.id);
+                setQueueTick((value) => value + 1);
+            });
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [jobs, hydrated, queueTick]);
 
@@ -1258,20 +1337,60 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             setErrorMessage("Chutes video generation requires a source image.");
             return;
         }
-        const selectedModel = modelSuggestions.find((entry) => entry.id === model);
-        const job: GenerationJob = {
-            id: createId(), status: "queued", mode, provider, model, prompt, apiKey, createdAt: new Date().toISOString(),
-            outputModalities: selectedModel?.outputModalities,
-            imageCount, imageAspect, imageSize, navyImageSize, chutesGuidanceScale, chutesWidth, chutesHeight, chutesSteps, chutesResolution, chutesSeed,
-            chutesVideoFps, chutesVideoGuidanceScale, videoImage: videoImage || undefined,
-            videoAspect, videoResolution, videoDuration, ttsVoice, ttsFormat, ttsSpeed, saveToGallery,
-            negativePrompt,
-            chutesTtsSpeed,
-            chutesTtsSpeaker,
-            chutesTtsMaxDuration,
-        };
-        setJobs(prev => [...prev, job]);
-        setStatusMessage("Queued...");
+        const batchCreatedAt = new Date().toISOString();
+        const modelsToRun =
+            mode === "image" && imagePipelineEnabled
+                ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
+                : [model];
+
+        const jobsToQueue = modelsToRun.map((jobModel, index) => {
+            const selectedModel = modelSuggestions.find((entry) => entry.id === jobModel);
+            return {
+                id: createId(),
+                status: "queued" as const,
+                mode,
+                provider,
+                model: jobModel,
+                prompt,
+                apiKey,
+                createdAt: batchCreatedAt,
+                batchId: `${batchCreatedAt}:${provider}:${mode}`,
+                batchCreatedAt,
+                batchOrder: index,
+                outputModalities: selectedModel?.outputModalities,
+                imageCount,
+                imageAspect,
+                imageSize,
+                navyImageSize,
+                chutesGuidanceScale,
+                chutesWidth,
+                chutesHeight,
+                chutesSteps,
+                chutesResolution,
+                chutesSeed,
+                chutesVideoFps,
+                chutesVideoGuidanceScale,
+                videoImage: videoImage || undefined,
+                videoAspect,
+                videoResolution,
+                videoDuration,
+                ttsVoice,
+                ttsFormat,
+                ttsSpeed,
+                saveToGallery,
+                negativePrompt,
+                chutesTtsSpeed,
+                chutesTtsSpeaker,
+                chutesTtsMaxDuration,
+            };
+        });
+
+        setJobs((prev) => [...prev, ...jobsToQueue]);
+        setStatusMessage(
+            jobsToQueue.length > 1
+                ? `Queued ${jobsToQueue.length} image jobs in pipeline order.`
+                : "Queued..."
+        );
     };
 
     const clearKey = () => {
@@ -1473,6 +1592,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (storedPrompt) setPrompt(storedPrompt);
             const storedNegativePrompt = getString(storedSettings.negativePrompt);
             if (storedNegativePrompt) setNegativePrompt(storedNegativePrompt);
+            setImagePipelineEnabled(
+                getBoolean(storedSettings.imagePipelineEnabled, false)
+            );
+            if (Array.isArray(storedSettings.imageModelOrder)) {
+                setImageModelOrder(
+                    storedSettings.imageModelOrder.filter(
+                        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+                    )
+                );
+            }
 
             const storedImageCount = getNumber(storedSettings.imageCount, 1);
             if (storedImageCount > 0) setImageCount(storedImageCount);
@@ -1656,6 +1785,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [provider, mode, modelSuggestions, model, hydrated]);
 
     useEffect(() => {
+        if (!hydrated || mode !== "image") return;
+        setImageModelOrder((prev) =>
+            resolveImageGenerationModelPipeline(
+                prev,
+                model,
+                modelSuggestions.map((entry) => entry.id)
+            )
+        );
+    }, [model, modelSuggestions, mode, hydrated]);
+
+    useEffect(() => {
         if (!hydrated) return;
         if (!model) return;
         const selectionKey = `${provider}:${mode}`;
@@ -1671,6 +1811,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const payload: StoredSettings = {
             prompt,
             negativePrompt,
+            imagePipelineEnabled,
+            imageModelOrder: resolvedImageModelOrder,
             imageCount,
             imageAspect,
             imageSize,
@@ -1703,6 +1845,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [
         prompt,
         negativePrompt,
+        imagePipelineEnabled,
+        resolvedImageModelOrder,
         imageCount,
         imageAspect,
         imageSize,
@@ -1865,6 +2009,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     id: entry.id,
                     dataUrl: entry.dataUrl,
                     mimeType: entry.mimeType ?? "image/png",
+                    model: entry.model,
+                    provider: entry.provider,
+                    prompt: entry.prompt,
+                    createdAt: entry.createdAt,
                 }))
                 .slice(0, MAX_SAVED_MEDIA);
             if (images.length) {
@@ -1883,6 +2031,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         prompt, setPrompt,
         negativePrompt, setNegativePrompt,
         imageCount, setImageCount,
+        imagePipelineEnabled, setImagePipelineEnabled,
+        imageModelOrder, setImageModelOrder,
         imageAspect, setImageAspect,
         imageSize, setImageSize,
         navyImageSize, setNavyImageSize,

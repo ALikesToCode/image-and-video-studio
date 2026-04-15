@@ -17,6 +17,14 @@ export type GeneratedImage = {
     id: string;
     dataUrl: string;
     mimeType: string;
+    model?: string;
+    provider?: Provider;
+    prompt?: string;
+    batchId?: string;
+    batchCreatedAt?: string;
+    batchOrder?: number;
+    imageOrder?: number;
+    createdAt?: string;
 };
 
 export type NavyUsageResponse = {

@@ -1,4 +1,5 @@
 import type { ModelOption } from "./constants.ts";
+import type { GeneratedImage } from "./types.ts";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
 
 type ActiveJobLike = {
@@ -28,8 +29,131 @@ type NavyModelGroups = {
   audio: ModelOption[];
 };
 
+type QueueMode = "image" | "video" | "tts";
+
+type QueueJobLike = {
+  id: string;
+  status: "queued" | "running" | "success" | "error";
+  mode: QueueMode;
+};
+
 const normalizeModalities = (modalities?: string[]) =>
   (modalities ?? []).map((value) => value.toLowerCase());
+
+const normalizeWhitespace = (value: string) =>
+  value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+
+const ensureSentence = (value: string) => {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (!trimmed) return "";
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+};
+
+const toSectionTitle = (rawLabel: string) => {
+  const normalized = rawLabel.trim().toLowerCase();
+  if (normalized === "background/setting") return "Background and setting";
+  if (normalized === "main character (focus)") return "Main character";
+  if (normalized === "hair & makeup") return "Hair and makeup";
+  if (normalized === "pose/expression") return "Pose and expression";
+  if (normalized === "composition/camera") return "Composition and camera";
+  return rawLabel
+    .replace(/[()]/g, "")
+    .replace(/[/-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const NEGATIVE_PROMPT_UPGRADES: Array<[RegExp, string]> = [
+  [/\b(blurry|blur|soft focus)\b/i, "sharp focus and crisp detail"],
+  [
+    /\b(text|caption|lettering|watermark|logo|signature)\b/i,
+    "clean surfaces without embedded typography or branding",
+  ],
+  [
+    /\b(extra limbs|extra fingers|bad hands|bad anatomy|deformed)\b/i,
+    "coherent anatomy with natural hands and accurate proportions",
+  ],
+  [
+    /\b(low quality|artifact|artifacts|noise|grainy|muddy)\b/i,
+    "polished, artifact-free rendering with high clarity",
+  ],
+];
+
+const buildFluxQualityGuidance = (negativePrompt?: string) => {
+  const positiveTargets = new Set<string>([
+    "crisp fine details",
+    "coherent anatomy",
+    "readable silhouettes",
+    "polished surfaces",
+    "artifact-free rendering",
+  ]);
+
+  if (negativePrompt?.trim()) {
+    for (const [pattern, upgrade] of NEGATIVE_PROMPT_UPGRADES) {
+      if (pattern.test(negativePrompt)) {
+        positiveTargets.add(upgrade);
+      }
+    }
+  }
+
+  return `Desired qualities: ${Array.from(positiveTargets).join(", ")}.`;
+};
+
+export const buildFluxImagePrompt = (prompt: string, negativePrompt?: string) => {
+  const normalized = normalizeWhitespace(prompt);
+  if (!normalized) return buildFluxQualityGuidance(negativePrompt);
+
+  const sections = normalized
+    .split("\n")
+    .map((line, index) => {
+      const match = /^([A-Za-z][A-Za-z0-9/&() \-]+):(.*)$/.exec(line);
+      if (!match) {
+        const trimmed = line.trim();
+        if (index === 0 && /^create\s+/i.test(trimmed)) {
+          return ensureSentence(
+            `Artwork direction: ${trimmed.replace(/^create\s+/i, "").trim()}`
+          );
+        }
+        return ensureSentence(trimmed);
+      }
+
+      const [, rawLabel, rawValue] = match;
+      const value = rawValue.trim();
+      if (!value) return "";
+      return ensureSentence(`${toSectionTitle(rawLabel)}: ${value}`);
+    })
+    .filter(Boolean);
+
+  sections.push(buildFluxQualityGuidance(negativePrompt));
+  return sections.join("\n\n");
+};
+
+export const prepareImagePromptForModel = (
+  model: string,
+  prompt: string,
+  negativePrompt?: string
+) => {
+  const normalizedPrompt = normalizeWhitespace(prompt);
+  const trimmedNegativePrompt = negativePrompt?.trim() || undefined;
+
+  if (!isFluxModel(model)) {
+    return {
+      prompt: normalizedPrompt,
+      negativePrompt: trimmedNegativePrompt,
+    };
+  }
+
+  return {
+    prompt: buildFluxImagePrompt(normalizedPrompt, trimmedNegativePrompt),
+    negativePrompt: undefined,
+  };
+};
 
 export const getActiveJobCount = (jobs: ActiveJobLike[]) =>
   jobs.filter((job) => job.status === "queued" || job.status === "running")
@@ -159,6 +283,90 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
   );
 };
 
+export const resolveImageGenerationModelPipeline = (
+  preferredModels: string[],
+  fallbackModel: string,
+  availableModels: string[]
+) => {
+  const allowed = new Set(availableModels);
+  const ordered: string[] = [];
+
+  for (const model of preferredModels) {
+    if (!allowed.has(model) || ordered.includes(model)) continue;
+    ordered.push(model);
+  }
+
+  if (!ordered.length && allowed.has(fallbackModel)) {
+    ordered.push(fallbackModel);
+  }
+
+  return ordered;
+};
+
+export const getQueuedJobsToStart = (
+  jobs: QueueJobLike[],
+  {
+    maxConcurrentImageJobs = 3,
+    maxConcurrentNonImageJobs = 1,
+    activeIds = [],
+  }: {
+    maxConcurrentImageJobs?: number;
+    maxConcurrentNonImageJobs?: number;
+    activeIds?: string[];
+  } = {}
+) => {
+  const activeSet = new Set(activeIds);
+  let availableImageSlots =
+    maxConcurrentImageJobs -
+    jobs.filter((job) => job.status === "running" && job.mode === "image").length;
+  let availableNonImageSlots =
+    maxConcurrentNonImageJobs -
+    jobs.filter((job) => job.status === "running" && job.mode !== "image").length;
+
+  const nextJobs: QueueJobLike[] = [];
+
+  for (const job of jobs) {
+    if (job.status !== "queued" || activeSet.has(job.id)) continue;
+
+    if (job.mode === "image") {
+      if (availableImageSlots <= 0) continue;
+      nextJobs.push(job);
+      availableImageSlots -= 1;
+      continue;
+    }
+
+    if (availableNonImageSlots <= 0) continue;
+    nextJobs.push(job);
+    availableNonImageSlots -= 1;
+  }
+
+  return nextJobs;
+};
+
+export const mergeGeneratedImagesInDisplayOrder = (
+  existing: GeneratedImage[],
+  incoming: GeneratedImage[]
+) =>
+  [...existing, ...incoming].sort((left, right) => {
+    const batchDateCompare =
+      (left.batchCreatedAt ?? left.createdAt ?? "").localeCompare(
+        right.batchCreatedAt ?? right.createdAt ?? ""
+      );
+    if (batchDateCompare !== 0) return batchDateCompare;
+
+    const batchOrderCompare =
+      (left.batchOrder ?? Number.MAX_SAFE_INTEGER) -
+      (right.batchOrder ?? Number.MAX_SAFE_INTEGER);
+    if (batchOrderCompare !== 0) return batchOrderCompare;
+
+    const imageOrderCompare =
+      (left.imageOrder ?? Number.MAX_SAFE_INTEGER) -
+      (right.imageOrder ?? Number.MAX_SAFE_INTEGER);
+    if (imageOrderCompare !== 0) return imageOrderCompare;
+
+    return left.id.localeCompare(right.id);
+  });
+
 export const buildNavyImageGenerationPayload = ({
   model,
   prompt,
@@ -173,23 +381,32 @@ export const buildNavyImageGenerationPayload = ({
   sync,
   responseFormat,
   aspectRatio,
-}: NavyImageGenerationInput) => ({
+}: NavyImageGenerationInput) => {
+  const preparedPrompt = prepareImagePromptForModel(model, prompt, negativePrompt);
+  const shouldPreferAspectRatio =
+    typeof aspectRatio === "string" && aspectRatio.trim() !== "" && aspectRatio !== "1:1";
+  const isLikelyVideoModel = NAVY_VIDEO_MODEL_PATTERN.test(model);
+
+  return {
   model,
-  prompt,
-  ...(size ? { size } : {}),
+  prompt: preparedPrompt.prompt,
+  ...(!shouldPreferAspectRatio && size ? { size } : {}),
   ...(typeof numberOfImages === "number" && numberOfImages > 0
     ? { n: numberOfImages }
     : {}),
-  ...(quality ? { quality } : {}),
+  ...(quality || !isLikelyVideoModel ? { quality: quality ?? "medium" } : {}),
   ...(style ? { style } : {}),
   ...(imageUrl ? { image_url: imageUrl } : {}),
-  ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
+  ...(preparedPrompt.negativePrompt
+    ? { negative_prompt: preparedPrompt.negativePrompt }
+    : {}),
   ...(typeof seed === "number" ? { seed } : {}),
   ...(typeof seconds === "number" ? { seconds } : {}),
   ...(typeof sync === "boolean" ? { sync } : {}),
   ...(responseFormat ? { response_format: responseFormat } : {}),
-  ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
-});
+  ...(shouldPreferAspectRatio ? { aspect_ratio: aspectRatio } : {}),
+};
+};
 
 export const isNavyGenerationPending = (status?: string | null) => {
   if (!status) return false;

@@ -15,7 +15,7 @@ import {
     CardHeader,
     CardTitle,
 } from "@/app/components/ui/card";
-import { Settings2 } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Layers3, Settings2 } from "lucide-react";
 import {
     IMAGE_ASPECTS,
     IMAGE_SIZES,
@@ -47,6 +47,12 @@ interface ImgGenSettingsProps {
     setImageSize: (s: string) => void;
     imageCount: number;
     setImageCount: (c: number) => void;
+    imagePipelineEnabled: boolean;
+    setImagePipelineEnabled: (enabled: boolean) => void;
+    imageModelOrder: string[];
+    setImageModelOrder: (
+        value: string[] | ((prev: string[]) => string[])
+    ) => void;
     chutesGuidanceScale: string;
     setChutesGuidanceScale: (v: string) => void;
     chutesWidth: string;
@@ -110,6 +116,10 @@ export function ImgGenSettings({
     setImageSize,
     imageCount,
     setImageCount,
+    imagePipelineEnabled,
+    setImagePipelineEnabled,
+    imageModelOrder,
+    setImageModelOrder,
     navyImageSize,
     setNavyImageSize,
     chutesVideoFps,
@@ -187,6 +197,8 @@ export function ImgGenSettings({
     const usageUpdatedLabel = navyUsageUpdatedAt
         ? new Date(navyUsageUpdatedAt).toLocaleTimeString()
         : null;
+    const availableModelIds = new Set(modelSuggestions.map((suggestion) => suggestion.id));
+    const orderedImageModels = imageModelOrder.filter((entry) => availableModelIds.has(entry));
 
     const formatCount = (value?: number) =>
         typeof value === "number" ? value.toLocaleString() : "-";
@@ -199,6 +211,27 @@ export function ImgGenSettings({
         if (hours > 0) return `${hours}h ${minutes}m`;
         if (minutes > 0) return `${minutes}m ${seconds}s`;
         return `${seconds}s`;
+    };
+    const reorderPipelineModel = (id: string, direction: "up" | "down") => {
+        setImageModelOrder((prev) => {
+            const next = prev.filter((entry) => availableModelIds.has(entry));
+            const index = next.indexOf(id);
+            if (index === -1) return next;
+            const targetIndex = direction === "up" ? index - 1 : index + 1;
+            if (targetIndex < 0 || targetIndex >= next.length) return next;
+            const reordered = [...next];
+            const [item] = reordered.splice(index, 1);
+            reordered.splice(targetIndex, 0, item);
+            return reordered;
+        });
+    };
+    const togglePipelineModel = (id: string) => {
+        setImageModelOrder((prev) => {
+            const next = prev.filter((entry) => availableModelIds.has(entry));
+            return next.includes(id)
+                ? next.filter((entry) => entry !== id)
+                : [...next, id];
+        });
     };
 
     return (
@@ -269,6 +302,98 @@ export function ImgGenSettings({
                         <p className="text-xs text-destructive">{modelsError}</p>
                     ) : null}
                 </div>
+
+                {mode === "image" && modelSuggestions.length > 1 ? (
+                    <div className="space-y-3 rounded-xl border border-border/50 bg-secondary/20 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <div className="flex items-center gap-2 text-sm font-medium">
+                                    <Layers3 className="h-4 w-4 text-primary" />
+                                    Ordered model pipeline
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Queue multiple image models, run them in parallel, and keep results in this order.
+                                </p>
+                            </div>
+                            <input
+                                type="checkbox"
+                                checked={imagePipelineEnabled}
+                                onChange={(event) => setImagePipelineEnabled(event.target.checked)}
+                                className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            />
+                        </div>
+
+                        {imagePipelineEnabled ? (
+                            <div className="space-y-2">
+                                {modelSuggestions.map((suggestion) => {
+                                    const index = orderedImageModels.indexOf(suggestion.id);
+                                    const selected = index !== -1;
+                                    return (
+                                        <div
+                                            key={suggestion.id}
+                                            className="flex items-center gap-2 rounded-lg border border-border/40 bg-background/50 px-2 py-2"
+                                        >
+                                            <button
+                                                type="button"
+                                                onClick={() => togglePipelineModel(suggestion.id)}
+                                                className={`flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
+                                                    selected
+                                                        ? "border-primary bg-primary text-primary-foreground"
+                                                        : "border-border/60 bg-background text-muted-foreground"
+                                                }`}
+                                                aria-label={`${selected ? "Remove" : "Add"} ${suggestion.label} from pipeline`}
+                                            >
+                                                {selected ? <Check className="h-4 w-4" /> : <span className="text-xs">+</span>}
+                                            </button>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="truncate text-sm font-medium">{suggestion.label}</div>
+                                                <div className="truncate text-[11px] text-muted-foreground">{suggestion.id}</div>
+                                            </div>
+                                            {selected ? (
+                                                <>
+                                                    <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">
+                                                        #{index + 1}
+                                                    </span>
+                                                    <div className="flex items-center gap-1">
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-7 w-7"
+                                                            onClick={() => reorderPipelineModel(suggestion.id, "up")}
+                                                            disabled={index === 0}
+                                                        >
+                                                            <ChevronUp className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-7 w-7"
+                                                            onClick={() => reorderPipelineModel(suggestion.id, "down")}
+                                                            disabled={index === orderedImageModels.length - 1}
+                                                        >
+                                                            <ChevronDown className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
+                                <p className="text-[11px] text-muted-foreground">
+                                    {orderedImageModels.length
+                                        ? `Generating now will queue ${orderedImageModels.length} model${orderedImageModels.length === 1 ? "" : "s"} for this prompt.`
+                                        : "Select at least one model to build the pipeline. The current model is used automatically if none are selected."}
+                                </p>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-muted-foreground">
+                                Disabled. Generate with the single selected model only.
+                            </p>
+                        )}
+                    </div>
+                ) : null}
 
                 {/* Dynamic Options */}
                 {mode === "image" && (
