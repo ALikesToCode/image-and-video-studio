@@ -29,6 +29,12 @@ export function ChatView() {
         navyTtsModels,
         saveChatImages,
         saveToGallery,
+        videoImage,
+        videoAspect,
+        videoDuration,
+        ttsVoice,
+        ttsFormat,
+        ttsSpeed,
     } = useStudio();
 
     const isNavyChat = chatProvider === "navy";
@@ -91,6 +97,12 @@ export function ChatView() {
                 modelsError={modelsError}
                 onRefreshModels={onRefreshModels}
                 saveToGallery={saveToGallery}
+                videoImage={videoImage}
+                videoAspect={videoAspect}
+                videoDuration={videoDuration}
+                ttsVoice={ttsVoice}
+                ttsFormat={ttsFormat}
+                ttsSpeed={ttsSpeed}
                 onSaveImages={handleSaveImages}
             />
         </div>

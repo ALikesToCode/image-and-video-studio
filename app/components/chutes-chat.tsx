@@ -44,6 +44,11 @@ import {
   isStudioStateAvailable,
   putStudioState,
 } from "@/lib/studio-state-db";
+import {
+  createSyntheticFallbackToolCall,
+  detectForcedToolCall,
+  stripHeavyMediaFromMessagesForStorage,
+} from "@/lib/chat-tooling";
 
 type ToolCall = {
   id: string;
@@ -83,6 +88,12 @@ type ChutesChatProps = {
   modelsLoading?: boolean;
   modelsError?: string | null;
   saveToGallery?: boolean;
+  videoImage?: string | null;
+  videoAspect?: string;
+  videoDuration?: string;
+  ttsVoice?: string;
+  ttsFormat?: string;
+  ttsSpeed?: string;
   onSaveImages?: (payload: {
     images: { id: string; dataUrl: string; mimeType: string }[];
     prompt: string;
@@ -369,6 +380,12 @@ export function ChutesChat({
   modelsLoading,
   modelsError,
   saveToGallery = false,
+  videoImage,
+  videoAspect,
+  videoDuration,
+  ttsVoice,
+  ttsFormat,
+  ttsSpeed,
   onSaveImages,
 }: ChutesChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -603,7 +620,10 @@ export function ChutesChat({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const trimmed = messages.slice(-MAX_CHAT_MESSAGES);
+    const trimmed = stripHeavyMediaFromMessagesForStorage(
+      messages,
+      MAX_CHAT_MESSAGES
+    );
     const persist = async () => {
       if (isStudioStateAvailable()) {
         try {
@@ -1644,48 +1664,6 @@ ${defaultPrompt}`;
     return toolMessages;
   };
 
-  const detectForcedToolCall = (
-    text: string
-  ): "generate_image" | "generate_video" | "generate_audio" | null => {
-    const normalized = text.toLowerCase();
-    const explicitGenerate =
-      /\b(generate|create|make|render|produce|draw)\b/.test(normalized) ||
-      /\bnow\b/.test(normalized);
-    if (!explicitGenerate) return null;
-
-    const videoIntent = /\b(video|clip|animate|animation|movie)\b/.test(normalized);
-    const audioIntent = /\b(audio|voice|speech|tts|narration)\b/.test(normalized);
-    const imageIntent =
-      /\b(image|picture|photo|art|illustration|render)\b/.test(normalized) ||
-      /\bflux\b/.test(normalized) ||
-      /\bdall[- ]?e\b/.test(normalized);
-
-    if (videoIntent && toolSettings.video) return "generate_video";
-    if (audioIntent && toolSettings.audio) return "generate_audio";
-    if (imageIntent && toolSettings.image) return "generate_image";
-    if (toolSettings.image) return "generate_image";
-    return null;
-  };
-
-  const extractImagePromptForFallback = (assistantContent: string, userPrompt: string) => {
-    const patterns = [
-      /final flux prompt:\s*([\s\S]*?)(?:\nnegative prompt:|\nvideo readiness:|\naudio mood:|\n\s*\n|$)/i,
-      /final prompt:\s*([\s\S]*?)(?:\nnegative prompt:|\nvideo readiness:|\naudio mood:|\n\s*\n|$)/i,
-      /prompt:\s*([\s\S]*?)(?:\nnegative prompt:|\nvideo readiness:|\naudio mood:|\n\s*\n|$)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = assistantContent.match(pattern);
-      if (!match || !match[1]) continue;
-      const candidate = match[1]
-        .replace(/^\s*[-*]\s*/gm, "")
-        .replace(/^["']|["']$/g, "")
-        .trim();
-      if (candidate.length > 8) return candidate;
-    }
-    return userPrompt;
-  };
-
   const submitMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed || busy) return;
@@ -1710,7 +1688,7 @@ ${defaultPrompt}`;
     let currentMessages: ChatMessage[] = [...messages, userMessage];
     setMessages(currentMessages);
     setBusy(true);
-    const forcedToolCall = detectForcedToolCall(trimmed);
+    const forcedToolCall = detectForcedToolCall(trimmed, toolSettings);
 
     try {
       for (let step = 0; step < 3; step += 1) {
@@ -1765,34 +1743,43 @@ ${defaultPrompt}`;
 
         // Check for tool calls
         if (!finalToolCalls.length) {
-          // Fallback: if image generation was explicitly requested but model did not emit a tool call,
-          // run one using the drafted prompt so generation still happens.
-          if (step === 0 && forcedToolCall === "generate_image" && toolSettings.image) {
-            const fallbackPrompt = extractImagePromptForFallback(
-              finalResult.content,
-              trimmed
-            );
-            const syntheticToolCall: ToolCall = {
-              id: createId(),
-              type: "function",
-              function: {
-                name: "generate_image",
-                arguments: JSON.stringify({
-                  prompt: fallbackPrompt,
-                  model: toolImageModel,
-                }),
-              },
-            };
-            const toolMessages = await handleToolCalls(
-              [syntheticToolCall],
-              (progressMessage) => {
-                currentMessages = [...currentMessages, progressMessage];
+          if (step === 0 && forcedToolCall) {
+            const fallbackToolCall = createSyntheticFallbackToolCall({
+              requestedTool: forcedToolCall,
+              provider,
+              userPrompt: trimmed,
+              assistantContent: finalResult.content,
+              imageModel: toolImageModel,
+              videoModel: toolVideoModel,
+              audioModel: toolAudioModel,
+              videoImage,
+              videoAspect,
+              videoDuration,
+              ttsVoice,
+              ttsFormat,
+              ttsSpeed,
+            });
+            if (fallbackToolCall) {
+              const syntheticToolCall: ToolCall = {
+                id: createId(),
+                type: "function",
+                function: {
+                  name: fallbackToolCall.name,
+                  arguments: JSON.stringify(fallbackToolCall.arguments),
+                },
+              };
+              const toolMessages = await handleToolCalls(
+                [syntheticToolCall],
+                (progressMessage) => {
+                  currentMessages = [...currentMessages, progressMessage];
+                  setMessages(currentMessages);
+                }
+              );
+              if (toolMessages.length) {
+                currentMessages = [...currentMessages, ...toolMessages];
                 setMessages(currentMessages);
+                continue;
               }
-            );
-            if (toolMessages.length) {
-              currentMessages = [...currentMessages, ...toolMessages];
-              setMessages(currentMessages);
             }
           }
           break;
