@@ -1,4 +1,5 @@
 import type { ChatProvider } from "./constants.ts";
+import { resolveActiveImageToolModels } from "./studio-generation.ts";
 
 export type ToolAvailability = {
   image: boolean;
@@ -18,6 +19,7 @@ type SyntheticFallbackToolCallOptions = {
   userPrompt: string;
   assistantContent: string;
   imageModel: string;
+  imagePipelineEnabled?: boolean;
   videoModel: string;
   audioModel: string;
   videoImage?: string | null;
@@ -125,12 +127,46 @@ export const extractAudioInputForFallback = (
   return candidate || normalizeValue(userPrompt);
 };
 
+export const resolveRequestedImageModels = ({
+  requestedModel,
+  defaultModel,
+  imagePipelineEnabled,
+  imageModelOrder,
+  availableModels,
+}: {
+  requestedModel: string;
+  defaultModel: string;
+  imagePipelineEnabled: boolean;
+  imageModelOrder: string[];
+  availableModels: string[];
+}) => {
+  const normalizedRequestedModel = requestedModel.trim();
+  const normalizedDefaultModel = defaultModel.trim();
+
+  if (
+    normalizedRequestedModel &&
+    normalizedRequestedModel !== normalizedDefaultModel
+  ) {
+    return availableModels.includes(normalizedRequestedModel)
+      ? [normalizedRequestedModel]
+      : [];
+  }
+
+  return resolveActiveImageToolModels({
+    pipelineEnabled: imagePipelineEnabled,
+    preferredModels: imageModelOrder,
+    fallbackModel: normalizedDefaultModel,
+    availableModels,
+  });
+};
+
 export const createSyntheticFallbackToolCall = ({
   requestedTool,
   provider,
   userPrompt,
   assistantContent,
   imageModel,
+  imagePipelineEnabled,
   videoModel,
   audioModel,
   videoImage,
@@ -147,7 +183,7 @@ export const createSyntheticFallbackToolCall = ({
       name: "generate_image",
       arguments: {
         prompt: extractPromptForFallback(assistantContent, userPrompt),
-        model: imageModel,
+        ...(imagePipelineEnabled ? {} : { model: imageModel }),
       },
     };
   }

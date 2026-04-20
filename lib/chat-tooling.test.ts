@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
+  resolveRequestedImageModels,
   stripHeavyMediaFromMessagesForStorage,
 } from "./chat-tooling.ts";
 
@@ -29,7 +30,7 @@ test("Forced tool detection recognizes explicit video requests", () => {
   );
 });
 
-test("Synthetic fallback builds an image tool call from the drafted prompt", () => {
+test("Synthetic fallback builds an image tool call from the drafted prompt without pinning the default model", () => {
   const fallback = createSyntheticFallbackToolCall({
     requestedTool: "generate_image",
     provider: "navy",
@@ -37,6 +38,7 @@ test("Synthetic fallback builds an image tool call from the drafted prompt", () 
     assistantContent:
       "Final Flux prompt: sharp modern anime portrait, blue rim light, clean silhouette.\nNegative prompt: watermark",
     imageModel: "flux",
+    imagePipelineEnabled: true,
     videoModel: "veo-3.1",
     audioModel: "gpt-4o-mini-tts",
   });
@@ -45,9 +47,34 @@ test("Synthetic fallback builds an image tool call from the drafted prompt", () 
     name: "generate_image",
     arguments: {
       prompt: "sharp modern anime portrait, blue rim light, clean silhouette.",
-      model: "flux",
     },
   });
+});
+
+test("Requested image models use the pipeline when the request targets the default model", () => {
+  assert.deepEqual(
+    resolveRequestedImageModels({
+      requestedModel: "flux",
+      defaultModel: "flux",
+      imagePipelineEnabled: true,
+      imageModelOrder: ["gpt-image-1.5", "flux"],
+      availableModels: ["flux", "gpt-image-1.5"],
+    }),
+    ["gpt-image-1.5", "flux"]
+  );
+});
+
+test("Requested image models stay pinned when a non-default model is explicitly requested", () => {
+  assert.deepEqual(
+    resolveRequestedImageModels({
+      requestedModel: "gpt-image-1.5",
+      defaultModel: "flux",
+      imagePipelineEnabled: true,
+      imageModelOrder: ["flux", "gpt-image-1.5"],
+      availableModels: ["flux", "gpt-image-1.5"],
+    }),
+    ["gpt-image-1.5"]
+  );
 });
 
 test("Synthetic fallback builds a Navy video tool call with current defaults", () => {

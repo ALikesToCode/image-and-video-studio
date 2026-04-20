@@ -56,11 +56,11 @@ import {
 import {
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
+  resolveRequestedImageModels,
   stripHeavyMediaFromMessagesForStorage,
 } from "@/lib/chat-tooling";
 import {
   buildProviderPolicyHintForImageModels,
-  resolveActiveImageToolModels,
 } from "@/lib/studio-generation";
 
 type ToolCall = {
@@ -457,10 +457,11 @@ export function ChutesChat({
   );
   const activeToolImageModels = useMemo(
     () =>
-      resolveActiveImageToolModels({
-        pipelineEnabled: imagePipelineEnabled,
-        preferredModels: imageModelOrder,
-        fallbackModel: toolImageModel,
+      resolveRequestedImageModels({
+        requestedModel: "",
+        defaultModel: toolImageModel,
+        imagePipelineEnabled,
+        imageModelOrder,
         availableModels: imageModels.map((item) => item.id),
       }),
     [imageModels, imageModelOrder, imagePipelineEnabled, toolImageModel]
@@ -1227,14 +1228,13 @@ ${defaultPrompt}`;
     }
     const requestedModel = getStringArg(args, ["model"]);
     const modelOverride = requestedModel || toolImageModel;
-    const modelsToRun = requestedModel
-      ? [requestedModel]
-      : resolveActiveImageToolModels({
-          pipelineEnabled: imagePipelineEnabled,
-          preferredModels: imageModelOrder,
-          fallbackModel: modelOverride,
-          availableModels: imageModels.map((item) => item.id),
-        });
+    const modelsToRun = resolveRequestedImageModels({
+      requestedModel,
+      defaultModel: modelOverride,
+      imagePipelineEnabled,
+      imageModelOrder,
+      availableModels: imageModels.map((item) => item.id),
+    });
     if (!modelsToRun.length) {
       throw new Error("No image models are available for the image tool.");
     }
@@ -1867,6 +1867,7 @@ ${defaultPrompt}`;
               userPrompt: trimmed,
               assistantContent: finalResult.content,
               imageModel: toolImageModel,
+              imagePipelineEnabled,
               videoModel: toolVideoModel,
               audioModel: toolAudioModel,
               videoImage,
