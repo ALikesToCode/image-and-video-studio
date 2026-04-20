@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
 import {
+  buildProviderPolicyHintForImageModels,
   buildNavyImageGenerationPayload,
   buildChutesChatSystemPrompt,
   extractOpenRouterImageModels,
@@ -11,6 +12,7 @@ import {
   mergeGeneratedImagesInDisplayOrder,
   prepareImagePromptForModel,
   resolveImageGenerationModelPipeline,
+  resolveActiveImageToolModels,
   groupNavyModelsByCapability,
   isNavyGenerationPending,
   resolveOpenRouterModalities,
@@ -132,6 +134,76 @@ test("Image model pipeline keeps explicit order and removes duplicates", () => {
     resolveImageGenerationModelPipeline([], "flux", ["flux", "gpt-image-1.5"]),
     ["flux"]
   );
+});
+
+test("Active chat image tool models fall back to the selected model when pipeline is disabled", () => {
+  assert.deepEqual(
+    resolveActiveImageToolModels({
+      pipelineEnabled: false,
+      preferredModels: ["gpt-image-1.5", "flux"],
+      fallbackModel: "flux",
+      availableModels: ["flux", "gpt-image-1.5"],
+    }),
+    ["flux"]
+  );
+});
+
+test("Active chat image tool models honor the shared pipeline order when enabled", () => {
+  assert.deepEqual(
+    resolveActiveImageToolModels({
+      pipelineEnabled: true,
+      preferredModels: ["gpt-image-1.5", "flux", "gpt-image-1.5"],
+      fallbackModel: "flux",
+      availableModels: ["flux", "gpt-image-1.5"],
+    }),
+    ["gpt-image-1.5", "flux"]
+  );
+});
+
+test("OpenAI image prompts add adult-content policy guidance only for likely NSFW requests", () => {
+  const prepared = prepareImagePromptForModel(
+    "gpt-image-1.5",
+    "Create an NSFW boudoir portrait of two consenting adults in soft golden light."
+  );
+
+  assert.match(prepared.prompt, /consenting adults/i);
+  assert.match(prepared.prompt, /non-consensual/i);
+  assert.match(prepared.prompt, /deceptive likeness/i);
+});
+
+test("Gemini image prompts add safety guidance only for likely NSFW requests", () => {
+  const prepared = prepareImagePromptForModel(
+    "gemini-3-pro-image-preview",
+    "Generate a tasteful NSFW editorial photo of an adult model in a luxury suite."
+  );
+
+  assert.match(prepared.prompt, /respect gemini safety settings/i);
+  assert.match(prepared.prompt, /sexually explicit/i);
+  assert.match(prepared.prompt, /child safety/i);
+});
+
+test("Non-NSFW prompts remain unchanged for non-Flux models", () => {
+  const prepared = prepareImagePromptForModel(
+    "gpt-image-1.5",
+    "Create a ceramic teapot on a walnut table beside morning window light."
+  );
+
+  assert.equal(
+    prepared.prompt,
+    "Create a ceramic teapot on a walnut table beside morning window light."
+  );
+  assert.equal(prepared.negativePrompt, undefined);
+});
+
+test("Chat provider policy hint only appears when selected image models need it", () => {
+  const hint = buildProviderPolicyHintForImageModels([
+    "gpt-image-1.5",
+    "gemini-3-pro-image-preview",
+  ]);
+
+  assert.match(hint, /OpenAI GPT Image/i);
+  assert.match(hint, /Gemini Nano Banana/i);
+  assert.equal(buildProviderPolicyHintForImageModels(["flux"]), "");
 });
 
 test("Queue selection starts multiple image jobs without blocking on one queued image", () => {

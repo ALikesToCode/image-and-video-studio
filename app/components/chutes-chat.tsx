@@ -20,8 +20,17 @@ import {
   ToggleRight,
   Copy,
   Check,
+  Layers3,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/app/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -49,6 +58,10 @@ import {
   detectForcedToolCall,
   stripHeavyMediaFromMessagesForStorage,
 } from "@/lib/chat-tooling";
+import {
+  buildProviderPolicyHintForImageModels,
+  resolveActiveImageToolModels,
+} from "@/lib/studio-generation";
 
 type ToolCall = {
   id: string;
@@ -84,6 +97,10 @@ type ChutesChatProps = {
   audioModels: ModelOption[];
   toolImageModel: string;
   setToolImageModel: (value: string) => void;
+  imagePipelineEnabled: boolean;
+  setImagePipelineEnabled: (value: boolean) => void;
+  imageModelOrder: string[];
+  setImageModelOrder: React.Dispatch<React.SetStateAction<string[]>>;
   onRefreshModels?: () => void;
   modelsLoading?: boolean;
   modelsError?: string | null;
@@ -376,6 +393,10 @@ export function ChutesChat({
   audioModels,
   toolImageModel,
   setToolImageModel,
+  imagePipelineEnabled,
+  setImagePipelineEnabled,
+  imageModelOrder,
+  setImageModelOrder,
   onRefreshModels,
   modelsLoading,
   modelsError,
@@ -426,6 +447,45 @@ export function ChutesChat({
     ...DEFAULT_TOOL_SETTINGS,
   });
   const [toolSettingsHydrated, setToolSettingsHydrated] = useState(false);
+  const availableImageModelIds = useMemo(
+    () => new Set(imageModels.map((item) => item.id)),
+    [imageModels]
+  );
+  const orderedToolImageModels = useMemo(
+    () => imageModelOrder.filter((entry) => availableImageModelIds.has(entry)),
+    [availableImageModelIds, imageModelOrder]
+  );
+  const activeToolImageModels = useMemo(
+    () =>
+      resolveActiveImageToolModels({
+        pipelineEnabled: imagePipelineEnabled,
+        preferredModels: imageModelOrder,
+        fallbackModel: toolImageModel,
+        availableModels: imageModels.map((item) => item.id),
+      }),
+    [imageModels, imageModelOrder, imagePipelineEnabled, toolImageModel]
+  );
+  const reorderPipelineModel = (id: string, direction: "up" | "down") => {
+    setImageModelOrder((prev) => {
+      const next = prev.filter((entry) => availableImageModelIds.has(entry));
+      const index = next.indexOf(id);
+      if (index === -1) return next;
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= next.length) return next;
+      const reordered = [...next];
+      const [item] = reordered.splice(index, 1);
+      reordered.splice(targetIndex, 0, item);
+      return reordered;
+    });
+  };
+  const togglePipelineModel = (id: string) => {
+    setImageModelOrder((prev) => {
+      const next = prev.filter((entry) => availableImageModelIds.has(entry));
+      return next.includes(id)
+        ? next.filter((entry) => entry !== id)
+        : [...next, id];
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -870,13 +930,17 @@ export function ChutesChat({
     const modelList = imageModels.map((item) => item.id).join(", ");
     const videoModelList = videoModels.map((item) => item.id).join(", ");
     const audioModelList = audioModels.map((item) => item.id).join(", ");
-    const fluxModelActive = /flux/i.test(toolImageModel);
+    const activeImageModelSummary = activeToolImageModels.join(", ");
+    const fluxModelActive = activeToolImageModels.some((item) => /flux/i.test(item));
+    const providerPolicyHint = buildProviderPolicyHintForImageModels(
+      activeToolImageModels
+    );
     const promptGuide =
       provider === "navy" ? NAVY_IMAGE_GUIDE_PROMPT : CHUTES_IMAGE_GUIDE_PROMPT;
     const enabledToolLines: string[] = [];
     if (toolSettings.image) {
       enabledToolLines.push(
-        `- generate_image (default model: ${toolImageModel}; available image models: ${modelList})`
+        `- generate_image (default model: ${toolImageModel}; active image models: ${activeImageModelSummary || toolImageModel}; available image models: ${modelList})`
       );
     }
     if (toolSettings.video) {
@@ -902,8 +966,12 @@ export function ChutesChat({
       "When image generation is requested, optimize prompts so the output can also be used as a strong keyframe for video and as artwork aligned with narration/voice mood.";
 
     const fluxHint = fluxModelActive
-      ? `Flux mode is active (default image model: ${toolImageModel}). Strictly follow the Flux Cross-Modal Prompt Protocol below.`
+      ? `Flux mode is active (active image models: ${activeImageModelSummary || toolImageModel}). Strictly follow the Flux Cross-Modal Prompt Protocol below whenever a Flux-family image model is active.`
       : "If the user asks for Flux or selects a Flux model, switch into Flux Cross-Modal Prompt Protocol.";
+    const policyScopeHint = providerPolicyHint
+      ? `${providerPolicyHint}
+Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
+      : "";
 
     const defaultPrompt = `${promptGuide}
 ${FLUX_CROSS_MODAL_GUIDE}
@@ -911,6 +979,7 @@ ${FLUX_CROSS_MODAL_GUIDE}
 You are a generation assistant. Help craft prompts, ask for missing details when needed, and summarize the final prompt before calling a generation tool.
 ${crossModalHint}
 ${fluxHint}
+${policyScopeHint}
 If the user explicitly asks to generate now, you must call the relevant tool in the same turn (do not stop at prompt drafting only).
 ${providerHint}
 ${toolInstruction}`;
@@ -920,6 +989,7 @@ ${toolInstruction}`;
 
 ${defaultPrompt}`;
   }, [
+    activeToolImageModels,
     toolImageModel,
     toolVideoModel,
     toolAudioModel,
@@ -1155,23 +1225,31 @@ ${defaultPrompt}`;
     if (!prompt) {
       throw new Error("Tool call missing prompt.");
     }
-    const modelOverride = getStringArg(args, ["model"]) || toolImageModel;
+    const requestedModel = getStringArg(args, ["model"]);
+    const modelOverride = requestedModel || toolImageModel;
+    const modelsToRun = requestedModel
+      ? [requestedModel]
+      : resolveActiveImageToolModels({
+          pipelineEnabled: imagePipelineEnabled,
+          preferredModels: imageModelOrder,
+          fallbackModel: modelOverride,
+          availableModels: imageModels.map((item) => item.id),
+        });
+    if (!modelsToRun.length) {
+      throw new Error("No image models are available for the image tool.");
+    }
     const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
-    const body: Record<string, unknown> = {
-      apiKey,
-      model: modelOverride,
-      prompt,
-    };
+    const baseBody: Record<string, unknown> = { apiKey, prompt };
     if (provider === "navy") {
       const numberOfImages = getNumberArg(args, ["n"]);
       const size = getStringArg(args, ["size"]);
       const quality = getStringArg(args, ["quality"]);
       const style = getStringArg(args, ["style"]);
-      if (size) body.size = size;
-      if (quality) body.quality = quality;
-      if (style) body.style = style;
+      if (size) baseBody.size = size;
+      if (quality) baseBody.quality = quality;
+      if (style) baseBody.style = style;
       if (numberOfImages && numberOfImages > 0) {
-        body.numberOfImages = Math.max(1, Math.round(numberOfImages));
+        baseBody.numberOfImages = Math.max(1, Math.round(numberOfImages));
       }
     } else {
       const guidanceScale = getNumberArg(args, ["guidance_scale"]);
@@ -1181,60 +1259,96 @@ ${defaultPrompt}`;
       const seed = getNumberArg(args, ["seed"]);
       const negativePrompt = getStringArg(args, ["negative_prompt"]);
       const resolution = getStringArg(args, ["resolution"]);
-      body.negativePrompt = negativePrompt || undefined;
-      body.guidanceScale = guidanceScale ?? undefined;
-      body.width = width ? Math.round(width) : undefined;
-      body.height = height ? Math.round(height) : undefined;
-      body.resolution = resolution || undefined;
-      body.numInferenceSteps = steps ? Math.round(steps) : undefined;
-      body.seed = seed !== null ? Math.round(seed) : null;
+      baseBody.negativePrompt = negativePrompt || undefined;
+      baseBody.guidanceScale = guidanceScale ?? undefined;
+      baseBody.width = width ? Math.round(width) : undefined;
+      baseBody.height = height ? Math.round(height) : undefined;
+      baseBody.resolution = resolution || undefined;
+      baseBody.numInferenceSteps = steps ? Math.round(steps) : undefined;
+      baseBody.seed = seed !== null ? Math.round(seed) : null;
     }
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload?.error ?? "Image tool failed.");
-    }
-    const images = Array.isArray(payload?.images)
-      ? (payload.images as Array<{ data?: unknown; mimeType?: unknown; url?: unknown }>)
-      : [];
-    if (!images.length) {
-      throw new Error("No images returned by tool.");
-    }
-    const parsedImages = (
-      await Promise.all(
-        images.map(async (image) => {
-          const data = typeof image?.data === "string" ? image.data : "";
-          const mimeType =
-            typeof image?.mimeType === "string" ? image.mimeType : "image/png";
-          if (data) {
-            return {
-              id: createId(),
-              dataUrl: dataUrlFromBase64(data, mimeType),
-              mimeType,
-            };
-          }
-          if (typeof image?.url === "string") {
-            const dataUrl = await fetchAsDataUrl(image.url);
-            return {
-              id: createId(),
-              dataUrl,
-              mimeType,
-            };
-          }
-          return null;
-        })
-      )
-    ).filter(
-      (item): item is { id: string; dataUrl: string; mimeType: string } => !!item
+    const invokeImageModel = async (targetModel: string) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...baseBody,
+          model: targetModel,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Image tool failed.");
+      }
+      const images = Array.isArray(payload?.images)
+        ? (payload.images as Array<{ data?: unknown; mimeType?: unknown; url?: unknown }>)
+        : [];
+      if (!images.length) {
+        throw new Error("No images returned by tool.");
+      }
+      const parsedImages = (
+        await Promise.all(
+          images.map(async (image) => {
+            const data = typeof image?.data === "string" ? image.data : "";
+            const mimeType =
+              typeof image?.mimeType === "string" ? image.mimeType : "image/png";
+            if (data) {
+              return {
+                id: createId(),
+                dataUrl: dataUrlFromBase64(data, mimeType),
+                mimeType,
+                model: targetModel,
+              };
+            }
+            if (typeof image?.url === "string") {
+              const dataUrl = await fetchAsDataUrl(image.url);
+              return {
+                id: createId(),
+                dataUrl,
+                mimeType,
+                model: targetModel,
+              };
+            }
+            return null;
+          })
+        )
+      ).filter(
+        (
+          item
+        ): item is { id: string; dataUrl: string; mimeType: string; model: string } =>
+          !!item
+      );
+      if (!parsedImages.length) {
+        throw new Error("No usable images returned by tool.");
+      }
+      return parsedImages;
+    };
+
+    const results = await Promise.allSettled(
+      modelsToRun.map((targetModel) => invokeImageModel(targetModel))
     );
+    const parsedImages = results.flatMap((result) =>
+      result.status === "fulfilled" ? result.value : []
+    );
+    const errors = results.flatMap((result, index) => {
+      if (result.status === "fulfilled") return [];
+      const message =
+        result.reason instanceof Error
+          ? result.reason.message
+          : "Image generation failed.";
+      return [`${modelsToRun[index]}: ${message}`];
+    });
+
     if (!parsedImages.length) {
-      throw new Error("No usable images returned by tool.");
+      throw new Error(errors.join(" | ") || "No usable images returned by tool.");
     }
-    return { images: parsedImages, model: modelOverride, prompt };
+
+    return {
+      images: parsedImages,
+      model: modelsToRun.join(", "),
+      prompt,
+      errors,
+    };
   };
 
   const runGenerateVideo = async (args: Record<string, unknown>) => {
@@ -1598,10 +1712,13 @@ ${defaultPrompt}`;
               model: result.model,
             });
           }
+          const imageStatus = result.errors.length
+            ? `Generated ${result.images.length} image(s) using ${result.model}. Failed: ${result.errors.join("; ")}`
+            : `Generated ${result.images.length} image(s) using ${result.model}.`;
           toolMessages.push({
             id: createId(),
             role: "tool",
-            content: `Generated ${result.images.length} image(s) using ${result.model}.`,
+            content: imageStatus,
             promptUsed: result.prompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
@@ -1884,6 +2001,111 @@ ${defaultPrompt}`;
                 ))}
               </SelectContent>
             </Select>
+
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 flex-none glass-card border-0 bg-secondary/50"
+                  title="Image Tool Pipeline"
+                  disabled={!toolSettings.image || !imageModels.length}
+                >
+                  <Layers3 className="h-4 w-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Image Tool Pipeline</DialogTitle>
+                  <DialogDescription>
+                    Reuse the shared image pipeline from Image Gen for chat image requests.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <label className="flex items-start justify-between gap-3 rounded-xl border border-border/50 bg-secondary/20 p-3">
+                    <div>
+                      <div className="text-sm font-medium">Enable ordered pipeline</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        When enabled, chat image generation runs the selected models in this order unless the user explicitly asks for one specific model.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={imagePipelineEnabled}
+                      onChange={(event) => setImagePipelineEnabled(event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                  </label>
+
+                  <div className="space-y-2">
+                    {imageModels.map((suggestion) => {
+                      const index = orderedToolImageModels.indexOf(suggestion.id);
+                      const selected = index !== -1;
+                      return (
+                        <div
+                          key={suggestion.id}
+                          className="flex items-center gap-2 rounded-lg border border-border/40 bg-background/50 px-2 py-2"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => togglePipelineModel(suggestion.id)}
+                            className={`flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border/60 bg-background text-muted-foreground"
+                            }`}
+                            aria-label={`${selected ? "Remove" : "Add"} ${suggestion.label} from pipeline`}
+                          >
+                            {selected ? <Check className="h-4 w-4" /> : <span className="text-xs">+</span>}
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">{suggestion.label}</div>
+                            <div className="truncate text-[11px] text-muted-foreground">{suggestion.id}</div>
+                          </div>
+                          {selected ? (
+                            <>
+                              <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">
+                                #{index + 1}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={() => reorderPipelineModel(suggestion.id, "up")}
+                                  disabled={index === 0}
+                                >
+                                  <ChevronUp className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={() => reorderPipelineModel(suggestion.id, "down")}
+                                  disabled={index === orderedToolImageModels.length - 1}
+                                >
+                                  <ChevronDown className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    {imagePipelineEnabled
+                      ? orderedToolImageModels.length
+                        ? `Chat will run ${orderedToolImageModels.length} image model${orderedToolImageModels.length === 1 ? "" : "s"} in order.`
+                        : "No extra models selected yet. Chat falls back to the default image model."
+                      : "Pipeline is disabled. Chat uses the single selected image model only."}
+                  </p>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             <Select
               value={toolVideoModel}

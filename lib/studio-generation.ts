@@ -54,6 +54,9 @@ const ensureSentence = (value: string) => {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 };
 
+const appendPromptNote = (prompt: string, note: string) =>
+  prompt.trim() ? `${prompt}\n\n${note}` : note;
+
 const toSectionTitle = (rawLabel: string) => {
   const normalized = rawLabel.trim().toLowerCase();
   if (normalized === "background/setting") return "Background and setting";
@@ -84,6 +87,34 @@ const NEGATIVE_PROMPT_UPGRADES: Array<[RegExp, string]> = [
     "polished, artifact-free rendering with high clarity",
   ],
 ];
+
+const ADULT_IMAGE_PROMPT_PATTERN =
+  /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
+
+const isOpenAiImageModel = (model: string) =>
+  model.toLowerCase().includes("gpt-image-");
+
+const isGeminiNativeImageModel = (model: string) => {
+  const normalized = model.toLowerCase();
+  return normalized.includes("gemini-") &&
+    (normalized.includes("flash-image") || normalized.includes("pro-image"));
+};
+
+const isLikelyAdultImagePrompt = (prompt: string) =>
+  ADULT_IMAGE_PROMPT_PATTERN.test(prompt);
+
+const buildOpenAiAdultImagePolicyNote = () =>
+  "Policy guardrails: Keep any adult sexual content limited to clearly consenting adults. Do not include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse. Respect OpenAI safety policies and moderation instead of trying to bypass them.";
+
+const buildGeminiAdultImagePolicyNote = () =>
+  "Policy guardrails: Respect Gemini safety settings for sexually explicit content and the built-in child safety protections. Keep any adult sexual content limited to adults, and do not try to bypass Gemini filtering.";
+
+const buildAdultImagePolicyNoteForModel = (model: string, prompt: string) => {
+  if (!isLikelyAdultImagePrompt(prompt)) return "";
+  if (isOpenAiImageModel(model)) return buildOpenAiAdultImagePolicyNote();
+  if (isGeminiNativeImageModel(model)) return buildGeminiAdultImagePolicyNote();
+  return "";
+};
 
 const buildFluxQualityGuidance = (negativePrompt?: string) => {
   const positiveTargets = new Set<string>([
@@ -141,16 +172,25 @@ export const prepareImagePromptForModel = (
 ) => {
   const normalizedPrompt = normalizeWhitespace(prompt);
   const trimmedNegativePrompt = negativePrompt?.trim() || undefined;
+  const adultPolicyNote = buildAdultImagePolicyNoteForModel(
+    model,
+    normalizedPrompt
+  );
 
   if (!isFluxModel(model)) {
     return {
-      prompt: normalizedPrompt,
+      prompt: adultPolicyNote
+        ? appendPromptNote(normalizedPrompt, adultPolicyNote)
+        : normalizedPrompt,
       negativePrompt: trimmedNegativePrompt,
     };
   }
 
+  const fluxPrompt = buildFluxImagePrompt(normalizedPrompt, trimmedNegativePrompt);
   return {
-    prompt: buildFluxImagePrompt(normalizedPrompt, trimmedNegativePrompt),
+    prompt: adultPolicyNote
+      ? appendPromptNote(fluxPrompt, adultPolicyNote)
+      : fluxPrompt,
     negativePrompt: undefined,
   };
 };
@@ -301,6 +341,38 @@ export const resolveImageGenerationModelPipeline = (
   }
 
   return ordered;
+};
+
+export const resolveActiveImageToolModels = ({
+  pipelineEnabled,
+  preferredModels,
+  fallbackModel,
+  availableModels,
+}: {
+  pipelineEnabled: boolean;
+  preferredModels: string[];
+  fallbackModel: string;
+  availableModels: string[];
+}) =>
+  resolveImageGenerationModelPipeline(
+    pipelineEnabled ? preferredModels : [],
+    fallbackModel,
+    availableModels
+  );
+
+export const buildProviderPolicyHintForImageModels = (models: string[]) => {
+  const hints: string[] = [];
+  if (models.some(isOpenAiImageModel)) {
+    hints.push(
+      "For OpenAI GPT Image models, preserve lawful adult intent when requested, but keep prompts limited to consenting adults and never include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse."
+    );
+  }
+  if (models.some(isGeminiNativeImageModel)) {
+    hints.push(
+      "For Gemini Nano Banana models, preserve lawful adult intent when requested, but respect Gemini safety settings for sexually explicit content and the built-in child safety protections."
+    );
+  }
+  return hints.join("\n");
 };
 
 export const getQueuedJobsToStart = (

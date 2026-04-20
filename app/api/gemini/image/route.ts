@@ -1,5 +1,7 @@
 export const runtime = "edge";
 
+import { prepareImagePromptForModel } from "@/lib/studio-generation";
+
 type ImageRequest = {
   apiKey: string;
   prompt: string;
@@ -81,6 +83,7 @@ export async function POST(req: Request) {
   if (!apiKey || !prompt || !model) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
+  const preparedPrompt = prepareImagePromptForModel(model, prompt);
 
   const isImagen = isImagenModel(model);
   const endpoint = isImagen
@@ -89,7 +92,7 @@ export async function POST(req: Request) {
 
   const payload = isImagen
     ? {
-        instances: [{ prompt }],
+        instances: [{ prompt: preparedPrompt.prompt }],
         parameters: {
           sampleCount: numberOfImages ?? 1,
           ...(aspectRatio ? { aspectRatio } : {}),
@@ -97,7 +100,7 @@ export async function POST(req: Request) {
         },
       }
     : {
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts: [{ text: preparedPrompt.prompt }] }],
         generationConfig: {
           responseModalities: ["IMAGE"],
           ...(aspectRatio || imageSize

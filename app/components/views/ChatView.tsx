@@ -29,6 +29,10 @@ export function ChatView() {
         navyTtsModels,
         saveChatImages,
         saveToGallery,
+        imagePipelineEnabled,
+        setImagePipelineEnabled,
+        imageModelOrder,
+        setImageModelOrder,
         videoImage,
         videoAspect,
         videoDuration,
@@ -93,6 +97,10 @@ export function ChatView() {
                 audioModels={audioModels}
                 toolImageModel={toolImageModel}
                 setToolImageModel={setToolImageModel}
+                imagePipelineEnabled={imagePipelineEnabled}
+                setImagePipelineEnabled={setImagePipelineEnabled}
+                imageModelOrder={imageModelOrder}
+                setImageModelOrder={setImageModelOrder}
                 modelsLoading={modelsLoading}
                 modelsError={modelsError}
                 onRefreshModels={onRefreshModels}
