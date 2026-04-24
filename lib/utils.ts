@@ -9,10 +9,11 @@ export const dataUrlFromBase64 = (data: string, mimeType: string) =>
   `data:${mimeType};base64,${data}`;
 
 export const fetchAsDataUrl = async (url: string) => {
-  if (url.startsWith("data:")) {
-    return url;
+  const normalizedUrl = url.trim();
+  if (/^data:/i.test(normalizedUrl)) {
+    return normalizedUrl;
   }
-  const response = await fetch(url);
+  const response = await fetch(normalizedUrl);
   if (!response.ok) {
     throw new Error("Unable to fetch the generated asset.");
   }

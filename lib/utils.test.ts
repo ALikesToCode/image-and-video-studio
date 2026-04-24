@@ -12,8 +12,8 @@ test("fetchAsDataUrl returns existing data URLs without fetching", async () => {
   };
 
   try {
-    const dataUrl = "data:image/jpeg;base64,abcd";
-    assert.equal(await fetchAsDataUrl(dataUrl), dataUrl);
+    const dataUrl = " data:image/jpeg;base64,abcd ";
+    assert.equal(await fetchAsDataUrl(dataUrl), dataUrl.trim());
     assert.equal(called, false);
   } finally {
     globalThis.fetch = originalFetch;
