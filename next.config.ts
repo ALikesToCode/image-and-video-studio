@@ -13,7 +13,7 @@ const securityHeaders = [
       "img-src 'self' data: blob:",
       "media-src 'self' data: blob:",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      "connect-src 'self' data: blob:",
       "form-action 'self'",
       "worker-src 'self' blob:",
     ].join("; "),
