@@ -23,17 +23,15 @@ Open `http://localhost:3000` and add your API key in the UI (Gemini, NavyAI, Ope
 
 ## Deploying to Cloudflare Workers
 
-This project uses Next.js App Router with edge runtime API routes, so it is compatible with Cloudflare Workers / Pages.
-
-1. Build with the Cloudflare adapter:
+This project deploys to Cloudflare Workers through the OpenNext Cloudflare adapter.
 
 ```bash
-npx @cloudflare/next-on-pages@latest
+pnpm run preview
+pnpm run deploy
 ```
 
-2. Deploy the output in `.vercel/output/static` and `.vercel/output/functions` using Wrangler or Cloudflare Pages.
-
-If you prefer Workers-only deployments, you can also wrap the output with the Next-on-Pages worker as documented here: https://developers.cloudflare.com/pages/framework-guides/nextjs/
+The Worker entrypoint and assets output are configured in `wrangler.jsonc`.
+OpenNext configuration lives in `open-next.config.ts`.
 
 ## Notes
 
