@@ -1142,14 +1142,32 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 }
 
                 const navyImages = Array.isArray(navyPayload?.images)
-                    ? (navyPayload.images as Array<{ url?: string; b64_json?: string }>)
+                    ? (navyPayload.images as Array<{
+                        url?: string;
+                        b64_json?: string;
+                        data?: string;
+                        mimeType?: string;
+                        mime_type?: string;
+                    }>)
                     : [];
                 for (const image of navyImages) {
-                    if (typeof image?.b64_json === "string" && image.b64_json) {
+                    const base64Data =
+                        typeof image?.data === "string" && image.data
+                            ? image.data
+                            : typeof image?.b64_json === "string" && image.b64_json
+                                ? image.b64_json
+                                : "";
+                    if (base64Data) {
+                        const mimeType =
+                            typeof image.mimeType === "string"
+                                ? image.mimeType
+                                : typeof image.mime_type === "string"
+                                    ? image.mime_type
+                                    : "image/png";
                         images.push({
                             id: createId(),
-                            dataUrl: dataUrlFromBase64(image.b64_json, "image/png"),
-                            mimeType: "image/png",
+                            dataUrl: dataUrlFromBase64(base64Data, mimeType),
+                            mimeType,
                         });
                         continue;
                     }
