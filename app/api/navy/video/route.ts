@@ -1,12 +1,13 @@
 export const runtime = "edge";
 
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 import {
   buildNavyImageGenerationPayload,
   isNavyGenerationPending,
 } from "@/lib/studio-generation";
 
 type VideoRequest = {
-  apiKey: string;
+  apiKey?: string;
   model: string;
   prompt: string;
   imageUrl?: string;
@@ -23,9 +24,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, prompt, imageUrl, negativePrompt, seconds, aspectRatio } =
+  const { model, prompt, imageUrl, negativePrompt, seconds, aspectRatio } =
     body;
-  if (!apiKey || !model || !prompt) {
+  const userApiKey = getUserApiKey(req, body);
+  if (!userApiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
@@ -33,7 +35,7 @@ export async function POST(req: Request) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${userApiKey}`,
     },
     body: JSON.stringify(
       buildNavyImageGenerationPayload({
@@ -48,18 +50,38 @@ export async function POST(req: Request) {
     ),
   });
 
-  const data = await response.json();
+  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Video generation failed." },
+      {
+        error: providerErrorMessage(data, "Video generation failed.", [
+          userApiKey,
+        ]),
+      },
       { status: response.status }
     );
   }
 
-  if (!data?.id) {
-    const videoUrl = data?.data?.[0]?.url ?? data?.result?.data?.[0]?.url;
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (!dataRecord.id) {
+    const dataItems = Array.isArray(dataRecord.data) ? dataRecord.data : [];
+    const result =
+      dataRecord.result && typeof dataRecord.result === "object"
+        ? (dataRecord.result as Record<string, unknown>)
+        : {};
+    const resultItems = Array.isArray(result.data) ? result.data : [];
+    const firstData =
+      dataItems[0] && typeof dataItems[0] === "object"
+        ? (dataItems[0] as Record<string, unknown>)
+        : {};
+    const firstResult =
+      resultItems[0] && typeof resultItems[0] === "object"
+        ? (resultItems[0] as Record<string, unknown>)
+        : {};
+    const videoUrl = firstData.url ?? firstResult.url;
     if (typeof videoUrl === "string" && videoUrl) {
-      return Response.json({ videoUrl, status: data?.status ?? null });
+      return Response.json({ videoUrl, status: dataRecord.status ?? null });
     }
     return Response.json(
       { error: "No job id returned by NavyAI." },
@@ -67,7 +89,7 @@ export async function POST(req: Request) {
     );
   }
 
-  return Response.json({ id: data.id });
+  return Response.json({ id: dataRecord.id });
 }
 
 export async function GET(req: Request) {
@@ -87,24 +109,34 @@ export async function GET(req: Request) {
     }
   );
 
-  const data = await response.json();
+  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Unable to fetch job." },
+      { error: providerErrorMessage(data, "Unable to fetch job.", [apiKey]) },
       { status: response.status }
     );
   }
 
-  if (isNavyGenerationPending(typeof data?.status === "string" ? data.status : null)) {
-    return Response.json({ done: false, status: data.status });
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (isNavyGenerationPending(typeof dataRecord.status === "string" ? dataRecord.status : null)) {
+    return Response.json({ done: false, status: dataRecord.status });
   }
 
-  const result = data.result ?? data;
+  const result =
+    dataRecord.result && typeof dataRecord.result === "object"
+      ? (dataRecord.result as Record<string, unknown>)
+      : dataRecord;
+  const resultItems = Array.isArray(result.data) ? result.data : [];
+  const firstResult =
+    resultItems[0] && typeof resultItems[0] === "object"
+      ? (resultItems[0] as Record<string, unknown>)
+      : {};
   const url =
-    result?.data?.[0]?.url ??
-    result?.data?.[0]?.video_url ??
-    result?.video_url ??
-    result?.url;
+    firstResult.url ??
+    firstResult.video_url ??
+    result.video_url ??
+    result.url;
 
   if (!url) {
     return Response.json(

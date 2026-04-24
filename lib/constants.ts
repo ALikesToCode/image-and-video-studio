@@ -1,28 +1,118 @@
 export type Provider = "gemini" | "navy" | "chutes" | "openrouter";
 export type Mode = "image" | "video" | "tts";
 export type ChatProvider = "chutes" | "navy";
+export type ModelEndpoint =
+    | "gemini-generate-content"
+    | "imagen-predict"
+    | "veo-predict-long-running"
+    | "openrouter-chat-completions"
+    | "navy-chat-completions"
+    | "navy-images-generations"
+    | "navy-audio-speech"
+    | "chutes-image"
+    | "chutes-video"
+    | "chutes-audio"
+    | string;
+
 export type ModelOption = {
     id: string;
     label: string;
+    provider?: Provider | string;
+    endpoint?: ModelEndpoint;
+    inputModalities?: string[];
     outputModalities?: string[];
+    premium?: boolean;
+    requiredPlan?: string | null;
+    tokenMultiplier?: number;
+    pricing?: unknown;
+    supports?: Partial<{
+        imageGeneration: boolean;
+        imageEdit: boolean;
+        referenceImages: boolean;
+        tts: boolean;
+        video: boolean;
+        asyncJobs: boolean;
+        negativePrompt: boolean;
+        seed: boolean;
+        size: boolean;
+        aspectRatio: boolean;
+        imageSize: boolean;
+        sourceImage: boolean;
+        firstFrame: boolean;
+        lastFrame: boolean;
+    }>;
 };
 
 export const GEMINI_IMAGE_MODELS: ModelOption[] = [
     {
-        id: "gemini-2.5-flash-image",
-        label: "Gemini 2.5 Flash Image",
+        id: "gemini-3.1-flash-image-preview",
+        label: "Gemini 3.1 Flash Image Preview",
+        provider: "gemini",
+        endpoint: "gemini-generate-content",
+        inputModalities: ["text", "image"],
+        outputModalities: ["text", "image"],
+        supports: {
+            imageGeneration: true,
+            imageEdit: true,
+            referenceImages: true,
+            aspectRatio: true,
+            imageSize: true,
+        },
     },
     {
         id: "gemini-3-pro-image-preview",
         label: "Gemini 3 Pro Image (Preview)",
+        provider: "gemini",
+        endpoint: "gemini-generate-content",
+        inputModalities: ["text", "image"],
+        outputModalities: ["text", "image"],
+        supports: {
+            imageGeneration: true,
+            imageEdit: true,
+            referenceImages: true,
+            aspectRatio: true,
+            imageSize: true,
+        },
+    },
+    {
+        id: "gemini-2.5-flash-image",
+        label: "Gemini 2.5 Flash Image",
+        provider: "gemini",
+        endpoint: "gemini-generate-content",
+        inputModalities: ["text", "image"],
+        outputModalities: ["text", "image"],
+        supports: {
+            imageGeneration: true,
+            imageEdit: true,
+            referenceImages: true,
+            aspectRatio: true,
+        },
     },
     {
         id: "imagen-4.0-generate-001",
         label: "Imagen 4",
+        provider: "gemini",
+        endpoint: "imagen-predict",
+        inputModalities: ["text"],
+        outputModalities: ["image"],
+        supports: {
+            imageGeneration: true,
+            aspectRatio: true,
+            imageSize: true,
+        },
     },
     {
         id: "imagen-4.0-fast-generate-001",
         label: "Imagen 4 Fast",
+        provider: "gemini",
+        endpoint: "imagen-predict",
+        inputModalities: ["text"],
+        outputModalities: ["image"],
+        supports: {
+            imageGeneration: true,
+            aspectRatio: true,
+            imageSize: true,
+        },
     },
 ];
 
@@ -30,10 +120,38 @@ export const GEMINI_VIDEO_MODELS: ModelOption[] = [
     {
         id: "veo-3.1-generate-preview",
         label: "Veo 3.1 Preview",
+        provider: "gemini",
+        endpoint: "veo-predict-long-running",
+        inputModalities: ["text", "image"],
+        outputModalities: ["video", "audio"],
+        supports: {
+            video: true,
+            asyncJobs: true,
+            sourceImage: true,
+            referenceImages: true,
+            firstFrame: true,
+            lastFrame: true,
+            negativePrompt: true,
+            aspectRatio: true,
+        },
     },
     {
         id: "veo-3.1-fast-generate-preview",
         label: "Veo 3.1 Fast Preview",
+        provider: "gemini",
+        endpoint: "veo-predict-long-running",
+        inputModalities: ["text", "image"],
+        outputModalities: ["video", "audio"],
+        supports: {
+            video: true,
+            asyncJobs: true,
+            sourceImage: true,
+            referenceImages: true,
+            firstFrame: true,
+            lastFrame: true,
+            negativePrompt: true,
+            aspectRatio: true,
+        },
     },
 ];
 
@@ -406,11 +524,27 @@ export const CHUTES_TTS_MODELS: ModelOption[] = [
 
 export const AUTO_IMAGE_OPTION = "auto";
 export const IMAGE_ASPECTS = ["1:1", "3:4", "4:3", "9:16", "16:9"];
+export const EXTENDED_IMAGE_ASPECTS = [
+    "1:1",
+    "1:4",
+    "4:1",
+    "1:8",
+    "8:1",
+    "2:3",
+    "3:2",
+    "3:4",
+    "4:3",
+    "4:5",
+    "5:4",
+    "9:16",
+    "16:9",
+    "21:9",
+];
 export const IMAGE_SIZES = ["1K", "2K", "4K"];
 export const IMAGEN_SIZES = ["1K", "2K"];
 export const NAVY_IMAGE_SIZES = ["1024x1024", "512x512", "768x768"];
 export const VIDEO_ASPECTS = ["16:9", "9:16"];
-export const VIDEO_RESOLUTIONS = ["720p", "1080p"];
+export const VIDEO_RESOLUTIONS = ["720p", "1080p", "4k"];
 export const VIDEO_DURATIONS = ["4", "6", "8"];
 export const TTS_VOICES = [
     "alloy",

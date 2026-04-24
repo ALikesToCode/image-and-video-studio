@@ -1,5 +1,7 @@
 export const runtime = "edge";
 
+import { jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+
 export async function GET(req: Request) {
   const apiKey = req.headers.get("x-user-api-key");
   if (!apiKey) {
@@ -12,10 +14,10 @@ export async function GET(req: Request) {
     },
   });
 
-  const data = await response.json();
+  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Unable to fetch models." },
+      { error: providerErrorMessage(data, "Unable to fetch models.", [apiKey]) },
       { status: response.status }
     );
   }

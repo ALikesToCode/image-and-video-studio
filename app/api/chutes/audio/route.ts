@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
 
 export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { apiKey, prompt, text, model, speed, speaker, maxDuration } = body;
+        const { prompt, text, model, speed, speaker, maxDuration } = body;
+        const apiKey = getUserApiKey(req, body);
 
         if (!apiKey) {
             return NextResponse.json({ error: "Missing API key" }, { status: 401 });
@@ -60,7 +62,10 @@ export async function POST(req: NextRequest) {
 
         if (!response.ok) {
             const errorText = await response.text();
-            return NextResponse.json({ error: `Chutes API Error: ${errorText}` }, { status: response.status });
+            return NextResponse.json(
+                { error: redactSecrets(errorText || "Chutes audio generation failed.", [apiKey]) },
+                { status: response.status }
+            );
         }
 
         // Return the audio file (stream)
@@ -78,9 +83,8 @@ export async function POST(req: NextRequest) {
         });
 
     } catch (error) {
-        console.error("Audio generation error:", error);
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : "Internal Server Error" },
+            { error: redactSecrets(error, []) || "Internal Server Error" },
             { status: 500 }
         );
     }

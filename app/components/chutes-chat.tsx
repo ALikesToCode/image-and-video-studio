@@ -995,9 +995,11 @@ ${defaultPrompt}`;
     const hasEnabledTools = toolSpec.length > 0;
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-api-key": apiKey,
+      },
       body: JSON.stringify({
-        apiKey,
         model,
         messages: [
           { role: "system", content: systemPrompt },
@@ -1125,8 +1127,8 @@ ${defaultPrompt}`;
               onUpdate({ toolCalls });
             }
           }
-        } catch (e) {
-          console.error("Parse error", e);
+        } catch {
+          // Ignore malformed stream fragments and keep reading.
         }
       }
     });
@@ -1206,7 +1208,7 @@ ${defaultPrompt}`;
       throw new Error("No image models are available for the image tool.");
     }
     const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
-    const baseBody: Record<string, unknown> = { apiKey };
+    const baseBody: Record<string, unknown> = {};
     if (provider === "navy") {
       const numberOfImages = getNumberArg(args, ["n"]);
       const size = getStringArg(args, ["size"]);
@@ -1248,7 +1250,10 @@ ${defaultPrompt}`;
       }
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": apiKey,
+        },
         body: JSON.stringify(request.body),
       });
       const payload = await response.json();
@@ -1343,9 +1348,11 @@ ${defaultPrompt}`;
       const seed = getNumberArg(args, ["seed"]);
       const createResponse = await fetch("/api/navy/video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": apiKey,
+        },
         body: JSON.stringify({
-          apiKey,
           model: modelOverride,
           prompt,
           size: size || undefined,
@@ -1434,9 +1441,11 @@ ${defaultPrompt}`;
     const guidanceScale = getNumberArg(args, ["guidance_scale_2"]);
     const response = await fetch("/api/chutes/video", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-api-key": apiKey,
+      },
       body: JSON.stringify({
-        apiKey,
         prompt,
         model: modelOverride,
         image: sourceImage,
@@ -1527,9 +1536,11 @@ ${defaultPrompt}`;
       const responseFormat = getStringArg(args, ["response_format"]);
       const response = await fetch("/api/navy/tts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": apiKey,
+        },
         body: JSON.stringify({
-          apiKey,
           model: modelOverride,
           input: prompt,
           voice,
@@ -1568,9 +1579,11 @@ ${defaultPrompt}`;
     const maxDuration = getNumberArg(args, ["max_duration_ms", "maxDuration"]);
     const response = await fetch("/api/chutes/audio", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-api-key": apiKey,
+      },
       body: JSON.stringify({
-        apiKey,
         prompt,
         model: modelOverride,
         speed: speed ?? undefined,

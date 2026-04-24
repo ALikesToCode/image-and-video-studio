@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
 
 export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { apiKey, prompt, image, fps, guidance_scale_2, model } = body;
+        const { prompt, image, fps, guidance_scale_2, model } = body;
+        const apiKey = getUserApiKey(req, body);
 
         if (!apiKey) {
             return NextResponse.json({ error: "Missing API key" }, { status: 401 });
@@ -44,7 +46,10 @@ export async function POST(req: NextRequest) {
 
         if (!response.ok) {
             const errorText = await response.text();
-            return NextResponse.json({ error: `Chutes API Error: ${errorText}` }, { status: response.status });
+            return NextResponse.json(
+                { error: redactSecrets(errorText || "Chutes video generation failed.", [apiKey]) },
+                { status: response.status }
+            );
         }
 
         const contentType = response.headers.get("content-type") ?? "";
@@ -62,9 +67,8 @@ export async function POST(req: NextRequest) {
         });
 
     } catch (error) {
-        console.error("Video generation error:", error);
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : "Internal Server Error" },
+            { error: redactSecrets(error, []) || "Internal Server Error" },
             { status: 500 }
         );
     }

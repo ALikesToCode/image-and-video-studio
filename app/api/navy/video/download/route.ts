@@ -1,5 +1,10 @@
 export const runtime = "edge";
 
+import { safeFetchExternalMedia, validateExternalMediaUrl } from "@/lib/server/safe-fetch";
+
+const shouldAttachNavyAuth = (url: URL) =>
+  url.hostname === "api.navy" || url.hostname.endsWith(".api.navy");
+
 export async function POST(req: Request) {
   let body: { url?: string };
   try {
@@ -12,11 +17,33 @@ export async function POST(req: Request) {
   if (!url) {
     return Response.json({ error: "Missing video URL." }, { status: 400 });
   }
+  let downloadUrl: URL;
+  try {
+    downloadUrl = validateExternalMediaUrl(url, ["api.navy", ".api.navy"]);
+  } catch {
+    return Response.json({ error: "Invalid video URL." }, { status: 400 });
+  }
 
   const apiKey = req.headers.get("x-user-api-key");
-  const response = await fetch(url, {
-    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
-  });
+  let response: Response;
+  try {
+    response = await safeFetchExternalMedia(downloadUrl.toString(), {
+      allowedHosts: ["api.navy", ".api.navy"],
+      allowedContentTypes: ["video/"],
+      maxBytes: 512 * 1024 * 1024,
+      timeoutMs: 60_000,
+      allowRedirects: true,
+      headers:
+        apiKey && shouldAttachNavyAuth(downloadUrl)
+          ? { Authorization: `Bearer ${apiKey}` }
+          : undefined,
+    });
+  } catch {
+    return Response.json(
+      { error: "Unable to download the rendered video." },
+      { status: 400 }
+    );
+  }
 
   if (!response.ok) {
     return Response.json(
@@ -25,13 +52,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const contentType =
-    response.headers.get("content-type") ?? "video/mp4";
-
   return new Response(response.body, {
     status: 200,
     headers: {
-      "Content-Type": contentType,
+      "Content-Type": response.headers.get("content-type") ?? "video/mp4",
     },
   });
 }

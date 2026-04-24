@@ -1,12 +1,13 @@
 export const runtime = "edge";
 
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 import {
   buildNavyImageGenerationPayload,
   isNavyGenerationPending,
 } from "@/lib/studio-generation";
 
 type ImageRequest = {
-  apiKey: string;
+  apiKey?: string;
   model: string;
   prompt: string;
   size?: string;
@@ -31,7 +32,6 @@ export async function POST(req: Request) {
   }
 
   const {
-    apiKey,
     model,
     prompt,
     size,
@@ -46,7 +46,8 @@ export async function POST(req: Request) {
     responseFormat,
     aspectRatio,
   } = body;
-  if (!apiKey || !model || !prompt) {
+  const userApiKey = getUserApiKey(req, body);
+  if (!userApiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${userApiKey}`,
     },
     body: JSON.stringify(
       buildNavyImageGenerationPayload({
@@ -75,20 +76,26 @@ export async function POST(req: Request) {
     ),
   });
 
-  const data = await response.json();
+  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Image generation failed." },
+      {
+        error: providerErrorMessage(data, "Image generation failed.", [
+          userApiKey,
+        ]),
+      },
       { status: response.status }
     );
   }
 
-  if (typeof data?.id === "string" && !Array.isArray(data?.data)) {
-    return Response.json({ id: data.id, status: data.status ?? null });
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (typeof dataRecord.id === "string" && !Array.isArray(dataRecord.data)) {
+    return Response.json({ id: dataRecord.id, status: dataRecord.status ?? null });
   }
 
-  const images = Array.isArray(data?.data)
-    ? data.data.map((item: { url?: string; b64_json?: string }) => ({
+  const images = Array.isArray(dataRecord.data)
+    ? dataRecord.data.map((item: { url?: string; b64_json?: string }) => ({
         url: item.url,
         b64_json: item.b64_json,
       }))
@@ -119,20 +126,25 @@ export async function GET(req: Request) {
     },
   });
 
-  const data = await response.json();
+  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Unable to fetch job." },
+      { error: providerErrorMessage(data, "Unable to fetch job.", [apiKey]) },
       { status: response.status }
     );
   }
 
-  if (isNavyGenerationPending(typeof data?.status === "string" ? data.status : null)) {
-    return Response.json({ done: false, status: data.status });
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (isNavyGenerationPending(typeof dataRecord.status === "string" ? dataRecord.status : null)) {
+    return Response.json({ done: false, status: dataRecord.status });
   }
 
-  const result = data?.result ?? data;
-  const images = Array.isArray(result?.data)
+  const result =
+    dataRecord.result && typeof dataRecord.result === "object"
+      ? (dataRecord.result as Record<string, unknown>)
+      : dataRecord;
+  const images = Array.isArray(result.data)
     ? result.data.map((item: { url?: string; b64_json?: string }) => ({
         url: item.url,
         b64_json: item.b64_json,

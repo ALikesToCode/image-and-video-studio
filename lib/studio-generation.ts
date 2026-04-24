@@ -5,6 +5,12 @@ import {
 } from "./constants.ts";
 import type { GeneratedImage } from "./types.ts";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
+import {
+  IMAGE_MIME_TYPES,
+  dataUrlToInlineData,
+  normalizeVeoDuration,
+  parseDataUrl,
+} from "./studio-validation.ts";
 
 type ActiveJobLike = {
   status: "queued" | "running" | "success" | "error";
@@ -33,6 +39,18 @@ type NavyModelGroups = {
   audio: ModelOption[];
 };
 
+type ReferenceImageInput = {
+  dataUrl: string;
+  role?: string;
+};
+
+type SanitizedReferenceImage = {
+  dataUrl: string;
+  data: string;
+  mimeType: string;
+  role?: string;
+};
+
 type QueueMode = "image" | "video" | "tts";
 
 type QueueJobLike = {
@@ -55,6 +73,9 @@ type ImageSizingOptions = {
 
 const normalizeModalities = (modalities?: string[]) =>
   (modalities ?? []).map((value) => value.toLowerCase());
+
+const normalizeEndpoint = (value: unknown) =>
+  typeof value === "string" ? value.toLowerCase() : "";
 
 const normalizeWhitespace = (value: string) =>
   value
@@ -303,6 +324,205 @@ export const resolveImageSizingOptions = (
   return sizing;
 };
 
+export const isImagenModel = (model: string) => model.startsWith("imagen-");
+
+const sanitizeReferenceImages = (
+  referenceImages?: ReferenceImageInput[],
+  maxItems = 10
+): SanitizedReferenceImage[] =>
+  (referenceImages ?? [])
+    .map<SanitizedReferenceImage | null>((reference) => {
+      const parsed = parseDataUrl(reference.dataUrl, IMAGE_MIME_TYPES);
+      if (!parsed) return null;
+      return {
+        dataUrl: parsed.dataUrl,
+        data: parsed.data,
+        mimeType: parsed.mimeType,
+        ...(reference.role ? { role: reference.role } : {}),
+      };
+    })
+    .filter((reference): reference is SanitizedReferenceImage => reference !== null)
+    .slice(0, maxItems);
+
+export const buildGeminiImagePayload = ({
+  model,
+  prompt,
+  aspectRatio,
+  imageSize,
+  numberOfImages,
+  referenceImages,
+}: {
+  model: string;
+  prompt: string;
+  aspectRatio?: string;
+  imageSize?: string;
+  numberOfImages?: number;
+  referenceImages?: ReferenceImageInput[];
+}) => {
+  const preparedPrompt = prepareImagePromptForModel(model, prompt);
+
+  if (isImagenModel(model)) {
+    return {
+      endpoint: `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`,
+      payload: {
+        instances: [{ prompt: preparedPrompt.prompt }],
+        parameters: {
+          sampleCount: numberOfImages ?? 1,
+          ...(aspectRatio ? { aspectRatio } : {}),
+          ...(imageSize ? { imageSize } : {}),
+        },
+      },
+    };
+  }
+
+  const parts: Array<Record<string, unknown>> = [{ text: preparedPrompt.prompt }];
+  for (const reference of sanitizeReferenceImages(referenceImages)) {
+    parts.push({
+      inline_data: {
+        mime_type: reference.mimeType,
+        data: reference.data,
+      },
+    });
+  }
+
+  return {
+    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    payload: {
+      contents: [{ parts }],
+      generationConfig: {
+        responseModalities: ["IMAGE"],
+        ...(aspectRatio || imageSize
+          ? {
+              imageConfig: {
+                ...(aspectRatio ? { aspectRatio } : {}),
+                ...(imageSize ? { imageSize } : {}),
+              },
+            }
+          : {}),
+      },
+    },
+  };
+};
+
+export const buildOpenRouterImagePayload = ({
+  model,
+  prompt,
+  aspectRatio,
+  imageSize,
+  outputModalities,
+  referenceImages,
+}: {
+  model: string;
+  prompt: string;
+  aspectRatio?: string;
+  imageSize?: string;
+  outputModalities?: string[];
+  referenceImages?: ReferenceImageInput[];
+}) => {
+  const modalities = resolveOpenRouterModalities(model, outputModalities);
+  const preparedPrompt = prepareImagePromptForModel(model, prompt);
+  const references = sanitizeReferenceImages(referenceImages);
+  const content = references.length
+    ? [
+        { type: "text", text: preparedPrompt.prompt },
+        ...references.map((reference) => ({
+          type: "image_url",
+          image_url: { url: reference.dataUrl },
+        })),
+      ]
+    : preparedPrompt.prompt;
+
+  return {
+    model,
+    messages: [{ role: "user", content }],
+    modalities,
+    ...(aspectRatio || imageSize
+      ? {
+          image_config: {
+            ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+            ...(imageSize ? { image_size: imageSize } : {}),
+          },
+        }
+      : {}),
+  };
+};
+
+const toVeoInlineImage = (dataUrl?: string | null) => {
+  if (!dataUrl) return null;
+  const inlineData = dataUrlToInlineData(dataUrl);
+  if (!inlineData) return null;
+  return {
+    inlineData: {
+      mimeType: inlineData.inlineData.mimeType,
+      data: inlineData.inlineData.data,
+    },
+  };
+};
+
+export const buildGeminiVideoPayload = ({
+  prompt,
+  aspectRatio,
+  resolution,
+  durationSeconds,
+  negativePrompt,
+  sourceImage,
+  lastFrameImage,
+  referenceImages,
+}: {
+  prompt: string;
+  aspectRatio?: string;
+  resolution?: string;
+  durationSeconds?: string;
+  negativePrompt?: string;
+  sourceImage?: string | null;
+  lastFrameImage?: string | null;
+  referenceImages?: ReferenceImageInput[];
+}) => {
+  const image = toVeoInlineImage(sourceImage);
+  const lastFrame = toVeoInlineImage(lastFrameImage);
+  const referenceImageParts = sanitizeReferenceImages(referenceImages, 3)
+    .filter(
+      (reference) =>
+        reference.role !== "source_image" &&
+        reference.role !== "first_frame" &&
+        reference.role !== "last_frame"
+    )
+    .slice(0, 3)
+    .map((reference) => ({
+      image: {
+        inlineData: {
+          mimeType: reference.mimeType,
+          data: reference.data,
+        },
+      },
+      referenceType: reference.role === "style" ? "style" : "asset",
+    }));
+  const normalizedDuration = normalizeVeoDuration(durationSeconds, {
+    resolution,
+    hasReferenceImages: referenceImageParts.length > 0,
+    hasLastFrame: Boolean(lastFrame),
+  });
+
+  return {
+    instances: [
+      {
+        prompt,
+        ...(image ? { image } : {}),
+        ...(lastFrame ? { lastFrame } : {}),
+        ...(referenceImageParts.length
+          ? { referenceImages: referenceImageParts }
+          : {}),
+      },
+    ],
+    parameters: {
+      ...(aspectRatio ? { aspectRatio } : {}),
+      ...(resolution ? { resolution } : {}),
+      durationSeconds: normalizedDuration,
+      ...(negativePrompt ? { negativePrompt } : {}),
+    },
+  };
+};
+
 export const getActiveJobCount = (jobs: ActiveJobLike[]) =>
   jobs.filter((job) => job.status === "queued" || job.status === "running")
     .length;
@@ -354,13 +574,51 @@ const toModelOption = (value: unknown): ModelOption | null => {
         ? record.label
         : id;
   const outputModalities = asArray(
-    record.output_modalities ?? record.outputModalities
+    record.output_modalities ??
+      record.outputModalities ??
+      asRecord(record.architecture)?.output_modalities
   ).filter((entry): entry is string => typeof entry === "string");
+  const inputModalities = asArray(
+    record.input_modalities ??
+      record.inputModalities ??
+      asRecord(record.architecture)?.input_modalities
+  ).filter((entry): entry is string => typeof entry === "string");
+  const endpoint =
+    typeof record.endpoint === "string" ? record.endpoint : undefined;
+  const provider =
+    typeof record.owned_by === "string"
+      ? record.owned_by
+      : typeof record.provider === "string"
+        ? record.provider
+        : undefined;
+  const premium = typeof record.premium === "boolean" ? record.premium : undefined;
+  const requiredPlan =
+    typeof record.required_plan === "string"
+      ? record.required_plan
+      : typeof record.requiredPlan === "string"
+        ? record.requiredPlan
+        : record.required_plan === null || record.requiredPlan === null
+          ? null
+          : undefined;
+  const tokenMultiplier =
+    typeof record.token_multiplier === "number"
+      ? record.token_multiplier
+      : typeof record.tokenMultiplier === "number"
+        ? record.tokenMultiplier
+        : undefined;
+  const pricing = record.pricing;
 
   return {
     id,
     label,
+    ...(provider ? { provider } : {}),
+    ...(endpoint ? { endpoint } : {}),
+    ...(inputModalities.length ? { inputModalities } : {}),
     ...(outputModalities.length ? { outputModalities } : {}),
+    ...(typeof premium === "boolean" ? { premium } : {}),
+    ...(requiredPlan !== undefined ? { requiredPlan } : {}),
+    ...(typeof tokenMultiplier === "number" ? { tokenMultiplier } : {}),
+    ...(pricing !== undefined ? { pricing } : {}),
   };
 };
 
@@ -391,7 +649,7 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
       if (!record || !model) return groups;
 
       const endpoint =
-        typeof record.endpoint === "string" ? record.endpoint.toLowerCase() : "";
+        normalizeEndpoint(record.endpoint);
       const id = model.id.toLowerCase();
 
       if (
@@ -399,7 +657,10 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
         endpoint.includes("/v1/messages") ||
         endpoint.includes("/v1/responses")
       ) {
-        pushUniqueModel(groups.chat, model);
+        pushUniqueModel(groups.chat, {
+          ...model,
+          supports: { ...(model.supports ?? {}) },
+        });
         return groups;
       }
 
@@ -409,7 +670,28 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
           NAVY_TTS_MODEL_PATTERN.test(id) &&
           !NAVY_TRANSCRIPTION_MODEL_PATTERN.test(id))
       ) {
-        pushUniqueModel(groups.audio, model);
+        pushUniqueModel(groups.audio, {
+          ...model,
+          supports: { ...(model.supports ?? {}), tts: true },
+        });
+        return groups;
+      }
+
+      if (
+        endpoint.includes("/v1/videos/generations") ||
+        endpoint.includes("/videos/generations")
+      ) {
+        pushUniqueModel(groups.video, {
+          ...model,
+          supports: {
+            ...(model.supports ?? {}),
+            video: true,
+            asyncJobs: true,
+            sourceImage: true,
+            aspectRatio: true,
+            negativePrompt: true,
+          },
+        });
         return groups;
       }
 
@@ -419,9 +701,29 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
         !endpoint
       ) {
         if (NAVY_VIDEO_MODEL_PATTERN.test(id)) {
-          pushUniqueModel(groups.video, model);
+          pushUniqueModel(groups.video, {
+            ...model,
+            supports: {
+              ...(model.supports ?? {}),
+              video: true,
+              asyncJobs: true,
+              sourceImage: true,
+              aspectRatio: true,
+              negativePrompt: true,
+            },
+          });
         } else if (!NAVY_TRANSCRIPTION_MODEL_PATTERN.test(id)) {
-          pushUniqueModel(groups.image, model);
+          pushUniqueModel(groups.image, {
+            ...model,
+            supports: {
+              ...(model.supports ?? {}),
+              imageGeneration: true,
+              sourceImage: true,
+              aspectRatio: true,
+              size: true,
+              seed: true,
+            },
+          });
         }
       }
 

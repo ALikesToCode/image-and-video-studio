@@ -1,18 +1,18 @@
 export const runtime = "edge";
 
-import { prepareImagePromptForModel } from "@/lib/studio-generation";
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { buildGeminiImagePayload } from "@/lib/studio-generation";
 
 type ImageRequest = {
-  apiKey: string;
+  apiKey?: string;
   prompt: string;
   model: string;
   aspectRatio?: string;
   imageSize?: string;
   numberOfImages?: number;
   personGeneration?: string;
+  referenceImages?: Array<{ dataUrl: string; role?: string }>;
 };
-
-const isImagenModel = (model: string) => model.startsWith("imagen-");
 
 const toRecord = (value: unknown): Record<string, unknown> | null => {
   if (value && typeof value === "object") {
@@ -32,13 +32,15 @@ const pickImagesFromGemini = (data: unknown) => {
   return parts
     .map((part) => {
       const partRecord = toRecord(part);
-      const inlineData = toRecord(partRecord?.inlineData);
+      const inlineData = toRecord(partRecord?.inlineData ?? partRecord?.inline_data);
       const imageData =
         typeof inlineData?.data === "string" ? inlineData.data : "";
       if (!imageData) return null;
       const mimeType =
         typeof inlineData?.mimeType === "string"
           ? inlineData.mimeType
+          : typeof inlineData?.mime_type === "string"
+            ? inlineData.mime_type
           : "image/png";
       return { data: imageData, mimeType };
     })
@@ -79,63 +81,42 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, prompt, model, aspectRatio, imageSize, numberOfImages } = body;
-  if (!apiKey || !prompt || !model) {
+  const { prompt, model, aspectRatio, imageSize, numberOfImages } = body;
+  const userApiKey = getUserApiKey(req, body);
+  if (!userApiKey || !prompt || !model) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
-  const preparedPrompt = prepareImagePromptForModel(model, prompt);
-
-  const isImagen = isImagenModel(model);
-  const endpoint = isImagen
-    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`
-    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-  const payload = isImagen
-    ? {
-        instances: [{ prompt: preparedPrompt.prompt }],
-        parameters: {
-          sampleCount: numberOfImages ?? 1,
-          ...(aspectRatio ? { aspectRatio } : {}),
-          ...(imageSize ? { imageSize } : {}),
-        },
-      }
-    : {
-        contents: [{ parts: [{ text: preparedPrompt.prompt }] }],
-        generationConfig: {
-          responseModalities: ["IMAGE"],
-          ...(aspectRatio || imageSize
-            ? {
-                imageConfig: {
-                  ...(aspectRatio ? { aspectRatio } : {}),
-                  ...(imageSize ? { imageSize } : {}),
-                },
-              }
-            : {}),
-        },
-      };
+  const { endpoint, payload } = buildGeminiImagePayload({
+    model,
+    prompt,
+    aspectRatio,
+    imageSize,
+    numberOfImages,
+    referenceImages: body.referenceImages,
+  });
 
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
+      "x-goog-api-key": userApiKey,
     },
     body: JSON.stringify(payload),
   });
 
-  const data = (await response.json()) as Record<string, unknown>;
+  const data = (await jsonOrNull(response)) as Record<string, unknown> | null;
   if (!response.ok) {
-    const errorRecord = toRecord(data.error);
-    const errorMessage =
-      typeof errorRecord?.message === "string"
-        ? errorRecord.message
-        : typeof data.error === "string"
-          ? data.error
-          : "Image generation failed.";
+    const errorMessage = providerErrorMessage(
+      data,
+      "Image generation failed.",
+      [userApiKey]
+    );
     return Response.json({ error: errorMessage }, { status: response.status });
   }
 
-  const images = isImagen ? pickImagesFromImagen(data) : pickImagesFromGemini(data);
+  const images = model.startsWith("imagen-")
+    ? pickImagesFromImagen(data)
+    : pickImagesFromGemini(data);
   if (!images.length) {
     return Response.json(
       { error: "No images were returned by the model." },

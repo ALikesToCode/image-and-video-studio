@@ -1,9 +1,10 @@
 export const runtime = "edge";
 
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 import { buildChatCompletionPayload } from "@/lib/chat-tooling";
 
 type ChatRequest = {
-  apiKey: string;
+  apiKey?: string;
   model: string;
   messages: Array<Record<string, unknown>>;
   tools?: Array<Record<string, unknown>>;
@@ -20,8 +21,9 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, messages, tools, toolChoice, maxTokens, temperature } =
+  const { model, messages, tools, toolChoice, maxTokens, temperature } =
     body;
+  const apiKey = getUserApiKey(req, body);
   if (!apiKey || !model || !Array.isArray(messages)) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
@@ -46,9 +48,9 @@ export async function POST(req: Request) {
   });
 
   if (!response.ok) {
-    const data = await response.json();
+    const data = await jsonOrNull(response);
     return Response.json(
-      { error: data?.error?.message ?? "Chat completion failed." },
+      { error: providerErrorMessage(data, "Chat completion failed.", [apiKey]) },
       { status: response.status }
     );
   }

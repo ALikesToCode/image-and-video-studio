@@ -1,7 +1,10 @@
 export const runtime = "edge";
 
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
+
 type ImageRequest = {
-  apiKey: string;
+  apiKey?: string;
   prompt: string;
   model?: string;
   negativePrompt?: string;
@@ -109,10 +112,13 @@ const extractFromJson = (data: unknown) => {
 };
 
 const downloadImage = async (url: string) => {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Unable to fetch the generated image.");
-  }
+  const response = await safeFetchExternalMedia(url, {
+    allowedHosts: ["chutes.ai", ".chutes.ai"],
+    allowedContentTypes: ["image/"],
+    maxBytes: 50 * 1024 * 1024,
+    timeoutMs: 30_000,
+    allowRedirects: true,
+  });
   const contentType = response.headers.get("content-type") ?? "image/png";
   const buffer = await response.arrayBuffer();
   return {
@@ -144,7 +150,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, prompt } = body;
+  const { prompt } = body;
+  const apiKey = getUserApiKey(req, body);
   if (!apiKey || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
@@ -193,9 +200,9 @@ export async function POST(req: Request) {
 
   if (!response.ok) {
     if (contentType.includes("application/json")) {
-      const data = await response.json();
+      const data = await jsonOrNull(response);
       return Response.json(
-        { error: data?.error?.message ?? "Image generation failed." },
+        { error: providerErrorMessage(data, "Image generation failed.", [apiKey]) },
         { status: response.status }
       );
     }

@@ -1,13 +1,19 @@
 export const runtime = "edge";
 
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { buildGeminiVideoPayload } from "@/lib/studio-generation";
+
 type VideoRequest = {
-  apiKey: string;
+  apiKey?: string;
   prompt: string;
   model: string;
   aspectRatio?: string;
   resolution?: string;
   durationSeconds?: string;
   negativePrompt?: string;
+  sourceImage?: string | null;
+  lastFrameImage?: string | null;
+  referenceImages?: Array<{ dataUrl: string; role?: string }>;
 };
 
 export async function POST(req: Request) {
@@ -18,48 +24,56 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, prompt, model, aspectRatio, resolution, durationSeconds, negativePrompt } =
+  const { prompt, model, aspectRatio, resolution, durationSeconds, negativePrompt } =
     body;
-  if (!apiKey || !prompt || !model) {
+  const userApiKey = getUserApiKey(req, body);
+  if (!userApiKey || !prompt || !model) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
-  const payload = {
-    instances: [{ prompt }],
-    parameters: {
-      ...(aspectRatio ? { aspectRatio } : {}),
-      ...(resolution ? { resolution } : {}),
-      ...(durationSeconds ? { durationSeconds } : {}),
-      ...(negativePrompt ? { negativePrompt } : {}),
-    },
-  };
+  const payload = buildGeminiVideoPayload({
+    prompt,
+    aspectRatio,
+    resolution,
+    durationSeconds,
+    negativePrompt,
+    sourceImage: body.sourceImage,
+    lastFrameImage: body.lastFrameImage,
+    referenceImages: body.referenceImages,
+  });
 
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
+      "x-goog-api-key": userApiKey,
     },
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json();
+  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Video generation failed." },
+      {
+        error: providerErrorMessage(data, "Video generation failed.", [
+          userApiKey,
+        ]),
+      },
       { status: response.status }
     );
   }
 
-  if (!data?.name) {
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (typeof dataRecord.name !== "string") {
     return Response.json(
       { error: "No operation name returned by Veo." },
       { status: 502 }
     );
   }
 
-  return Response.json({ name: data.name });
+  return Response.json({ name: dataRecord.name });
 }
 
 export async function GET(req: Request) {
@@ -79,29 +93,58 @@ export async function GET(req: Request) {
       },
     }
   );
-  const data = await response.json();
+  const data = await jsonOrNull(response);
 
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Unable to fetch operation." },
+      { error: providerErrorMessage(data, "Unable to fetch operation.", [apiKey]) },
       { status: response.status }
     );
   }
 
-  if (!data.done) {
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (!dataRecord.done) {
     return Response.json({ done: false });
   }
 
-  if (data.error) {
+  const error = dataRecord.error;
+  if (error) {
+    const errorRecord =
+      error && typeof error === "object" ? (error as Record<string, unknown>) : {};
     return Response.json(
-      { done: true, error: data.error.message ?? "Video generation failed." },
+      {
+        done: true,
+        error:
+          typeof errorRecord.message === "string"
+            ? errorRecord.message
+            : "Video generation failed.",
+      },
       { status: 502 }
     );
   }
 
+  const responseRecord =
+    dataRecord.response && typeof dataRecord.response === "object"
+      ? (dataRecord.response as Record<string, unknown>)
+      : {};
+  const generateVideoResponse =
+    responseRecord.generateVideoResponse &&
+    typeof responseRecord.generateVideoResponse === "object"
+      ? (responseRecord.generateVideoResponse as Record<string, unknown>)
+      : {};
+  const samples = Array.isArray(generateVideoResponse.generatedSamples)
+    ? generateVideoResponse.generatedSamples
+    : [];
+  const firstSample =
+    samples[0] && typeof samples[0] === "object"
+      ? (samples[0] as Record<string, unknown>)
+      : {};
   const video =
-    data?.response?.generateVideoResponse?.generatedSamples?.[0]?.video ?? null;
-  const videoUri = video?.uri ?? null;
+    firstSample.video && typeof firstSample.video === "object"
+      ? (firstSample.video as Record<string, unknown>)
+      : {};
+  const videoUri = typeof video.uri === "string" ? video.uri : null;
 
   if (!videoUri) {
     return Response.json(

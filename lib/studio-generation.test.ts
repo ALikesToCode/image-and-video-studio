@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
 import {
   buildProviderPolicyHintForImageModels,
+  buildGeminiImagePayload,
+  buildGeminiVideoPayload,
   buildNavyImageGenerationPayload,
+  buildOpenRouterImagePayload,
   buildChutesChatSystemPrompt,
   extractOpenRouterImageModels,
   getActiveJobCount,
@@ -58,6 +61,116 @@ test("OpenRouter model extraction keeps image-capable models and metadata", () =
   assert.equal(models.length, 2);
   assert.deepEqual(models[0]?.outputModalities, ["text", "image"]);
   assert.deepEqual(models[1]?.outputModalities, ["image"]);
+});
+
+test("OpenRouter model extraction preserves pricing and modality metadata", () => {
+  const models = extractOpenRouterImageModels({
+    data: [
+      {
+        id: "google/gemini-3.1-flash-image-preview",
+        name: "Gemini 3.1 Flash Image Preview",
+        architecture: {
+          input_modalities: ["text", "image"],
+          output_modalities: ["text", "image"],
+        },
+        pricing: { prompt: "0.000001" },
+      },
+    ],
+  });
+
+  assert.equal(models[0]?.id, "google/gemini-3.1-flash-image-preview");
+  assert.deepEqual(models[0]?.inputModalities, ["text", "image"]);
+  assert.deepEqual(models[0]?.outputModalities, ["text", "image"]);
+  assert.deepEqual(models[0]?.pricing, { prompt: "0.000001" });
+});
+
+test("Gemini image payload keeps Imagen separate from Gemini edit payloads", () => {
+  const imagen = buildGeminiImagePayload({
+    model: "imagen-4.0-generate-001",
+    prompt: "A product photo",
+    aspectRatio: "1:1",
+    imageSize: "2K",
+    numberOfImages: 2,
+    referenceImages: [{ dataUrl: "data:image/png;base64,YWJj" }],
+  });
+
+  assert.match(imagen.endpoint, /:predict$/);
+  assert.deepEqual(imagen.payload, {
+    instances: [{ prompt: "A product photo" }],
+    parameters: {
+      sampleCount: 2,
+      aspectRatio: "1:1",
+      imageSize: "2K",
+    },
+  });
+
+  const gemini = buildGeminiImagePayload({
+    model: "gemini-3.1-flash-image-preview",
+    prompt: "Edit this into a product hero image",
+    referenceImages: [{ dataUrl: "data:image/png;base64,YWJj" }],
+  });
+  const parts = (gemini.payload as {
+    contents: Array<{ parts: Array<Record<string, unknown>> }>;
+  }).contents[0]?.parts;
+
+  assert.match(gemini.endpoint, /:generateContent$/);
+  assert.equal(parts?.[0]?.text, "Edit this into a product hero image");
+  assert.deepEqual(parts?.[1], {
+    inline_data: {
+      mime_type: "image/png",
+      data: "YWJj",
+    },
+  });
+});
+
+test("OpenRouter image payload puts text first before image references", () => {
+  const payload = buildOpenRouterImagePayload({
+    model: "google/gemini-2.5-flash-image-preview",
+    prompt: "Use this product as reference",
+    outputModalities: ["text", "image"],
+    aspectRatio: "16:9",
+    imageSize: "1024x1024",
+    referenceImages: [{ dataUrl: "data:image/jpeg;base64,ZA==" }],
+  });
+
+  assert.deepEqual(payload.modalities, ["image", "text"]);
+  assert.deepEqual(payload.image_config, {
+    aspect_ratio: "16:9",
+    image_size: "1024x1024",
+  });
+  const content = (payload.messages[0] as {
+    content: Array<Record<string, unknown>>;
+  }).content;
+  assert.deepEqual(content[0], { type: "text", text: "Use this product as reference" });
+  assert.deepEqual(content[1], {
+    type: "image_url",
+    image_url: { url: "data:image/jpeg;base64,ZA==" },
+  });
+});
+
+test("Gemini Veo payload carries source and last-frame images and normalizes duration", () => {
+  const payload = buildGeminiVideoPayload({
+    prompt: "A slow cinematic push-in",
+    aspectRatio: "16:9",
+    resolution: "1080p",
+    durationSeconds: "4",
+    sourceImage: "data:image/png;base64,YWJj",
+    lastFrameImage: "data:image/jpeg;base64,ZA==",
+  });
+
+  assert.equal(payload.parameters.durationSeconds, "8");
+  assert.deepEqual(payload.instances[0]?.image, {
+    inlineData: {
+      mimeType: "image/png",
+      data: "YWJj",
+    },
+  });
+  assert.deepEqual(payload.instances[0]?.lastFrame, {
+    inlineData: {
+      mimeType: "image/jpeg",
+      data: "ZA==",
+    },
+  });
 });
 
 test("Only queued and running jobs count as active work", () => {

@@ -1,17 +1,17 @@
 export const runtime = "edge";
 
-import {
-  prepareImagePromptForModel,
-  resolveOpenRouterModalities,
-} from "@/lib/studio-generation";
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
+import { buildOpenRouterImagePayload } from "@/lib/studio-generation";
 
 type ImageRequest = {
-  apiKey: string;
+  apiKey?: string;
   model: string;
   prompt: string;
   aspectRatio?: string;
   imageSize?: string;
   outputModalities?: string[];
+  referenceImages?: Array<{ dataUrl: string; role?: string }>;
 };
 
 type ImagePayload = {
@@ -36,10 +36,13 @@ const parseDataUrl = (value: string) => {
 };
 
 const fetchImageAsBase64 = async (url: string) => {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("Unable to fetch the generated image.");
-  }
+  const response = await safeFetchExternalMedia(url, {
+    allowedHosts: ["openrouter.ai", ".openrouter.ai"],
+    allowedContentTypes: ["image/"],
+    maxBytes: 50 * 1024 * 1024,
+    timeoutMs: 30_000,
+    allowRedirects: true,
+  });
   const contentType = response.headers.get("content-type") ?? "image/png";
   const buffer = await response.arrayBuffer();
   return {
@@ -56,27 +59,20 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, prompt, aspectRatio, imageSize, outputModalities } = body;
-  if (!apiKey || !model || !prompt) {
+  const { model, prompt, aspectRatio, imageSize, outputModalities } = body;
+  const userApiKey = getUserApiKey(req, body);
+  if (!userApiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
-  const modalities = resolveOpenRouterModalities(model, outputModalities);
-  const preparedPrompt = prepareImagePromptForModel(model, prompt);
-
-  const payload = {
+  const payload = buildOpenRouterImagePayload({
     model,
-    messages: [{ role: "user", content: preparedPrompt.prompt }],
-    modalities,
-    ...(aspectRatio || imageSize
-      ? {
-          image_config: {
-            ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
-            ...(imageSize ? { image_size: imageSize } : {}),
-          },
-        }
-      : {}),
-  };
+    prompt,
+    aspectRatio,
+    imageSize,
+    outputModalities,
+    referenceImages: body.referenceImages,
+  });
 
   const response = await fetch(
     "https://openrouter.ai/api/v1/chat/completions",
@@ -84,21 +80,35 @@ export async function POST(req: Request) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${userApiKey}`,
       },
       body: JSON.stringify(payload),
     }
   );
 
-  const data = await response.json();
+  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Image generation failed." },
+      {
+        error: providerErrorMessage(data, "Image generation failed.", [
+          userApiKey,
+        ]),
+      },
       { status: response.status }
     );
   }
 
-  const message = data?.choices?.[0]?.message;
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const choices = Array.isArray(dataRecord.choices) ? dataRecord.choices : [];
+  const firstChoice =
+    choices[0] && typeof choices[0] === "object"
+      ? (choices[0] as Record<string, unknown>)
+      : {};
+  const message =
+    firstChoice.message && typeof firstChoice.message === "object"
+      ? (firstChoice.message as Record<string, unknown>)
+      : {};
   const images = message?.images ?? [];
   if (!Array.isArray(images) || images.length === 0) {
     return Response.json(

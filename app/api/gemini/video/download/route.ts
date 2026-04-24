@@ -1,7 +1,10 @@
 export const runtime = "edge";
 
+import { getUserApiKey } from "@/lib/api-safety";
+import { safeFetchExternalMedia, validateExternalMediaUrl } from "@/lib/server/safe-fetch";
+
 type DownloadRequest = {
-  apiKey: string;
+  apiKey?: string;
   uri: string;
 };
 
@@ -13,16 +16,41 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, uri } = body;
+  const { uri } = body;
+  const apiKey = getUserApiKey(req, body);
   if (!apiKey || !uri) {
     return Response.json({ error: "Missing API key or URI." }, { status: 400 });
   }
+  let downloadUrl: URL;
+  try {
+    downloadUrl = validateExternalMediaUrl(uri, [
+      "generativelanguage.googleapis.com",
+    ]);
+    if (!downloadUrl.pathname.startsWith("/v1beta/")) {
+      throw new Error("Invalid Gemini media path.");
+    }
+  } catch {
+    return Response.json({ error: "Invalid Gemini video URI." }, { status: 400 });
+  }
 
-  const response = await fetch(uri, {
-    headers: {
-      "x-goog-api-key": apiKey,
-    },
-  });
+  let response: Response;
+  try {
+    response = await safeFetchExternalMedia(downloadUrl.toString(), {
+      allowedHosts: ["generativelanguage.googleapis.com"],
+      allowedContentTypes: ["video/"],
+      maxBytes: 512 * 1024 * 1024,
+      timeoutMs: 60_000,
+      allowRedirects: true,
+      headers: {
+        "x-goog-api-key": apiKey,
+      },
+    });
+  } catch {
+    return Response.json(
+      { error: "Unable to download the video." },
+      { status: 400 }
+    );
+  }
 
   if (!response.ok) {
     return Response.json(

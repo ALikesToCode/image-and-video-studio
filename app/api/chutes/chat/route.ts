@@ -1,7 +1,10 @@
 export const runtime = "edge";
 
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { buildChatCompletionPayload } from "@/lib/chat-tooling";
+
 type ChatRequest = {
-  apiKey: string;
+  apiKey?: string;
   model: string;
   messages: Array<Record<string, unknown>>;
   tools?: Array<Record<string, unknown>>;
@@ -18,30 +21,22 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, messages, tools, toolChoice, maxTokens, temperature } =
+  const { model, messages, tools, toolChoice, maxTokens, temperature } =
     body;
+  const apiKey = getUserApiKey(req, body);
   if (!apiKey || !model || !Array.isArray(messages)) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
-  const payload: Record<string, unknown> = {
+  const payload = buildChatCompletionPayload({
     model,
     messages,
-    stream: true,
-  };
-
-  if (Array.isArray(tools) && tools.length) {
-    payload.tools = tools;
-  }
-  if (toolChoice !== undefined) {
-    payload.tool_choice = toolChoice;
-  }
-  if (typeof maxTokens === "number" && Number.isFinite(maxTokens)) {
-    payload.max_tokens = maxTokens;
-  }
-  if (typeof temperature === "number" && Number.isFinite(temperature)) {
-    payload.temperature = temperature;
-  }
+    tools,
+    toolChoice,
+    maxTokens,
+    temperature,
+    omitToolChoiceForUnsupportedModels: true,
+  });
 
   const response = await fetch("https://llm.chutes.ai/v1/chat/completions", {
     method: "POST",
@@ -53,9 +48,9 @@ export async function POST(req: Request) {
   });
 
   if (!response.ok) {
-    const data = await response.json();
+    const data = await jsonOrNull(response);
     return Response.json(
-      { error: data?.error?.message ?? "Chat completion failed." },
+      { error: providerErrorMessage(data, "Chat completion failed.", [apiKey]) },
       { status: response.status }
     );
   }

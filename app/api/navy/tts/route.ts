@@ -1,7 +1,9 @@
 export const runtime = "edge";
 
+import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+
 type TtsRequest = {
-  apiKey: string;
+  apiKey?: string;
   model: string;
   input: string;
   voice: string;
@@ -27,8 +29,9 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { apiKey, model, input, voice, speed, responseFormat } = body;
-  if (!apiKey || !model || !input || !voice) {
+  const { model, input, voice, speed, responseFormat } = body;
+  const userApiKey = getUserApiKey(req, body);
+  if (!userApiKey || !model || !input || !voice) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
@@ -36,7 +39,7 @@ export async function POST(req: Request) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${userApiKey}`,
     },
     body: JSON.stringify({
       model,
@@ -50,9 +53,13 @@ export async function POST(req: Request) {
   if (!response.ok) {
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) {
-      const data = await response.json();
+      const data = await jsonOrNull(response);
       return Response.json(
-        { error: data?.error?.message ?? "Speech generation failed." },
+        {
+          error: providerErrorMessage(data, "Speech generation failed.", [
+            userApiKey,
+          ]),
+        },
         { status: response.status }
       );
     }
