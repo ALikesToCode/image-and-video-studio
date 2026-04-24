@@ -226,7 +226,7 @@ export const buildFluxImagePrompt = (prompt: string, negativePrompt?: string) =>
       const match = /^([A-Za-z][A-Za-z0-9/&() \-]+):(.*)$/.exec(line);
       if (!match) {
         const trimmed = line.trim();
-        if (index === 0 && /^create\s+/i.test(trimmed)) {
+        if (index === 0) {
           return ensureSentence(
             `Artwork direction: ${trimmed.replace(/^create\s+/i, "").trim()}`
           );

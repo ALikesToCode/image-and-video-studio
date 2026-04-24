@@ -214,7 +214,7 @@ test("Navy image payload maps OpenAI-compatible fields to Navy API fields", () =
   assert.equal(payload.aspect_ratio, "16:9");
   assert.equal("size" in payload, false);
   assert.equal("negative_prompt" in payload, false);
-  assert.match(payload.prompt, /^A naval command room at dusk\./);
+  assert.match(payload.prompt, /^Artwork direction: A naval command room at dusk\./);
   assert.match(payload.prompt, /artifact-free rendering/i);
   assert.match(payload.prompt, /clean surfaces without embedded typography or branding/i);
 });
@@ -258,6 +258,19 @@ Composition/camera: Medium-wide shot from a slightly low angle.`,
   assert.equal(secondPass.prompt, firstPass.prompt);
   assert.equal(secondPass.negativePrompt, undefined);
   assert.equal(secondPass.prompt.match(/Desired qualities:/g)?.length, 1);
+});
+
+test("Flux prompt preparation converts short raw prompts into artwork direction", () => {
+  const prepared = prepareImagePromptForModel(
+    "flux",
+    "red cube on a white background"
+  );
+
+  assert.match(
+    prepared.prompt,
+    /^Artwork direction: red cube on a white background\./
+  );
+  assert.match(prepared.prompt, /Desired qualities:/);
 });
 
 test("Chat image tool requests prepare Flux prompts before fetch", () => {

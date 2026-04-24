@@ -940,6 +940,8 @@ export function ChutesChat({
       ? `${providerPolicyHint}
 Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
       : "";
+    const imagePromptInstruction =
+      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details.";
 
     const defaultPrompt = `${promptGuide}
 ${FLUX_CROSS_MODAL_GUIDE}
@@ -948,6 +950,7 @@ You are a generation assistant. Help craft prompts, ask for missing details when
 ${crossModalHint}
 ${fluxHint}
 ${policyScopeHint}
+${imagePromptInstruction}
 If the user explicitly asks to generate now, you must call the relevant tool in the same turn (do not stop at prompt drafting only).
 ${providerHint}
 ${toolInstruction}`;
