@@ -1,7 +1,12 @@
 export const runtime = "edge";
 
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
-import { buildGeminiImagePayload } from "@/lib/studio-generation";
+import {
+  buildGeminiImagePayload,
+  buildSaferImagePromptForModel,
+  isLikelyImagePolicyError,
+  supportsSaferImagePromptRetry,
+} from "@/lib/studio-generation";
 
 type ImageRequest = {
   apiKey?: string;
@@ -73,6 +78,9 @@ const pickImagesFromImagen = (data: unknown) => {
     );
 };
 
+const payloadLooksPolicyBlocked = (data: unknown) =>
+  isLikelyImagePolicyError(JSON.stringify(data ?? ""));
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
@@ -86,37 +94,74 @@ export async function POST(req: Request) {
   if (!userApiKey || !prompt || !model) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
-  const { endpoint, payload } = buildGeminiImagePayload({
-    model,
-    prompt,
-    aspectRatio,
-    imageSize,
-    numberOfImages,
-    referenceImages: body.referenceImages,
-  });
+  const requestImages = async (requestPrompt: string) => {
+    const { endpoint, payload } = buildGeminiImagePayload({
+      model,
+      prompt: requestPrompt,
+      aspectRatio,
+      imageSize,
+      numberOfImages,
+      referenceImages: body.referenceImages,
+    });
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": userApiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = (await jsonOrNull(response)) as Record<string, unknown> | null;
+    const images = model.startsWith("imagen-")
+      ? pickImagesFromImagen(data)
+      : pickImagesFromGemini(data);
+    return { response, data, images };
+  };
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": userApiKey,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = (await jsonOrNull(response)) as Record<string, unknown> | null;
+  let { response, data, images } = await requestImages(prompt);
   if (!response.ok) {
-    const errorMessage = providerErrorMessage(
+    let errorMessage = providerErrorMessage(
       data,
       "Image generation failed.",
       [userApiKey]
     );
+    if (
+      supportsSaferImagePromptRetry(model) &&
+      isLikelyImagePolicyError(errorMessage)
+    ) {
+      ({ response, data, images } = await requestImages(
+        buildSaferImagePromptForModel(model, prompt)
+      ));
+      if (response.ok && images.length) {
+        return Response.json({ images });
+      }
+      errorMessage = providerErrorMessage(
+        data,
+        "Image generation failed.",
+        [userApiKey]
+      );
+    }
     return Response.json({ error: errorMessage }, { status: response.status });
   }
 
-  const images = model.startsWith("imagen-")
-    ? pickImagesFromImagen(data)
-    : pickImagesFromGemini(data);
+  if (
+    !images.length &&
+    supportsSaferImagePromptRetry(model) &&
+    payloadLooksPolicyBlocked(data)
+  ) {
+    ({ response, data, images } = await requestImages(
+      buildSaferImagePromptForModel(model, prompt)
+    ));
+    if (!response.ok) {
+      const errorMessage = providerErrorMessage(
+        data,
+        "Image generation failed.",
+        [userApiKey]
+      );
+      return Response.json({ error: errorMessage }, { status: response.status });
+    }
+  }
+
   if (!images.length) {
     return Response.json(
       { error: "No images were returned by the model." },

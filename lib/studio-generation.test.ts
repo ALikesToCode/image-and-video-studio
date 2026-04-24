@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
 import {
+  buildSaferImagePromptForModel,
   buildProviderPolicyHintForImageModels,
   buildGeminiImagePayload,
   buildGeminiVideoPayload,
@@ -19,6 +20,7 @@ import {
   resolveImageSizingOptions,
   resolveActiveImageToolModels,
   groupNavyModelsByCapability,
+  isLikelyImagePolicyError,
   isNavyGenerationPending,
   resolveOpenRouterModalities,
   summarizeImageModelPrompts,
@@ -347,6 +349,28 @@ test("Gemini image prompts add safety guidance only for likely NSFW requests", (
   assert.match(prepared.prompt, /respect gemini safety settings/i);
   assert.match(prepared.prompt, /sexually explicit/i);
   assert.match(prepared.prompt, /child safety/i);
+});
+
+test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompts", () => {
+  const openAiPrompt = buildSaferImagePromptForModel(
+    "gpt-image-1.5",
+    "Create a provocative nightclub editorial portrait."
+  );
+  const geminiPrompt = buildSaferImagePromptForModel(
+    "google/gemini-2.5-flash-image-preview",
+    "Create a provocative nightclub editorial portrait."
+  );
+  const fluxPrompt = buildSaferImagePromptForModel(
+    "flux",
+    "Create a provocative nightclub editorial portrait."
+  );
+
+  assert.match(openAiPrompt, /policy-compliant OpenAI image prompt/i);
+  assert.match(openAiPrompt, /clearly adult/i);
+  assert.match(geminiPrompt, /policy-compliant Gemini image prompt/i);
+  assert.match(geminiPrompt, /child-safety/i);
+  assert.equal(fluxPrompt, "Create a provocative nightclub editorial portrait.");
+  assert.equal(isLikelyImagePolicyError("blocked by image safety policy"), true);
 });
 
 test("Non-NSFW prompts remain unchanged for non-Flux models", () => {

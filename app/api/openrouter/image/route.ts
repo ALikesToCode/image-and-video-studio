@@ -2,7 +2,12 @@ export const runtime = "edge";
 
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
-import { buildOpenRouterImagePayload } from "@/lib/studio-generation";
+import {
+  buildOpenRouterImagePayload,
+  buildSaferImagePromptForModel,
+  isLikelyImagePolicyError,
+  supportsSaferImagePromptRetry,
+} from "@/lib/studio-generation";
 
 type ImageRequest = {
   apiKey?: string;
@@ -51,6 +56,41 @@ const fetchImageAsBase64 = async (url: string) => {
   };
 };
 
+const extractResponseText = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(extractResponseText).join(" ");
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return [
+      extractResponseText(record.text),
+      extractResponseText(record.content),
+      extractResponseText(record.message),
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  return "";
+};
+
+const getMessageImages = (data: unknown) => {
+  const dataRecord =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const choices = Array.isArray(dataRecord.choices) ? dataRecord.choices : [];
+  const firstChoice =
+    choices[0] && typeof choices[0] === "object"
+      ? (choices[0] as Record<string, unknown>)
+      : {};
+  const message =
+    firstChoice.message && typeof firstChoice.message === "object"
+      ? (firstChoice.message as Record<string, unknown>)
+      : {};
+  const images = message?.images ?? [];
+  return {
+    images: Array.isArray(images) ? images : [],
+    responseText: extractResponseText(message.content),
+  };
+};
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
@@ -65,52 +105,85 @@ export async function POST(req: Request) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
-  const payload = buildOpenRouterImagePayload({
-    model,
-    prompt,
-    aspectRatio,
-    imageSize,
-    outputModalities,
-    referenceImages: body.referenceImages,
-  });
+  const postImageRequest = async (requestPrompt: string) => {
+    const payload = buildOpenRouterImagePayload({
+      model,
+      prompt: requestPrompt,
+      aspectRatio,
+      imageSize,
+      outputModalities,
+      referenceImages: body.referenceImages,
+    });
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${userApiKey}`,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    const data = await jsonOrNull(response);
+    const { images, responseText } = getMessageImages(data);
+    return { response, data, images, responseText };
+  };
 
-  const response = await fetch(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${userApiKey}`,
-      },
-      body: JSON.stringify(payload),
+  let { response, data, images, responseText } = await postImageRequest(prompt);
+  if (!response.ok) {
+    let errorMessage = providerErrorMessage(data, "Image generation failed.", [
+      userApiKey,
+    ]);
+    if (
+      supportsSaferImagePromptRetry(model) &&
+      isLikelyImagePolicyError(errorMessage)
+    ) {
+      ({ response, data, images, responseText } = await postImageRequest(
+        buildSaferImagePromptForModel(model, prompt)
+      ));
+      if (response.ok && images.length) {
+        // Continue into the normal image normalization path.
+      } else {
+        errorMessage = providerErrorMessage(
+          data,
+          "Image generation failed.",
+          [userApiKey]
+        );
+      }
     }
-  );
+  }
 
-  const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
       {
-        error: providerErrorMessage(data, "Image generation failed.", [
-          userApiKey,
-        ]),
+        error: providerErrorMessage(data, "Image generation failed.", [userApiKey]),
       },
       { status: response.status }
     );
   }
 
-  const dataRecord =
-    data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-  const choices = Array.isArray(dataRecord.choices) ? dataRecord.choices : [];
-  const firstChoice =
-    choices[0] && typeof choices[0] === "object"
-      ? (choices[0] as Record<string, unknown>)
-      : {};
-  const message =
-    firstChoice.message && typeof firstChoice.message === "object"
-      ? (firstChoice.message as Record<string, unknown>)
-      : {};
-  const images = message?.images ?? [];
-  if (!Array.isArray(images) || images.length === 0) {
+  if (
+    images.length === 0 &&
+    supportsSaferImagePromptRetry(model) &&
+    isLikelyImagePolicyError(responseText)
+  ) {
+    ({ response, data, images } = await postImageRequest(
+      buildSaferImagePromptForModel(model, prompt)
+    ));
+    if (!response.ok) {
+      return Response.json(
+        {
+          error: providerErrorMessage(data, "Image generation failed.", [
+            userApiKey,
+          ]),
+        },
+        { status: response.status }
+      );
+    }
+  }
+
+  if (images.length === 0) {
     return Response.json(
       { error: "No images were returned by the model." },
       { status: 502 }

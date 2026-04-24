@@ -3,8 +3,11 @@ export const runtime = "edge";
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import {
+  buildSaferImagePromptForModel,
   buildNavyImageGenerationPayload,
+  isLikelyImagePolicyError,
   isNavyGenerationPending,
+  supportsSaferImagePromptRetry,
 } from "@/lib/studio-generation";
 
 type ImageRequest = {
@@ -127,7 +130,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
-  const response = await fetch("https://api.navy/v1/images/generations", {
+  const postGeneration = (requestPrompt: string) => fetch("https://api.navy/v1/images/generations", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -136,7 +139,7 @@ export async function POST(req: Request) {
     body: JSON.stringify(
       buildNavyImageGenerationPayload({
         model,
-        prompt,
+        prompt: requestPrompt,
         size,
         numberOfImages,
         quality,
@@ -152,7 +155,21 @@ export async function POST(req: Request) {
     ),
   });
 
-  const data = await jsonOrNull(response);
+  let response = await postGeneration(prompt);
+  let data = await jsonOrNull(response);
+  if (!response.ok) {
+    const errorMessage = providerErrorMessage(data, "Image generation failed.", [
+      userApiKey,
+    ]);
+    if (
+      supportsSaferImagePromptRetry(model) &&
+      isLikelyImagePolicyError(errorMessage)
+    ) {
+      response = await postGeneration(buildSaferImagePromptForModel(model, prompt));
+      data = await jsonOrNull(response);
+    }
+  }
+
   if (!response.ok) {
     return Response.json(
       {

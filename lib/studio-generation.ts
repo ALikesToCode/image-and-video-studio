@@ -137,13 +137,24 @@ const NEGATIVE_PROMPT_UPGRADES: Array<[RegExp, string]> = [
 const ADULT_IMAGE_PROMPT_PATTERN =
   /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
 
+export const isImagenModel = (model: string) => model.startsWith("imagen-");
+
 const isOpenAiImageModel = (model: string) =>
-  model.toLowerCase().includes("gpt-image-");
+  /\b(gpt-image-|dall-e-)/i.test(model);
 
 const isGeminiNativeImageModel = (model: string) => {
   const normalized = model.toLowerCase();
   return normalized.includes("gemini-") &&
     (normalized.includes("flash-image") || normalized.includes("pro-image"));
+};
+
+const isGeminiImagePolicyModel = (model: string) => {
+  const normalized = model.toLowerCase();
+  return (
+    isGeminiNativeImageModel(model) ||
+    isImagenModel(normalized) ||
+    normalized.includes("/imagen-")
+  );
 };
 
 const isLikelyAdultImagePrompt = (prompt: string) =>
@@ -158,8 +169,27 @@ const buildGeminiAdultImagePolicyNote = () =>
 const buildAdultImagePolicyNoteForModel = (model: string, prompt: string) => {
   if (!isLikelyAdultImagePrompt(prompt)) return "";
   if (isOpenAiImageModel(model)) return buildOpenAiAdultImagePolicyNote();
-  if (isGeminiNativeImageModel(model)) return buildGeminiAdultImagePolicyNote();
+  if (isGeminiImagePolicyModel(model)) return buildGeminiAdultImagePolicyNote();
   return "";
+};
+
+export const supportsSaferImagePromptRetry = (model: string) =>
+  isOpenAiImageModel(model) || isGeminiImagePolicyModel(model);
+
+export const isLikelyImagePolicyError = (message: string) =>
+  /\b(policy|safety|safe|blocked|flagged|prohibited|moderation|filtered|responsibleai|violation|unsafe)\b/i.test(
+    message
+  );
+
+export const buildSaferImagePromptForModel = (model: string, prompt: string) => {
+  const normalizedPrompt = normalizeWhitespace(prompt);
+  if (!supportsSaferImagePromptRetry(model)) return normalizedPrompt;
+
+  const policyNote = isOpenAiImageModel(model)
+    ? "Safety recovery: Rewrite this as a policy-compliant OpenAI image prompt. Preserve the user's lawful visual intent, but remove or soften any explicit sexual, graphic, non-consensual, minor-related, deceptive likeness, or otherwise disallowed details. Use clearly adult subjects only when people are relevant, and prefer tasteful editorial styling over explicit depiction."
+    : "Safety recovery: Rewrite this as a policy-compliant Gemini image prompt. Preserve the user's lawful visual intent, but respect Gemini built-in safety filtering, avoid sexually explicit output, avoid any child-safety risk, and remove or soften details likely to trigger prohibited-content or image-safety blocks.";
+
+  return appendPromptNote(normalizedPrompt, policyNote);
 };
 
 const buildFluxQualityGuidance = (negativePrompt?: string) => {
@@ -323,8 +353,6 @@ export const resolveImageSizingOptions = (
 
   return sizing;
 };
-
-export const isImagenModel = (model: string) => model.startsWith("imagen-");
 
 const sanitizeReferenceImages = (
   referenceImages?: ReferenceImageInput[],

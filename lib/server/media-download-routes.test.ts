@@ -232,6 +232,56 @@ test("Navy image route returns async job ids without waiting for media", async (
   }
 });
 
+test("Navy image route retries flagged OpenAI image prompts with safer wording", async () => {
+  const originalFetch = globalThis.fetch;
+  const prompts: string[] = [];
+  globalThis.fetch = async (_input, init) => {
+    const requestBody =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : {};
+    if (typeof requestBody.prompt === "string") {
+      prompts.push(requestBody.prompt);
+    }
+    if (prompts.length === 1) {
+      return Response.json(
+        { error: { message: "blocked by image safety policy" } },
+        { status: 400 }
+      );
+    }
+    return Response.json({ id: "job_safe", status: "queued" });
+  };
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-image-1.5",
+          prompt: "Create a provocative nightclub editorial portrait.",
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, { id: "job_safe", status: "queued" });
+    assert.equal(prompts.length, 2);
+    assert.match(
+      prompts[0] ?? "",
+      /Create a provocative nightclub editorial portrait\./
+    );
+    assert.doesNotMatch(prompts[0] ?? "", /Safety recovery/i);
+    assert.match(prompts[1] ?? "", /policy-compliant OpenAI image prompt/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route rejects untrusted generated image hosts before fetch", async () => {
   const originalFetch = globalThis.fetch;
   const calls: string[] = [];
