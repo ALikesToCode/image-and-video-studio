@@ -2,6 +2,7 @@ export const runtime = "edge";
 
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
+import { IMAGE_MIME_TYPES, parseDataUrl } from "@/lib/studio-validation";
 import {
   buildSaferImagePromptForModel,
   buildNavyImageGenerationPayload,
@@ -71,6 +72,30 @@ const contentTypeFromRecord = (record: Record<string, unknown>) =>
       ? record.mime_type
       : "image/png";
 
+const dataUrlImagePayload = (value: unknown): NavyImagePayload | null => {
+  const parsed = parseDataUrl(value, IMAGE_MIME_TYPES);
+  if (parsed) {
+    return {
+      data: parsed.data,
+      mimeType: parsed.mimeType,
+    };
+  }
+  return null;
+};
+
+const inlineImagePayload = (
+  value: unknown,
+  fallbackMimeType: string
+): NavyImagePayload | null => {
+  const dataUrlPayload = dataUrlImagePayload(value);
+  if (dataUrlPayload) return dataUrlPayload;
+  if (typeof value !== "string" || !value) return null;
+  return {
+    data: value,
+    mimeType: fallbackMimeType,
+  };
+};
+
 const downloadGeneratedImage = async (url: string): Promise<NavyImagePayload> => {
   const response = await safeFetchExternalMedia(url, {
     allowedHosts: NAVY_IMAGE_MEDIA_HOSTS,
@@ -91,21 +116,23 @@ const normalizeNavyImages = async (items: unknown[]) => {
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
-    if (typeof record.b64_json === "string" && record.b64_json) {
-      images.push({
-        data: record.b64_json,
-        mimeType: contentTypeFromRecord(record),
-      });
+    const contentType = contentTypeFromRecord(record);
+    const b64Payload = inlineImagePayload(record.b64_json, contentType);
+    if (b64Payload) {
+      images.push(b64Payload);
       continue;
     }
-    if (typeof record.data === "string" && record.data) {
-      images.push({
-        data: record.data,
-        mimeType: contentTypeFromRecord(record),
-      });
+    const dataPayload = inlineImagePayload(record.data, contentType);
+    if (dataPayload) {
+      images.push(dataPayload);
       continue;
     }
     if (typeof record.url === "string" && record.url) {
+      const dataUrlPayload = dataUrlImagePayload(record.url);
+      if (dataUrlPayload) {
+        images.push(dataUrlPayload);
+        continue;
+      }
       images.push(await downloadGeneratedImage(record.url));
     }
   }
