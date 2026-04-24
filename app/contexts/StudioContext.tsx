@@ -42,6 +42,7 @@ import {
     getQueuedJobsToStart,
     getActiveJobCount,
     mergeGeneratedImagesInDisplayOrder,
+    normalizeImageModelOrder,
     resolveImageSizingOptions,
     resolveImageGenerationModelPipeline,
 } from "@/lib/studio-generation";
@@ -1992,13 +1993,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             setImagePipelineEnabled(
                 getBoolean(storedSettings.imagePipelineEnabled, false)
             );
-            if (Array.isArray(storedSettings.imageModelOrder)) {
-                setImageModelOrder(
-                    storedSettings.imageModelOrder.filter(
-                        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
-                    )
-                );
-            }
+            setImageModelOrder(normalizeImageModelOrder(storedSettings.imageModelOrder));
 
             const storedImageCount = getNumber(storedSettings.imageCount, 1);
             if (storedImageCount > 0) setImageCount(storedImageCount);
@@ -2250,17 +2245,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [provider, mode, modelSuggestions, model, hydrated]);
 
     useEffect(() => {
-        if (!hydrated || mode !== "image") return;
-        setImageModelOrder((prev) =>
-            resolveImageGenerationModelPipeline(
-                prev,
-                model,
-                modelSuggestions.map((entry) => entry.id)
-            )
-        );
-    }, [model, modelSuggestions, mode, hydrated]);
-
-    useEffect(() => {
         if (!hydrated) return;
         if (!model) return;
         const selectionKey = `${provider}:${mode}`;
@@ -2277,7 +2261,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             prompt,
             negativePrompt,
             imagePipelineEnabled,
-            imageModelOrder: resolvedImageModelOrder,
+            imageModelOrder: normalizeImageModelOrder(imageModelOrder),
             imageCount,
             imageAspect,
             imageSize,
@@ -2311,7 +2295,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         prompt,
         negativePrompt,
         imagePipelineEnabled,
-        resolvedImageModelOrder,
+        imageModelOrder,
         imageCount,
         imageAspect,
         imageSize,

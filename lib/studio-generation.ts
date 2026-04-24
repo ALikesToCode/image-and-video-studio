@@ -819,6 +819,20 @@ export const resolveImageGenerationModelPipeline = (
   return ordered;
 };
 
+export const normalizeImageModelOrder = (values: unknown): string[] => {
+  if (!Array.isArray(values)) return [];
+  const order: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const model = value.trim();
+    if (!model || order.includes(model)) continue;
+    order.push(model);
+  }
+
+  return order;
+};
+
 export const resolveActiveImageToolModels = ({
   pipelineEnabled,
   preferredModels,

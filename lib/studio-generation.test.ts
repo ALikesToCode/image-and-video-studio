@@ -14,6 +14,7 @@ import {
   getActiveJobCount,
   getQueuedJobsToStart,
   mergeGeneratedImagesInDisplayOrder,
+  normalizeImageModelOrder,
   prepareImageModelRequests,
   prepareImagePromptForModel,
   resolveImageGenerationModelPipeline,
@@ -328,6 +329,20 @@ test("Image model pipeline keeps explicit order and removes duplicates", () => {
   assert.deepEqual(
     resolveImageGenerationModelPipeline([], "flux", ["flux", "gpt-image-1.5"]),
     ["flux"]
+  );
+});
+
+test("Image model order persistence keeps temporarily unavailable model ids", () => {
+  assert.deepEqual(
+    normalizeImageModelOrder([
+      " gpt-image-2 ",
+      "flux.2-pro",
+      "gpt-image-2",
+      "",
+      null,
+      "nano-banana-2",
+    ]),
+    ["gpt-image-2", "flux.2-pro", "nano-banana-2"]
   );
 });
 
