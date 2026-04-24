@@ -11,6 +11,7 @@ import {
   sanitizeChatMediaAssets,
   shouldOmitToolChoiceForModel,
   stripHeavyMediaFromMessagesForStorage,
+  toChatCompletionMessages,
 } from "./chat-tooling.ts";
 
 test("Forced tool detection recognizes explicit audio requests", () => {
@@ -150,6 +151,71 @@ test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {
   });
 
   assert.equal(payload.tool_choice, "auto");
+});
+
+test("Navy chat messages pass assistant reasoning content back for thinking-mode tool turns", () => {
+  const messages = toChatCompletionMessages(
+    [
+      {
+        role: "assistant",
+        content: "",
+        thinking: "Need to call the image tool.",
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "generate_image", arguments: "{\"prompt\":\"sky\"}" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: "Image generated.",
+        toolCallId: "call_1",
+        name: "generate_image",
+      },
+    ],
+    { includeReasoningContent: true }
+  );
+
+  assert.deepEqual(messages, [
+    {
+      role: "assistant",
+      content: "",
+      reasoning_content: "Need to call the image tool.",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: { name: "generate_image", arguments: "{\"prompt\":\"sky\"}" },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: "Image generated.",
+      tool_call_id: "call_1",
+      name: "generate_image",
+    },
+  ]);
+});
+
+test("Chat messages omit UI-only thinking unless reasoning passthrough is enabled", () => {
+  assert.deepEqual(
+    toChatCompletionMessages([
+      {
+        role: "assistant",
+        content: "Done.",
+        thinking: "Hidden provider reasoning.",
+      },
+    ]),
+    [
+      {
+        role: "assistant",
+        content: "Done.",
+      },
+    ]
+  );
 });
 
 test("Requested image models use the pipeline when the request targets the default model", () => {

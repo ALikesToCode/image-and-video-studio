@@ -61,6 +61,19 @@ type ChatCompletionPayloadInput = {
   omitToolChoiceForUnsupportedModels?: boolean;
 };
 
+type ChatCompletionMessageInput = {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  thinking?: string;
+  toolCalls?: unknown[];
+  toolCallId?: string;
+  name?: string;
+};
+
+type ChatCompletionMessagesOptions = {
+  includeReasoningContent?: boolean;
+};
+
 const normalizeValue = (value: string) => value.trim().replace(/\r\n/g, "\n");
 const normalizeComparable = (value: string) =>
   normalizeValue(value).replace(/\s+/g, " ").toLowerCase();
@@ -118,6 +131,41 @@ export const buildChatCompletionPayload = ({
 
   return payload;
 };
+
+export const toChatCompletionMessages = (
+  messages: ChatCompletionMessageInput[],
+  { includeReasoningContent = false }: ChatCompletionMessagesOptions = {}
+) =>
+  messages.map((message) => {
+    const base: Record<string, unknown> = {
+      role: message.role,
+      content: message.content,
+    };
+
+    if (
+      includeReasoningContent &&
+      message.role === "assistant" &&
+      typeof message.thinking === "string" &&
+      message.thinking.trim()
+    ) {
+      base.reasoning_content = message.thinking;
+    }
+
+    if (
+      message.role === "assistant" &&
+      Array.isArray(message.toolCalls) &&
+      message.toolCalls.length
+    ) {
+      base.tool_calls = message.toolCalls;
+    }
+
+    if (message.role === "tool") {
+      if (message.toolCallId) base.tool_call_id = message.toolCallId;
+      if (message.name) base.name = message.name;
+    }
+
+    return base;
+  });
 
 const extractTaggedBlock = (assistantContent: string, labels: string[]) => {
   for (const label of labels) {

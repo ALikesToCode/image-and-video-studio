@@ -63,6 +63,7 @@ import {
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   stripHeavyMediaFromMessagesForStorage,
+  toChatCompletionMessages,
 } from "@/lib/chat-tooling";
 import {
   buildProviderPolicyHintForImageModels,
@@ -968,24 +969,6 @@ ${defaultPrompt}`;
     customSystemPrompt,
   ]);
 
-  const toApiMessages = (items: ChatMessage[]) =>
-    items.map((message) => {
-      const base: Record<string, unknown> = {
-        role: message.role,
-        content: message.content,
-      };
-      if (message.role === "assistant" && message.toolCalls?.length) {
-        base.tool_calls = message.toolCalls;
-      }
-      if (message.role === "tool") {
-        base.tool_call_id = message.toolCallId;
-        if (message.name) base.name = message.name;
-      }
-      return base;
-    });
-
-
-
   const callChatStreaming = async (
     items: ChatMessage[],
     onUpdate: (update: { content?: string; thinking?: string; toolCalls?: ToolCall[] }) => void,
@@ -1003,7 +986,9 @@ ${defaultPrompt}`;
         model,
         messages: [
           { role: "system", content: systemPrompt },
-          ...toApiMessages(items),
+          ...toChatCompletionMessages(items, {
+            includeReasoningContent: provider === "navy",
+          }),
         ],
         ...(
           hasEnabledTools
