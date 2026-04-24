@@ -3,20 +3,32 @@
 
 import { useState } from "react";
 import { StoredMedia } from "@/lib/types";
-import { Download, Maximize2, Trash2, AudioLines, Video, Copy, Check } from "lucide-react";
+import { Download, Maximize2, Trash2, AudioLines, Video, Copy, Check, Search } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
+import { Input } from "./ui/input";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "./ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { ImageViewer } from "./image-viewer";
 
 interface GalleryGridProps {
     items: StoredMedia[];
     onClear: () => void;
+    onDelete: (id: string) => Promise<void>;
 }
 
-export function GalleryGrid({ items, onClear }: GalleryGridProps) {
+export function GalleryGrid({ items, onClear, onDelete }: GalleryGridProps) {
     const [activeItem, setActiveItem] = useState<StoredMedia | null>(null);
     const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+    const [query, setQuery] = useState("");
+    const [kindFilter, setKindFilter] = useState<"all" | StoredMedia["kind"]>("all");
+    const [sortMode, setSortMode] = useState<"newest" | "oldest" | "provider" | "model">("newest");
 
     const resolveKind = (
         kind: StoredMedia["kind"] | undefined,
@@ -73,11 +85,63 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
         }
     };
 
+    const handleExportJson = () => {
+        const payload = {
+            exportedAt: new Date().toISOString(),
+            assets: visibleItems.map((item) => ({
+                id: item.id,
+                kind: resolveKind(item.kind, item.mimeType),
+                provider: item.provider,
+                model: item.model,
+                prompt: item.prompt,
+                createdAt: item.createdAt,
+                mimeType: item.mimeType,
+                dataUrl: item.dataUrl,
+            })),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {
+            type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "studio-gallery-export.json";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
     const closeViewer = (open: boolean) => {
         if (!open) {
             setActiveItem(null);
         }
     };
+
+    const visibleItems = items
+        .filter((item) => {
+            const kind = resolveKind(item.kind, item.mimeType);
+            if (kindFilter !== "all" && kind !== kindFilter) return false;
+            const normalizedQuery = query.trim().toLowerCase();
+            if (!normalizedQuery) return true;
+            return [item.prompt, item.model, item.provider, item.mimeType]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase()
+                .includes(normalizedQuery);
+        })
+        .sort((left, right) => {
+            if (sortMode === "oldest") {
+                return left.createdAt.localeCompare(right.createdAt);
+            }
+            if (sortMode === "provider") {
+                return left.provider.localeCompare(right.provider) || right.createdAt.localeCompare(left.createdAt);
+            }
+            if (sortMode === "model") {
+                return left.model.localeCompare(right.model) || right.createdAt.localeCompare(left.createdAt);
+            }
+            return right.createdAt.localeCompare(left.createdAt);
+        });
 
     if (items.length === 0) {
         return (
@@ -92,15 +156,54 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
         <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h3 className="text-lg font-semibold">Gallery</h3>
-                <Button variant="outline" size="sm" onClick={onClear} className="w-full sm:w-auto">
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Clear Gallery
-                </Button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button variant="outline" size="sm" onClick={handleExportJson} className="w-full sm:w-auto">
+                        <Download className="mr-2 h-4 w-4" />
+                        Export JSON
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={onClear} className="w-full sm:w-auto">
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Clear Gallery
+                    </Button>
+                </div>
+            </div>
+            <div className="grid gap-2 md:grid-cols-[1fr_160px_160px]">
+                <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Search prompt, model, provider"
+                        className="pl-9"
+                    />
+                </div>
+                <Select value={kindFilter} onValueChange={(value) => setKindFilter(value as typeof kindFilter)}>
+                    <SelectTrigger>
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">All media</SelectItem>
+                        <SelectItem value="image">Images</SelectItem>
+                        <SelectItem value="video">Videos</SelectItem>
+                        <SelectItem value="audio">Audio</SelectItem>
+                    </SelectContent>
+                </Select>
+                <Select value={sortMode} onValueChange={(value) => setSortMode(value as typeof sortMode)}>
+                    <SelectTrigger>
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="newest">Newest</SelectItem>
+                        <SelectItem value="oldest">Oldest</SelectItem>
+                        <SelectItem value="provider">Provider</SelectItem>
+                        <SelectItem value="model">Model</SelectItem>
+                    </SelectContent>
+                </Select>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 <AnimatePresence mode="popLayout">
-                    {items.map((item) => {
+                    {visibleItems.map((item) => {
                         const kind = resolveKind(item.kind, item.mimeType);
                         return (
                             <motion.div
@@ -159,6 +262,15 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
                                                 className="h-8 w-8 rounded-full"
                                             >
                                                 <Download className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                size="icon"
+                                                variant="destructive"
+                                                onClick={() => void onDelete(item.id)}
+                                                className="h-8 w-8 rounded-full"
+                                                title="Delete asset"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </div>
                                     </div>

@@ -5,6 +5,7 @@
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
+import { ReferenceStrip } from "../reference-strip";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -141,6 +142,17 @@ export function ImageGenView() {
                         className="glass-card group relative overflow-hidden rounded-xl p-4 shadow-xl sm:p-6"
                     >
                         <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                        <div className="relative mb-4">
+                            <ReferenceStrip
+                                references={context.references}
+                                selectedReferenceIds={context.selectedReferenceIds}
+                                onAddReference={context.addReferenceFile}
+                                onToggleReference={context.toggleReferenceSelection}
+                                onRemoveReference={context.removeReference}
+                                onClearSelected={context.clearSelectedReferences}
+                                compact
+                            />
+                        </div>
                         <PromptInput
                             prompt={context.prompt}
                             setPrompt={context.setPrompt}

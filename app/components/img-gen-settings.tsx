@@ -201,6 +201,7 @@ export function ImgGenSettings({
         : null;
     const availableModelIds = new Set(modelSuggestions.map((suggestion) => suggestion.id));
     const orderedImageModels = imageModelOrder.filter((entry) => availableModelIds.has(entry));
+    const selectedModel = modelSuggestions.find((suggestion) => suggestion.id === model);
 
     const formatCount = (value?: number) =>
         typeof value === "number" ? value.toLocaleString() : "-";
@@ -290,7 +291,7 @@ export function ImgGenSettings({
                         <SelectContent>
                             {modelSuggestions.map((m) => (
                                 <SelectItem key={m.id} value={m.id}>
-                                    {m.label}
+                                    {m.label}{m.premium ? " (premium)" : ""}
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -302,6 +303,22 @@ export function ImgGenSettings({
                     </p>
                     {modelsError ? (
                         <p className="text-xs text-destructive">{modelsError}</p>
+                    ) : null}
+                    {selectedModel?.endpoint || selectedModel?.requiredPlan || selectedModel?.tokenMultiplier ? (
+                        <div className="rounded-lg border border-border/50 bg-secondary/20 p-2 text-[11px] text-muted-foreground">
+                            {selectedModel.endpoint ? <div>Endpoint: {selectedModel.endpoint}</div> : null}
+                            {selectedModel.requiredPlan ? <div>Plan: {selectedModel.requiredPlan}</div> : null}
+                            {typeof selectedModel.tokenMultiplier === "number" ? <div>Token multiplier: {selectedModel.tokenMultiplier}</div> : null}
+                        </div>
+                    ) : null}
+                    {selectedModel?.premium ? (
+                        <p className="text-xs text-amber-600">This model may be premium or plan-gated.</p>
+                    ) : null}
+                    {mode === "image" && isFluxFamilyModel ? (
+                        <p className="text-xs text-muted-foreground">This model ignores negative prompts; exclusions are rewritten as positive instructions.</p>
+                    ) : null}
+                    {mode === "video" && provider === "gemini" && (videoResolution === "1080p" || videoResolution === "4k") ? (
+                        <p className="text-xs text-amber-600">This resolution requires an 8-second Veo duration.</p>
                     ) : null}
                 </div>
 

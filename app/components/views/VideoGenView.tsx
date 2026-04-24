@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
+import { ReferenceStrip } from "../reference-strip";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Download, Video as VideoIcon, Upload, X, Settings2 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
@@ -18,7 +19,6 @@ export function VideoGenView() {
         statusMessage,
         videoImage,
         setVideoImage,
-        provider,
         mode,
         setMode,
     } = context;
@@ -117,8 +117,19 @@ export function VideoGenView() {
                         ) : null}
                     </AnimatePresence>
 
-                    {/* Source Image Uploader (Required for Chutes) */}
-                    {provider === "chutes" && (
+                    <div className="mx-auto max-w-3xl">
+                        <ReferenceStrip
+                            references={context.references}
+                            selectedReferenceIds={context.selectedReferenceIds}
+                            onAddReference={context.addReferenceFile}
+                            onToggleReference={context.toggleReferenceSelection}
+                            onRemoveReference={context.removeReference}
+                            onClearSelected={context.clearSelectedReferences}
+                        />
+                    </div>
+
+                    {/* Source Image Uploader */}
+                    {(
                         <div className="mx-auto max-w-3xl space-y-3 sm:space-y-4">
                             <h3 className="text-sm font-medium text-muted-foreground">Source Image</h3>
                             <div
@@ -158,7 +169,7 @@ export function VideoGenView() {
                                             <Upload className="h-6 w-6 text-muted-foreground" />
                                         </div>
                                         <p className="text-sm font-medium">Click or drag image to upload</p>
-                                        <p className="text-xs text-muted-foreground">Required for Image-to-Video</p>
+                                        <p className="text-xs text-muted-foreground">Used for image-to-video when supported</p>
                                     </div>
                                 )}
                             </div>
