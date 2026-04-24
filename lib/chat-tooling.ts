@@ -59,6 +59,8 @@ type ChatCompletionPayloadInput = {
   temperature?: number;
   stream?: boolean;
   omitToolChoiceForUnsupportedModels?: boolean;
+  thinking?: { type?: unknown };
+  reasoningEffort?: unknown;
 };
 
 type ChatCompletionMessageInput = {
@@ -94,6 +96,19 @@ export const shouldOmitToolChoiceForModel = (model: string) => {
   );
 };
 
+export const isDeepSeekV4Model = (model: string) => {
+  const normalized = model.trim().toLowerCase();
+  return normalized === "deepseek-v4-pro" || normalized === "deepseek-v4-flash";
+};
+
+export const normalizeDeepSeekThinkingType = (value: unknown) =>
+  value === "disabled" ? "disabled" : "enabled";
+
+export const normalizeDeepSeekReasoningEffort = (value: unknown) => {
+  if (value === "max" || value === "xhigh") return "max";
+  return "high";
+};
+
 export const buildChatCompletionPayload = ({
   model,
   messages,
@@ -103,12 +118,25 @@ export const buildChatCompletionPayload = ({
   temperature,
   stream = true,
   omitToolChoiceForUnsupportedModels = false,
+  thinking,
+  reasoningEffort,
 }: ChatCompletionPayloadInput) => {
+  const isDeepSeekV4 = isDeepSeekV4Model(model);
+  const thinkingType = isDeepSeekV4
+    ? normalizeDeepSeekThinkingType(thinking?.type)
+    : null;
   const payload: Record<string, unknown> = {
     model,
     messages,
     stream,
   };
+
+  if (thinkingType) {
+    payload.thinking = { type: thinkingType };
+    if (thinkingType === "enabled") {
+      payload.reasoning_effort = normalizeDeepSeekReasoningEffort(reasoningEffort);
+    }
+  }
 
   if (Array.isArray(tools) && tools.length) {
     payload.tools = tools;
@@ -125,7 +153,11 @@ export const buildChatCompletionPayload = ({
   if (typeof maxTokens === "number" && Number.isFinite(maxTokens)) {
     payload.max_tokens = maxTokens;
   }
-  if (typeof temperature === "number" && Number.isFinite(temperature)) {
+  if (
+    typeof temperature === "number" &&
+    Number.isFinite(temperature) &&
+    !(isDeepSeekV4 && thinkingType === "enabled")
+  ) {
     payload.temperature = temperature;
   }
 

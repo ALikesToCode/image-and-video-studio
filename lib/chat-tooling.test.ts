@@ -5,6 +5,8 @@ import {
   buildChatCompletionPayload,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
+  isDeepSeekV4Model,
+  normalizeDeepSeekReasoningEffort,
   repairImageToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
@@ -106,8 +108,11 @@ test("Image tool argument repair leaves valid image prompts intact", () => {
 
 test("DeepSeek-family chat payloads omit explicit tool_choice while keeping tools", () => {
   assert.equal(shouldOmitToolChoiceForModel("deepseek-v4-pro"), true);
+  assert.equal(shouldOmitToolChoiceForModel("deepseek-v4-flash"), true);
   assert.equal(shouldOmitToolChoiceForModel("deepseek-reasoner"), true);
   assert.equal(shouldOmitToolChoiceForModel("deepseek-ai/DeepSeek-V3"), true);
+  assert.equal(isDeepSeekV4Model("deepseek-v4-pro"), true);
+  assert.equal(isDeepSeekV4Model("deepseek-v4-flash"), true);
 
   const payload = buildChatCompletionPayload({
     model: "deepseek-v4-pro",
@@ -130,7 +135,41 @@ test("DeepSeek-family chat payloads omit explicit tool_choice while keeping tool
   assert.equal("tool_choice" in payload, false);
   assert.equal(payload.tools instanceof Array, true);
   assert.equal(payload.max_tokens, 256);
+  assert.deepEqual(payload.thinking, { type: "enabled" });
+  assert.equal(payload.reasoning_effort, "high");
+  assert.equal("temperature" in payload, false);
+});
+
+test("DeepSeek V4 payloads can disable thinking and keep sampling controls", () => {
+  const payload = buildChatCompletionPayload({
+    model: "deepseek-v4-flash",
+    messages: [{ role: "user", content: "Reply briefly." }],
+    maxTokens: 64,
+    temperature: 0.7,
+    thinking: { type: "disabled" },
+    reasoningEffort: "max",
+  });
+
+  assert.deepEqual(payload.thinking, { type: "disabled" });
+  assert.equal("reasoning_effort" in payload, false);
   assert.equal(payload.temperature, 0.7);
+});
+
+test("DeepSeek V4 payloads support max reasoning effort aliases", () => {
+  assert.equal(normalizeDeepSeekReasoningEffort("high"), "high");
+  assert.equal(normalizeDeepSeekReasoningEffort("low"), "high");
+  assert.equal(normalizeDeepSeekReasoningEffort("medium"), "high");
+  assert.equal(normalizeDeepSeekReasoningEffort("max"), "max");
+  assert.equal(normalizeDeepSeekReasoningEffort("xhigh"), "max");
+
+  const payload = buildChatCompletionPayload({
+    model: "deepseek-v4-pro",
+    messages: [{ role: "user", content: "Think carefully." }],
+    reasoningEffort: "max",
+  });
+
+  assert.deepEqual(payload.thinking, { type: "enabled" });
+  assert.equal(payload.reasoning_effort, "max");
 });
 
 test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {
@@ -151,6 +190,8 @@ test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {
   });
 
   assert.equal(payload.tool_choice, "auto");
+  assert.equal("thinking" in payload, false);
+  assert.equal("reasoning_effort" in payload, false);
 });
 
 test("Navy chat messages pass assistant reasoning content back for thinking-mode tool turns", () => {

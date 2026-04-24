@@ -195,6 +195,10 @@ export const NAVY_CHAT_MODELS: ModelOption[] = [
         label: "DeepSeek V4 Pro",
     },
     {
+        id: "deepseek-v4-flash",
+        label: "DeepSeek V4 Flash",
+    },
+    {
         id: "gpt-5",
         label: "GPT-5",
     },

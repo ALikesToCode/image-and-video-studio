@@ -11,6 +11,8 @@ type ChatRequest = {
   toolChoice?: unknown;
   maxTokens?: number;
   temperature?: number;
+  thinking?: { type?: unknown };
+  reasoningEffort?: unknown;
 };
 
 export async function POST(req: Request) {
@@ -21,8 +23,16 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { model, messages, tools, toolChoice, maxTokens, temperature } =
-    body;
+  const {
+    model,
+    messages,
+    tools,
+    toolChoice,
+    maxTokens,
+    temperature,
+    thinking,
+    reasoningEffort,
+  } = body;
   const apiKey = getUserApiKey(req, body);
   if (!apiKey || !model || !Array.isArray(messages)) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
@@ -35,6 +45,8 @@ export async function POST(req: Request) {
     toolChoice,
     maxTokens,
     temperature,
+    thinking,
+    reasoningEffort,
     omitToolChoiceForUnsupportedModels: true,
   });
 

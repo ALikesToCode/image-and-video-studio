@@ -58,6 +58,7 @@ import {
   type ChatMediaAsset,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
+  isDeepSeekV4Model,
   repairImageToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
@@ -413,7 +414,11 @@ export function ChutesChat({
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
     ...DEFAULT_TOOL_SETTINGS,
   });
+  const [deepSeekThinkingEnabled, setDeepSeekThinkingEnabled] = useState(true);
+  const [deepSeekReasoningEffort, setDeepSeekReasoningEffort] =
+    useState<"high" | "max">("high");
   const [toolSettingsHydrated, setToolSettingsHydrated] = useState(false);
+  const isDeepSeekV4ChatModel = provider === "navy" && isDeepSeekV4Model(model);
   const availableImageModelIds = useMemo(
     () => new Set(imageModels.map((item) => item.id)),
     [imageModels]
@@ -1003,6 +1008,14 @@ ${defaultPrompt}`;
         ),
         maxTokens: 1024,
         temperature: 0.7,
+        ...(isDeepSeekV4ChatModel
+          ? {
+              thinking: {
+                type: deepSeekThinkingEnabled ? "enabled" : "disabled",
+              },
+              reasoningEffort: deepSeekReasoningEffort,
+            }
+          : {}),
       }),
     });
 
@@ -2037,6 +2050,53 @@ ${defaultPrompt}`;
             </Select>
 
             <div className="no-scrollbar col-span-2 flex min-w-0 items-center gap-1.5 overflow-x-auto pb-1 sm:contents sm:overflow-visible sm:pb-0">
+            {isDeepSeekV4ChatModel ? (
+              <>
+                <Button
+                  type="button"
+                  variant={deepSeekThinkingEnabled ? "secondary" : "ghost"}
+                  size="icon"
+                  onClick={() => setDeepSeekThinkingEnabled((prev) => !prev)}
+                  className="h-9 w-9 flex-none"
+                  title={
+                    deepSeekThinkingEnabled
+                      ? "Disable DeepSeek Thinking"
+                      : "Enable DeepSeek Thinking"
+                  }
+                  aria-label={
+                    deepSeekThinkingEnabled
+                      ? "Disable DeepSeek Thinking"
+                      : "Enable DeepSeek Thinking"
+                  }
+                >
+                  {deepSeekThinkingEnabled ? (
+                    <ToggleRight className="h-4 w-4" />
+                  ) : (
+                    <ToggleLeft className="h-4 w-4" />
+                  )}
+                </Button>
+                <Select
+                  value={deepSeekReasoningEffort}
+                  onValueChange={(value) =>
+                    setDeepSeekReasoningEffort(value === "max" ? "max" : "high")
+                  }
+                  disabled={!deepSeekThinkingEnabled}
+                >
+                  <SelectTrigger
+                    className="glass-card h-9 w-[96px] flex-none border-0 bg-secondary/50"
+                    title="DeepSeek Reasoning Effort"
+                    aria-label="DeepSeek Reasoning Effort"
+                  >
+                    <BrainCircuit className="mr-1.5 h-3.5 w-3.5" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="max">Max</SelectItem>
+                  </SelectContent>
+                </Select>
+              </>
+            ) : null}
             <Select
               value={toolImageModel}
               onValueChange={setToolImageModel}
