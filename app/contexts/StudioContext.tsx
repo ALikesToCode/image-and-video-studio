@@ -230,6 +230,19 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
         .slice(0, MAX_CACHED_MODELS);
 };
 
+const mergeModelOptions = (...modelLists: ModelOption[][]): ModelOption[] => {
+    const merged: ModelOption[] = [];
+    const seen = new Set<string>();
+    for (const models of modelLists) {
+        for (const model of models) {
+            if (seen.has(model.id)) continue;
+            seen.add(model.id);
+            merged.push(model);
+        }
+    }
+    return merged.slice(0, MAX_CACHED_MODELS);
+};
+
 
 
 const createId = () => {
@@ -644,13 +657,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             setNavyImageModels(imageModels.length ? imageModels : NAVY_IMAGE_MODELS);
             setNavyVideoModels(videoModels.length ? videoModels : NAVY_VIDEO_MODELS);
             setNavyTtsModels(audioModels.length ? audioModels : NAVY_TTS_MODELS);
-            setNavyChatModels(chatModels.length ? chatModels : NAVY_CHAT_MODELS);
+            setNavyChatModels(
+                chatModels.length
+                    ? mergeModelOptions(NAVY_CHAT_MODELS, chatModels)
+                    : NAVY_CHAT_MODELS
+            );
             return;
         }
 
         // Fallback for unexpected unbucketed responses.
         if (rawModels.length) {
-            setNavyChatModels(rawModels);
+            setNavyChatModels(mergeModelOptions(NAVY_CHAT_MODELS, rawModels));
             return;
         }
 
@@ -1588,7 +1605,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storedToolImageModel = readLocalStorage<string>(STORAGE_KEYS.chutesToolImageModel, "");
         if (storedToolImageModel) setChutesToolImageModel(storedToolImageModel);
         const storedNavyChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyChatModels, []);
-        if (storedNavyChatModels.length) setNavyChatModels(sanitizeModelOptions(storedNavyChatModels));
+        if (storedNavyChatModels.length) {
+            setNavyChatModels(
+                mergeModelOptions(NAVY_CHAT_MODELS, sanitizeModelOptions(storedNavyChatModels))
+            );
+        }
         const storedNavyChatModel = readLocalStorage<string>(STORAGE_KEYS.navyChatModel, "");
         if (storedNavyChatModel) setNavyChatModel(storedNavyChatModel);
         const storedNavyToolImageModel = readLocalStorage<string>(STORAGE_KEYS.navyToolImageModel, "");

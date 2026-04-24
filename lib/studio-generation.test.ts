@@ -10,6 +10,7 @@ import {
   getActiveJobCount,
   getQueuedJobsToStart,
   mergeGeneratedImagesInDisplayOrder,
+  prepareImageModelRequests,
   prepareImagePromptForModel,
   resolveImageGenerationModelPipeline,
   resolveImageSizingOptions,
@@ -17,6 +18,7 @@ import {
   groupNavyModelsByCapability,
   isNavyGenerationPending,
   resolveOpenRouterModalities,
+  summarizeImageModelPrompts,
 } from "./studio-generation.ts";
 
 test("OpenRouter image-only models use image-only modality", () => {
@@ -119,6 +121,57 @@ Lighting: Dramatic contrast between warm golden hour sunlight and cold blue glow
   assert.match(prepared.prompt, /Main character: Satoru Gojo, very tall woman in late twenties\./i);
   assert.match(prepared.prompt, /sharp focus and crisp detail/i);
   assert.match(prepared.prompt, /coherent anatomy with natural hands and accurate proportions/i);
+});
+
+test("Flux prompt preparation is idempotent for already prepared chat prompts", () => {
+  const firstPass = prepareImagePromptForModel(
+    "flux",
+    `Create a high-detail modern anime illustration.
+
+Background/setting: A worn shopping mall corridor in late afternoon.
+Main character (focus): Three figures in tense confrontation.
+Composition/camera: Medium-wide shot from a slightly low angle.`,
+    "text, bad hands"
+  );
+
+  const secondPass = prepareImagePromptForModel(
+    "flux",
+    firstPass.prompt,
+    "text, bad hands"
+  );
+
+  assert.equal(secondPass.prompt, firstPass.prompt);
+  assert.equal(secondPass.negativePrompt, undefined);
+  assert.equal(secondPass.prompt.match(/Desired qualities:/g)?.length, 1);
+});
+
+test("Chat image tool requests prepare Flux prompts before fetch", () => {
+  const requests = prepareImageModelRequests({
+    models: ["flux", "gpt-image-1.5"],
+    baseBody: {
+      apiKey: "test-key",
+      size: "1024x1024",
+    },
+    prompt: `Create a high-detail modern anime illustration.
+
+Background/setting: A slightly run-down shopping mall corridor in late afternoon.
+Main character (focus): Three figures in tense confrontation.`,
+    negativePrompt: "watermark, bad hands",
+  });
+
+  assert.equal(requests[0]?.body.model, "flux");
+  assert.match(String(requests[0]?.body.prompt), /Artwork direction:/i);
+  assert.match(String(requests[0]?.body.prompt), /Background and setting:/i);
+  assert.match(String(requests[0]?.body.prompt), /clean surfaces without embedded typography or branding/i);
+  assert.equal("negativePrompt" in (requests[0]?.body ?? {}), false);
+
+  assert.equal(requests[1]?.body.model, "gpt-image-1.5");
+  assert.match(String(requests[1]?.body.prompt), /Create a high-detail modern anime illustration/i);
+  assert.equal(requests[1]?.body.negativePrompt, "watermark, bad hands");
+
+  const promptSummary = summarizeImageModelPrompts(requests);
+  assert.match(promptSummary, /^flux:\n/);
+  assert.match(promptSummary, /\n\ngpt-image-1\.5:\n/);
 });
 
 test("Image model pipeline keeps explicit order and removes duplicates", () => {

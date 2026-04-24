@@ -70,8 +70,14 @@ const ensureSentence = (value: string) => {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 };
 
-const appendPromptNote = (prompt: string, note: string) =>
-  prompt.trim() ? `${prompt}\n\n${note}` : note;
+const appendPromptNote = (prompt: string, note: string) => {
+  const normalizedPrompt = prompt.trim();
+  if (!normalizedPrompt) return note;
+  if (normalizedPrompt.toLowerCase().includes(note.toLowerCase())) {
+    return normalizedPrompt;
+  }
+  return `${normalizedPrompt}\n\n${note}`;
+};
 
 const isAutoImageOption = (value?: string) =>
   !value || value === AUTO_IMAGE_OPTION;
@@ -155,6 +161,10 @@ const buildFluxQualityGuidance = (negativePrompt?: string) => {
   return `Desired qualities: ${Array.from(positiveTargets).join(", ")}.`;
 };
 
+const isPreparedFluxPrompt = (prompt: string) =>
+  /\bDesired qualities:\s*/i.test(prompt) &&
+  /\b(crisp fine details|coherent anatomy|artifact-free rendering)\b/i.test(prompt);
+
 export const buildFluxImagePrompt = (prompt: string, negativePrompt?: string) => {
   const normalized = normalizeWhitespace(prompt);
   if (!normalized) return buildFluxQualityGuidance(negativePrompt);
@@ -189,6 +199,7 @@ export const prepareImagePromptForModel = (
   prompt: string,
   negativePrompt?: string
 ) => {
+  const rawPrompt = prompt.trim().replace(/\r\n/g, "\n");
   const normalizedPrompt = normalizeWhitespace(prompt);
   const trimmedNegativePrompt = negativePrompt?.trim() || undefined;
   const adultPolicyNote = buildAdultImagePolicyNoteForModel(
@@ -205,13 +216,64 @@ export const prepareImagePromptForModel = (
     };
   }
 
-  const fluxPrompt = buildFluxImagePrompt(normalizedPrompt, trimmedNegativePrompt);
+  const fluxPrompt = isPreparedFluxPrompt(rawPrompt)
+    ? rawPrompt
+    : buildFluxImagePrompt(normalizedPrompt, trimmedNegativePrompt);
   return {
     prompt: adultPolicyNote
       ? appendPromptNote(fluxPrompt, adultPolicyNote)
       : fluxPrompt,
     negativePrompt: undefined,
   };
+};
+
+export type PreparedImageModelRequest = {
+  model: string;
+  body: Record<string, unknown>;
+  prompt: string;
+};
+
+export const prepareImageModelRequests = ({
+  models,
+  baseBody,
+  prompt,
+  negativePrompt,
+  includeNegativePrompt = true,
+}: {
+  models: string[];
+  baseBody: Record<string, unknown>;
+  prompt: string;
+  negativePrompt?: string;
+  includeNegativePrompt?: boolean;
+}): PreparedImageModelRequest[] =>
+  models.map((model) => {
+    const prepared = prepareImagePromptForModel(model, prompt, negativePrompt);
+    return {
+      model,
+      prompt: prepared.prompt,
+      body: {
+        ...baseBody,
+        model,
+        prompt: prepared.prompt,
+        ...(includeNegativePrompt && prepared.negativePrompt
+          ? { negativePrompt: prepared.negativePrompt }
+          : {}),
+      },
+    };
+  });
+
+export const summarizeImageModelPrompts = (
+  requests: Pick<PreparedImageModelRequest, "model" | "prompt">[]
+) => {
+  const uniquePrompts = Array.from(
+    new Set(requests.map((request) => request.prompt).filter(Boolean))
+  );
+  if (uniquePrompts.length <= 1) {
+    return uniquePrompts[0] ?? "";
+  }
+  return requests
+    .map((request) => `${request.model}:\n${request.prompt}`)
+    .join("\n\n");
 };
 
 export const resolveImageSizingOptions = (

@@ -69,6 +69,14 @@ export const NAVY_CHAT_MODELS: ModelOption[] = [
         label: "GPT-4o",
     },
     {
+        id: "glm-5.1-venice",
+        label: "GLM 5.1 Venice",
+    },
+    {
+        id: "deepseek-v4-pro",
+        label: "DeepSeek V4 Pro",
+    },
+    {
         id: "gpt-5",
         label: "GPT-5",
     },

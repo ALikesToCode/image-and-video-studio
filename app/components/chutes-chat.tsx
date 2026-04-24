@@ -21,7 +21,6 @@ import {
   Copy,
   Check,
   Layers3,
-  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import {
@@ -66,6 +65,8 @@ import {
 } from "@/lib/chat-tooling";
 import {
   buildProviderPolicyHintForImageModels,
+  prepareImageModelRequests,
+  summarizeImageModelPrompts,
 } from "@/lib/studio-generation";
 
 type ToolCall = {
@@ -401,7 +402,6 @@ export function ChutesChat({
   );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
   const [headerCollapsed, setHeaderCollapsed] = useState(true);
-  const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const [toolVideoModel, setToolVideoModel] = useState(
     videoModels[0]?.id ?? ""
   );
@@ -1191,6 +1191,7 @@ ${defaultPrompt}`;
     if (!prompt) {
       throw new Error("Tool call missing prompt.");
     }
+    const negativePrompt = getStringArg(args, ["negative_prompt"]);
     const requestedModel = getStringArg(args, ["model"]);
     const modelOverride = requestedModel || toolImageModel;
     const modelsToRun = resolveRequestedImageModels({
@@ -1204,7 +1205,7 @@ ${defaultPrompt}`;
       throw new Error("No image models are available for the image tool.");
     }
     const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
-    const baseBody: Record<string, unknown> = { apiKey, prompt };
+    const baseBody: Record<string, unknown> = { apiKey };
     if (provider === "navy") {
       const numberOfImages = getNumberArg(args, ["n"]);
       const size = getStringArg(args, ["size"]);
@@ -1222,9 +1223,7 @@ ${defaultPrompt}`;
       const height = getNumberArg(args, ["height"]);
       const steps = getNumberArg(args, ["num_inference_steps"]);
       const seed = getNumberArg(args, ["seed"]);
-      const negativePrompt = getStringArg(args, ["negative_prompt"]);
       const resolution = getStringArg(args, ["resolution"]);
-      baseBody.negativePrompt = negativePrompt || undefined;
       baseBody.guidanceScale = guidanceScale ?? undefined;
       baseBody.width = width ? Math.round(width) : undefined;
       baseBody.height = height ? Math.round(height) : undefined;
@@ -1232,14 +1231,24 @@ ${defaultPrompt}`;
       baseBody.numInferenceSteps = steps ? Math.round(steps) : undefined;
       baseBody.seed = seed !== null ? Math.round(seed) : null;
     }
+    const imageRequests = prepareImageModelRequests({
+      models: modelsToRun,
+      baseBody,
+      prompt,
+      negativePrompt: negativePrompt || undefined,
+    });
+    const imageRequestByModel = new Map(
+      imageRequests.map((request) => [request.model, request])
+    );
     const invokeImageModel = async (targetModel: string) => {
+      const request = imageRequestByModel.get(targetModel);
+      if (!request) {
+        throw new Error(`Image model ${targetModel} is not prepared.`);
+      }
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...baseBody,
-          model: targetModel,
-        }),
+        body: JSON.stringify(request.body),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -1311,7 +1320,7 @@ ${defaultPrompt}`;
     return {
       images: parsedImages,
       model: modelsToRun.join(", "),
-      prompt,
+      prompt: summarizeImageModelPrompts(imageRequests),
       errors,
     };
   };
@@ -1912,39 +1921,19 @@ ${defaultPrompt}`;
       {/* Header */}
       <header className="glass sticky top-0 z-10 flex-none border-b p-2.5 sm:p-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <div className="flex items-center justify-between gap-2 sm:hidden">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="rounded-xl bg-primary/10 p-2 text-primary">
-                <Bot className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold leading-none">
-                  {provider === "navy" ? "NavyAI Chat" : "Chutes Agent"}
-                </h2>
-                <p className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                  Online
-                </p>
-              </div>
+          <div className="flex min-w-0 items-center gap-2 sm:hidden">
+            <div className="rounded-xl bg-primary/10 p-2 text-primary">
+              <Bot className="h-4 w-4" />
             </div>
-            <Button
-              type="button"
-              variant={mobileControlsOpen ? "secondary" : "ghost"}
-              size="icon"
-              onClick={() =>
-                setMobileControlsOpen((prev) => {
-                  const next = !prev;
-                  if (!next) setHeaderCollapsed(true);
-                  return next;
-                })
-              }
-              className="h-9 w-9 shrink-0"
-              title="Chat controls"
-              aria-label="Chat controls"
-              aria-expanded={mobileControlsOpen}
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-            </Button>
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold leading-none">
+                {provider === "navy" ? "NavyAI Chat" : "Chutes Agent"}
+              </h2>
+              <p className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                Online
+              </p>
+            </div>
           </div>
 
           <div className="hidden items-center gap-2 sm:flex">
@@ -1966,14 +1955,9 @@ ${defaultPrompt}`;
             </div>
           </div>
 
-          <div
-            className={cn(
-              "no-scrollbar w-full items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-nowrap sm:justify-end sm:overflow-visible sm:pb-0",
-              mobileControlsOpen ? "flex" : "hidden sm:flex"
-            )}
-          >
+          <div className="grid w-full grid-cols-[minmax(6.75rem,0.8fr)_minmax(0,1.2fr)] items-center gap-1.5 sm:flex sm:w-auto sm:flex-nowrap sm:justify-end sm:overflow-visible sm:pb-0">
             <Select value={provider} onValueChange={(value) => setProvider(value as ChatProvider)}>
-              <SelectTrigger className="glass-card h-9 min-w-[7.25rem] flex-none border-0 bg-secondary/50 sm:w-[140px]">
+              <SelectTrigger className="glass-card h-9 min-w-0 flex-none border-0 bg-secondary/50 sm:w-[140px]">
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
@@ -1983,7 +1967,7 @@ ${defaultPrompt}`;
             </Select>
 
             <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className="glass-card h-9 min-w-[11rem] flex-none border-0 bg-secondary/50 sm:w-[200px]">
+              <SelectTrigger className="glass-card h-9 min-w-0 flex-none border-0 bg-secondary/50 sm:w-[200px]">
                 <SelectValue placeholder="Select a model" />
               </SelectTrigger>
               <SelectContent>
@@ -1993,12 +1977,13 @@ ${defaultPrompt}`;
               </SelectContent>
             </Select>
 
+            <div className="no-scrollbar col-span-2 flex min-w-0 items-center gap-1.5 overflow-x-auto pb-1 sm:contents sm:overflow-visible sm:pb-0">
             <Select
               value={toolImageModel}
               onValueChange={setToolImageModel}
               disabled={!toolSettings.image || !imageModels.length}
             >
-              <SelectTrigger className="h-9 w-9 flex-none px-0 justify-center glass-card border-0 bg-secondary/50" title="Image Tool Model">
+              <SelectTrigger className="h-9 w-9 flex-none justify-center border-0 bg-secondary/50 px-0 glass-card" title="Image Tool Model" aria-label="Image Tool Model">
                 <ImageIcon className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
@@ -2015,6 +2000,7 @@ ${defaultPrompt}`;
                   size="icon"
                   className="h-9 w-9 flex-none glass-card border-0 bg-secondary/50"
                   title="Image Tool Pipeline"
+                  aria-label="Image Tool Pipeline"
                   disabled={!toolSettings.image || !imageModels.length}
                 >
                   <Layers3 className="h-4 w-4" />
@@ -2118,7 +2104,7 @@ ${defaultPrompt}`;
               onValueChange={setToolVideoModel}
               disabled={!toolSettings.video || !videoModels.length}
             >
-              <SelectTrigger className="h-9 w-9 flex-none px-0 justify-center glass-card border-0 bg-secondary/50" title="Video Tool Model">
+              <SelectTrigger className="h-9 w-9 flex-none justify-center border-0 bg-secondary/50 px-0 glass-card" title="Video Tool Model" aria-label="Video Tool Model">
                 <Video className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
@@ -2133,7 +2119,7 @@ ${defaultPrompt}`;
               onValueChange={setToolAudioModel}
               disabled={!toolSettings.audio || !audioModels.length}
             >
-              <SelectTrigger className="h-9 w-9 flex-none px-0 justify-center glass-card border-0 bg-secondary/50" title="Audio Tool Model">
+              <SelectTrigger className="h-9 w-9 flex-none justify-center border-0 bg-secondary/50 px-0 glass-card" title="Audio Tool Model" aria-label="Audio Tool Model">
                 <AudioLines className="h-4 w-4" />
               </SelectTrigger>
               <SelectContent>
@@ -2144,7 +2130,7 @@ ${defaultPrompt}`;
             </Select>
 
             {onRefreshModels && (
-              <Button variant="ghost" size="icon" onClick={onRefreshModels} disabled={modelsLoading} className="h-9 w-9 flex-none">
+              <Button variant="ghost" size="icon" onClick={onRefreshModels} disabled={modelsLoading} className="h-9 w-9 flex-none" title="Refresh models" aria-label="Refresh models">
                 <Sparkles className={cn("h-4 w-4", modelsLoading && "animate-spin")} />
               </Button>
             )}
@@ -2155,9 +2141,11 @@ ${defaultPrompt}`;
               onClick={() => setHeaderCollapsed((prev) => !prev)}
               className="h-9 w-9 flex-none"
               title={headerCollapsed ? "Expand header controls" : "Collapse header controls"}
+              aria-label={headerCollapsed ? "Expand header controls" : "Collapse header controls"}
             >
               {headerCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
             </Button>
+            </div>
           </div>
         </div>
         <AnimatePresence initial={false}>
