@@ -5,6 +5,8 @@ import {
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
   resolveRequestedImageModels,
+  sanitizeChatImageAssets,
+  sanitizeChatMediaAssets,
   stripHeavyMediaFromMessagesForStorage,
 } from "./chat-tooling.ts";
 
@@ -74,6 +76,50 @@ test("Requested image models stay pinned when a non-default model is explicitly 
       availableModels: ["flux", "gpt-image-1.5"],
     }),
     ["gpt-image-1.5"]
+  );
+});
+
+test("Chat image assets preserve per-image model labels", () => {
+  assert.deepEqual(
+    sanitizeChatImageAssets([
+      {
+        id: "img-1",
+        dataUrl: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        model: "gpt-image-1.5",
+      },
+    ]),
+    [
+      {
+        id: "img-1",
+        dataUrl: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        model: "gpt-image-1.5",
+      },
+    ]
+  );
+});
+
+test("Chat media assets preserve per-image model labels", () => {
+  assert.deepEqual(
+    sanitizeChatMediaAssets([
+      {
+        id: "img-1",
+        kind: "image",
+        dataUrl: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        model: "flux",
+      },
+    ]),
+    [
+      {
+        id: "img-1",
+        kind: "image",
+        dataUrl: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        model: "flux",
+      },
+    ]
   );
 });
 

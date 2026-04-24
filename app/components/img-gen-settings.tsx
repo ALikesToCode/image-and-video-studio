@@ -17,10 +17,12 @@ import {
 } from "@/app/components/ui/card";
 import { Check, ChevronDown, ChevronUp, Layers3, Settings2 } from "lucide-react";
 import {
+    AUTO_IMAGE_OPTION,
     IMAGE_ASPECTS,
     IMAGE_SIZES,
     IMAGEN_SIZES,
     Mode,
+    NAVY_IMAGE_SIZES,
     Provider,
     ModelOption,
     TTS_FORMATS,
@@ -407,9 +409,14 @@ export function ImgGenSettings({
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="1024x1024">1024x1024</SelectItem>
-                                            <SelectItem value="512x512">512x512</SelectItem>
-                                            <SelectItem value="768x768">768x768</SelectItem>
+                                            <SelectItem value={AUTO_IMAGE_OPTION}>
+                                                Auto (model decides)
+                                            </SelectItem>
+                                            {NAVY_IMAGE_SIZES.map((size) => (
+                                                <SelectItem key={size} value={size}>
+                                                    {size}
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -420,6 +427,9 @@ export function ImgGenSettings({
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
+                                            <SelectItem value={AUTO_IMAGE_OPTION}>
+                                                Auto (model decides)
+                                            </SelectItem>
                                             {IMAGE_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
@@ -431,27 +441,33 @@ export function ImgGenSettings({
                                     <div className="space-y-2">
                                         <Label>Aspect Ratio</Label>
                                         <Select value={imageAspect} onValueChange={setImageAspect}>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {IMAGE_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value={AUTO_IMAGE_OPTION}>
+                                                Auto (model decides)
+                                            </SelectItem>
+                                            {IMAGE_ASPECTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                                 )}
                                 {showImageSize && (
                                     <div className="space-y-2">
                                         <Label>Size</Label>
                                         <Select value={imageSize} onValueChange={setImageSize}>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableImageSizes.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value={AUTO_IMAGE_OPTION}>
+                                                Auto (model decides)
+                                            </SelectItem>
+                                            {availableImageSizes.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                                 )}
                             </>
                         )}

@@ -396,9 +396,11 @@ export const CHUTES_TTS_MODELS: ModelOption[] = [
     },
 ];
 
+export const AUTO_IMAGE_OPTION = "auto";
 export const IMAGE_ASPECTS = ["1:1", "3:4", "4:3", "9:16", "16:9"];
 export const IMAGE_SIZES = ["1K", "2K", "4K"];
 export const IMAGEN_SIZES = ["1K", "2K"];
+export const NAVY_IMAGE_SIZES = ["1024x1024", "512x512", "768x768"];
 export const VIDEO_ASPECTS = ["16:9", "9:16"];
 export const VIDEO_RESOLUTIONS = ["720p", "1080p"];
 export const VIDEO_DURATIONS = ["4", "6", "8"];

@@ -1,4 +1,8 @@
-import type { ModelOption } from "./constants.ts";
+import {
+  AUTO_IMAGE_OPTION,
+  type ModelOption,
+  type Provider,
+} from "./constants.ts";
 import type { GeneratedImage } from "./types.ts";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
 
@@ -37,6 +41,18 @@ type QueueJobLike = {
   mode: QueueMode;
 };
 
+type ImageSizingOptionsInput = {
+  imageAspect?: string;
+  imageSize?: string;
+  navyImageSize?: string;
+};
+
+type ImageSizingOptions = {
+  aspectRatio?: string;
+  imageSize?: string;
+  size?: string;
+};
+
 const normalizeModalities = (modalities?: string[]) =>
   (modalities ?? []).map((value) => value.toLowerCase());
 
@@ -56,6 +72,9 @@ const ensureSentence = (value: string) => {
 
 const appendPromptNote = (prompt: string, note: string) =>
   prompt.trim() ? `${prompt}\n\n${note}` : note;
+
+const isAutoImageOption = (value?: string) =>
+  !value || value === AUTO_IMAGE_OPTION;
 
 const toSectionTitle = (rawLabel: string) => {
   const normalized = rawLabel.trim().toLowerCase();
@@ -193,6 +212,33 @@ export const prepareImagePromptForModel = (
       : fluxPrompt,
     negativePrompt: undefined,
   };
+};
+
+export const resolveImageSizingOptions = (
+  provider: Provider,
+  { imageAspect, imageSize, navyImageSize }: ImageSizingOptionsInput
+): ImageSizingOptions => {
+  const sizing: ImageSizingOptions = {};
+
+  if (
+    (provider === "gemini" || provider === "openrouter" || provider === "navy") &&
+    !isAutoImageOption(imageAspect)
+  ) {
+    sizing.aspectRatio = imageAspect;
+  }
+
+  if (
+    (provider === "gemini" || provider === "openrouter") &&
+    !isAutoImageOption(imageSize)
+  ) {
+    sizing.imageSize = imageSize;
+  }
+
+  if (provider === "navy" && !isAutoImageOption(navyImageSize)) {
+    sizing.size = navyImageSize;
+  }
+
+  return sizing;
 };
 
 export const getActiveJobCount = (jobs: ActiveJobLike[]) =>

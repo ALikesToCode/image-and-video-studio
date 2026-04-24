@@ -114,12 +114,21 @@ export function GalleryGrid({ items, onClear }: GalleryGridProps) {
                                 <Card className="overflow-hidden group relative glass-card border-none shadow-sm hover:shadow-lg transition-all">
                                     <div className="aspect-square relative">
                                         {kind === "image" ? (
-                                            <img
-                                                src={item.dataUrl}
-                                                alt={item.prompt}
-                                                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                                loading="lazy"
-                                            />
+                                            <>
+                                                <img
+                                                    src={item.dataUrl}
+                                                    alt={item.prompt}
+                                                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                                    loading="lazy"
+                                                />
+                                                {item.model ? (
+                                                    <div className="absolute left-2 top-2 z-10 flex flex-wrap gap-2">
+                                                        <span className="rounded-full bg-background/85 px-2 py-1 text-[10px] font-semibold text-foreground shadow-sm backdrop-blur">
+                                                            {item.model}
+                                                        </span>
+                                                    </div>
+                                                ) : null}
+                                            </>
                                         ) : kind === "video" ? (
                                             <video
                                                 src={item.dataUrl}

@@ -13,6 +13,21 @@ export type ForcedToolCall =
   | "generate_audio"
   | null;
 
+export type ChatImageAsset = {
+  id: string;
+  dataUrl: string;
+  mimeType: string;
+  model?: string;
+};
+
+export type ChatMediaAsset = {
+  id: string;
+  kind: "image" | "video" | "audio";
+  dataUrl: string;
+  mimeType: string;
+  model?: string;
+};
+
 type SyntheticFallbackToolCallOptions = {
   requestedTool: ForcedToolCall;
   provider: ChatProvider;
@@ -67,6 +82,62 @@ const coercePositiveNumber = (value?: string | number | null) => {
     }
   }
   return null;
+};
+
+export const sanitizeChatImageAssets = (value: unknown): ChatImageAsset[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((img) => {
+      if (!img || typeof img !== "object") return null;
+      const imgRecord = img as Record<string, unknown>;
+      const id = typeof imgRecord.id === "string" ? imgRecord.id : "";
+      const dataUrl =
+        typeof imgRecord.dataUrl === "string" ? imgRecord.dataUrl : "";
+      const mimeType =
+        typeof imgRecord.mimeType === "string" ? imgRecord.mimeType : "image/png";
+      const model =
+        typeof imgRecord.model === "string" && imgRecord.model.trim()
+          ? imgRecord.model.trim()
+          : undefined;
+      if (!id || !dataUrl) return null;
+      return { id, dataUrl, mimeType, ...(model ? { model } : {}) };
+    })
+    .filter((entry): entry is ChatImageAsset => !!entry);
+};
+
+export const sanitizeChatMediaAssets = (value: unknown): ChatMediaAsset[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const mediaRecord = item as Record<string, unknown>;
+      const id = typeof mediaRecord.id === "string" ? mediaRecord.id : "";
+      const kind = mediaRecord.kind;
+      const dataUrl =
+        typeof mediaRecord.dataUrl === "string" ? mediaRecord.dataUrl : "";
+      const mimeType =
+        typeof mediaRecord.mimeType === "string" ? mediaRecord.mimeType : "";
+      const model =
+        typeof mediaRecord.model === "string" && mediaRecord.model.trim()
+          ? mediaRecord.model.trim()
+          : undefined;
+      if (!id || !dataUrl) return null;
+      if (kind !== "image" && kind !== "video" && kind !== "audio") return null;
+      return {
+        id,
+        kind,
+        dataUrl,
+        mimeType:
+          mimeType ||
+          (kind === "video"
+            ? "video/mp4"
+            : kind === "audio"
+              ? "audio/mpeg"
+              : "image/png"),
+        ...(model ? { model } : {}),
+      };
+    })
+    .filter((entry): entry is ChatMediaAsset => !!entry);
 };
 
 export const detectForcedToolCall = (

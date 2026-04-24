@@ -12,6 +12,7 @@ import {
   mergeGeneratedImagesInDisplayOrder,
   prepareImagePromptForModel,
   resolveImageGenerationModelPipeline,
+  resolveImageSizingOptions,
   resolveActiveImageToolModels,
   groupNavyModelsByCapability,
   isNavyGenerationPending,
@@ -261,6 +262,61 @@ test("Navy pending statuses are recognized consistently", () => {
   assert.equal(isNavyGenerationPending("processing"), true);
   assert.equal(isNavyGenerationPending("completed"), false);
   assert.equal(isNavyGenerationPending("succeeded"), false);
+});
+
+test("Auto image sizing omits aspect and size fields for providers that support model-defined sizing", () => {
+  assert.deepEqual(
+    resolveImageSizingOptions("gemini", {
+      imageAspect: "auto",
+      imageSize: "auto",
+      navyImageSize: "auto",
+    }),
+    {}
+  );
+
+  assert.deepEqual(
+    resolveImageSizingOptions("openrouter", {
+      imageAspect: "auto",
+      imageSize: "auto",
+      navyImageSize: "auto",
+    }),
+    {}
+  );
+
+  assert.deepEqual(
+    resolveImageSizingOptions("navy", {
+      imageAspect: "auto",
+      imageSize: "auto",
+      navyImageSize: "auto",
+    }),
+    {}
+  );
+});
+
+test("Explicit image sizing preserves the selected override values", () => {
+  assert.deepEqual(
+    resolveImageSizingOptions("gemini", {
+      imageAspect: "16:9",
+      imageSize: "2K",
+      navyImageSize: "auto",
+    }),
+    {
+      aspectRatio: "16:9",
+      imageSize: "2K",
+    }
+  );
+
+  assert.deepEqual(
+    resolveImageSizingOptions("navy", {
+      imageAspect: "3:4",
+      imageSize: "auto",
+      navyImageSize: "1024x1024",
+    }),
+    {
+      aspectRatio: "3:4",
+      size: "1024x1024",
+    }
+  );
 });
 
 test("Navy model catalog is normalized into image, video, and TTS groups", () => {

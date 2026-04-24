@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
+    AUTO_IMAGE_OPTION,
     DEFAULT_MODELS,
     GEMINI_IMAGE_MODELS,
     GEMINI_VIDEO_MODELS,
@@ -11,6 +12,7 @@ import {
     CHUTES_TTS_MODELS,
     OPENROUTER_IMAGE_MODELS,
     NAVY_IMAGE_MODELS,
+    NAVY_IMAGE_SIZES,
     NAVY_CHAT_MODELS,
     NAVY_VIDEO_MODELS,
     NAVY_TTS_MODELS,
@@ -37,6 +39,7 @@ import {
     getQueuedJobsToStart,
     getActiveJobCount,
     mergeGeneratedImagesInDisplayOrder,
+    resolveImageSizingOptions,
     resolveImageGenerationModelPipeline,
 } from "@/lib/studio-generation";
 import {
@@ -484,7 +487,7 @@ interface StudioContextType {
     refreshChutesChatModels: () => Promise<void>;
     refreshNavyChatModels: () => Promise<void>;
     saveChatImages: (payload: {
-        images: { id: string; dataUrl: string; mimeType: string }[];
+        images: { id: string; dataUrl: string; mimeType: string; model?: string }[];
         prompt: string;
         model: string;
         provider: Provider;
@@ -528,9 +531,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [imageCount, setImageCount] = useState(1);
     const [imagePipelineEnabled, setImagePipelineEnabled] = useState(false);
     const [imageModelOrder, setImageModelOrder] = useState<string[]>([]);
-    const [imageAspect, setImageAspect] = useState(IMAGE_ASPECTS[0]);
-    const [imageSize, setImageSize] = useState(IMAGE_SIZES[0]);
-    const [navyImageSize, setNavyImageSize] = useState("1024x1024");
+    const [imageAspect, setImageAspect] = useState(AUTO_IMAGE_OPTION);
+    const [imageSize, setImageSize] = useState(AUTO_IMAGE_OPTION);
+    const [navyImageSize, setNavyImageSize] = useState(AUTO_IMAGE_OPTION);
     const [chutesGuidanceScale, setChutesGuidanceScale] = useState("7.5");
     // Chutes video
     const [chutesVideoFps, setChutesVideoFps] = useState("16");
@@ -741,7 +744,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
 
     const addMediaToGallery = async (
-        items: { url: string; mimeType?: string; blob?: Blob }[],
+        items: { url: string; mimeType?: string; blob?: Blob; model?: string }[],
         metadata: {
             prompt: string;
             model: string;
@@ -757,8 +760,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 const id = createId();
                 let blob = item.blob;
                 let mimeType = item.mimeType;
+                const model = item.model ?? metadata.model;
                 if (!idbAvailable) {
-                    entries.push({ id, dataUrl: item.url, prompt: metadata.prompt, model: metadata.model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
+                    entries.push({ id, dataUrl: item.url, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
                     continue;
                 }
                 if (!blob) {
@@ -768,14 +772,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         blob = await response.blob();
                         mimeType = mimeType ?? blob.type;
                     } catch {
-                        entries.push({ id, dataUrl: item.url, prompt: metadata.prompt, model: metadata.model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
+                        entries.push({ id, dataUrl: item.url, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
                         continue;
                     }
                 }
                 await putGalleryBlob(id, blob);
                 const url = URL.createObjectURL(blob);
                 galleryUrlsRef.current.set(id, url);
-                entries.push({ id, dataUrl: url, prompt: metadata.prompt, model: metadata.model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType: mimeType ?? blob.type });
+                entries.push({ id, dataUrl: url, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType: mimeType ?? blob.type });
             }
             if (entries.length) {
                 setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
@@ -797,28 +801,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 model: job.model,
                 prompt: job.prompt,
             };
+            const imageSizing = resolveImageSizingOptions(job.provider, {
+                imageAspect: job.imageAspect,
+                imageSize: job.imageSize,
+                navyImageSize: job.navyImageSize,
+            });
 
             if (job.provider === "gemini") {
                 body = {
                     ...body,
-                    aspectRatio: job.imageAspect,
-                    imageSize: job.imageSize,
+                    ...imageSizing,
                     numberOfImages: job.imageCount,
                 };
             } else if (job.provider === "openrouter") {
                 body = {
                     ...body,
-                    aspectRatio: job.imageAspect,
-                    imageSize: job.imageSize,
+                    ...imageSizing,
                     outputModalities: job.outputModalities,
                 };
             } else if (job.provider === "navy") {
                 body = {
                     ...body,
-                    size: job.navyImageSize,
+                    ...imageSizing,
                     numberOfImages: job.imageCount,
                     negativePrompt: job.negativePrompt,
-                    aspectRatio: job.imageAspect,
                 };
             } else {
                 url = "/api/chutes/image";
@@ -1403,7 +1409,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     };
 
     const saveChatImages = async (payload: {
-        images: { id: string; dataUrl: string; mimeType: string }[];
+        images: { id: string; dataUrl: string; mimeType: string; model?: string }[];
         prompt: string;
         model: string;
         provider: Provider;
@@ -1413,6 +1419,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             payload.images.map((image) => ({
                 url: image.dataUrl,
                 mimeType: image.mimeType,
+                model: image.model,
             })),
             {
                 prompt: payload.prompt,
@@ -1607,11 +1614,26 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (storedImageCount > 0) setImageCount(storedImageCount);
 
             const storedImageAspect = getString(storedSettings.imageAspect);
-            if (IMAGE_ASPECTS.includes(storedImageAspect)) setImageAspect(storedImageAspect);
+            if (
+                storedImageAspect === AUTO_IMAGE_OPTION ||
+                IMAGE_ASPECTS.includes(storedImageAspect)
+            ) {
+                setImageAspect(storedImageAspect);
+            }
             const storedImageSize = getString(storedSettings.imageSize);
-            if (IMAGE_SIZES.includes(storedImageSize)) setImageSize(storedImageSize);
+            if (
+                storedImageSize === AUTO_IMAGE_OPTION ||
+                IMAGE_SIZES.includes(storedImageSize)
+            ) {
+                setImageSize(storedImageSize);
+            }
             const storedNavyImageSize = getString(storedSettings.navyImageSize);
-            if (storedNavyImageSize) setNavyImageSize(storedNavyImageSize);
+            if (
+                storedNavyImageSize === AUTO_IMAGE_OPTION ||
+                NAVY_IMAGE_SIZES.includes(storedNavyImageSize)
+            ) {
+                setNavyImageSize(storedNavyImageSize);
+            }
             const storedGuidanceScale = getString(storedSettings.chutesGuidanceScale);
             if (storedGuidanceScale) setChutesGuidanceScale(storedGuidanceScale);
             const storedWidth = getString(storedSettings.chutesWidth);
