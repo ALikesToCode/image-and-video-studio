@@ -1,11 +1,11 @@
 # Image & Video Studio
 
-Browser-based local-first workspace for image, video, audio/TTS, and chat-assisted media creation. The app is BYOK: provider API keys are entered in the UI and stored in the browser.
+Browser-based local-first workspace for image, video, audio/TTS, and chat-assisted media creation. The app is BYOK: provider API keys are entered in the UI and stay in browser-controlled storage.
 
 ## Privacy model
 
-- API keys are stored in browser `localStorage` so they survive refreshes on the same device.
-- Generated media, uploaded references, and resumable provider job metadata are stored locally in browser storage.
+- API keys default to `sessionStorage`, can be kept in memory-only manual mode, and can be persisted in `localStorage` only by explicit opt-in.
+- Generated media, uploaded references, and resumable provider job metadata are stored locally in browser storage, primarily IndexedDB.
 - App API routes proxy provider requests for CORS, streaming, and media download compatibility.
 - The server/edge runtime does not persist API keys, generated assets, chat history, or user accounts.
 - Provider calls still leave your browser and go through the configured edge route to the selected provider.
@@ -23,7 +23,8 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
 
 ## Local storage architecture
 
-- `localStorage` keeps small settings, provider keys, selected model IDs, and lightweight metadata caches.
+- `localStorage` keeps small settings, selected model IDs, lightweight metadata caches, and API keys only when persistent key storage is explicitly selected.
+- `sessionStorage` is the default API key storage mode.
 - IndexedDB stores blobs, references, resumable jobs, and versioned stores:
   - `assets`
   - `assetBlobs`
@@ -44,15 +45,15 @@ Open Settings in the app and add keys for the providers you want to use:
 - OpenRouter API key
 - Chutes API key
 
-Keys are sent to app API routes with `x-user-api-key` where practical. Route handlers also keep backward-compatible body-key fallback for older local state, sanitize provider errors, and avoid logging keys.
+Keys are sent to app API routes with `x-user-api-key` where practical. Route handlers also keep backward-compatible body-key fallback for older local state, sanitize provider errors, and avoid logging keys. Old `studio_api_key_*` localStorage keys are detected in Settings and must be explicitly migrated or discarded.
 
 ## Running locally
 
 ```bash
 pnpm install
+pnpm run typecheck
 pnpm test
 pnpm lint
-pnpm build
 ```
 
 For development, run:
@@ -76,9 +77,11 @@ The Worker entrypoint and assets output are configured in `wrangler.jsonc`. Open
 
 ## Tests and checks
 
-- `npm test` runs Node's test runner with `tsx` so `lib/*.test.ts` files are actually loaded.
-- `npm run lint` runs ESLint.
-- `npm run build` runs the Next.js production build.
+- `pnpm run typecheck` runs TypeScript without emit.
+- `pnpm test` runs Node's test runner with `tsx` so nested `lib/**/*.test.ts` files are loaded.
+- `pnpm lint` runs ESLint.
+- `pnpm build` runs the Next.js production build.
+- `pnpm verify` runs typecheck, lint, tests, and build. In Codex sessions, build/dev are not run unless you explicitly ask.
 
 ## Known limitations
 
