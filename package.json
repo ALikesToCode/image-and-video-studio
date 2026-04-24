@@ -2,6 +2,7 @@
   "name": "image-and-video-studio",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.30.2",
   "scripts": {
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --webpack",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
@@ -9,8 +10,10 @@
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "test": "node --test --experimental-specifier-resolution=node",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"lib/**/*.test.ts\"",
     "lint": "eslint",
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build",
     "postinstall": "node scripts/ensure-tapable.cjs"
   },
   "dependencies": {
@@ -45,6 +48,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.3",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "wrangler": "4.84.1"
   },
