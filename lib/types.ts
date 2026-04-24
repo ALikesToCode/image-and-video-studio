@@ -27,6 +27,46 @@ export type GeneratedImage = {
     createdAt?: string;
 };
 
+export type ReferenceRole =
+    | "general"
+    | "character"
+    | "object"
+    | "style"
+    | "first_frame"
+    | "last_frame"
+    | "source_image";
+
+export type StoredReference = {
+    id: string;
+    role: ReferenceRole;
+    label?: string;
+    dataUrl: string;
+    blobKey: string;
+    mimeType: string;
+    createdAt: string;
+    size?: number;
+};
+
+export type PersistedGenerationJob = {
+    id: string;
+    status: "queued" | "running" | "success" | "error";
+    mode: "image" | "video" | "tts";
+    provider: Provider;
+    model: string;
+    prompt: string;
+    createdAt: string;
+    batchId?: string;
+    batchCreatedAt?: string;
+    batchOrder?: number;
+    startedAt?: string;
+    finishedAt?: string;
+    error?: string;
+    progress?: string;
+    remoteJobId?: string;
+    remoteOperationName?: string;
+    remoteStatus?: string;
+};
+
 export type NavyUsageResponse = {
     plan: string;
     limits: {

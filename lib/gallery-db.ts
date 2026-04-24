@@ -1,6 +1,27 @@
 const DB_NAME = "studio-gallery";
-const DB_VERSION = 1;
-const STORE_NAME = "images";
+const DB_VERSION = 2;
+const LEGACY_BLOB_STORE = "images";
+const ASSETS_STORE = "assets";
+const ASSET_BLOBS_STORE = "assetBlobs";
+const REFERENCES_STORE = "references";
+const JOBS_STORE = "jobs";
+const CONVERSATIONS_STORE = "conversations";
+const MODEL_CATALOGS_STORE = "modelCatalogs";
+const SETTINGS_STORE = "settings";
+
+const VERSIONED_STORES = [
+  ASSETS_STORE,
+  ASSET_BLOBS_STORE,
+  REFERENCES_STORE,
+  JOBS_STORE,
+  CONVERSATIONS_STORE,
+  MODEL_CATALOGS_STORE,
+  SETTINGS_STORE,
+] as const;
+
+type StoreName =
+  | typeof LEGACY_BLOB_STORE
+  | (typeof VERSIONED_STORES)[number];
 
 export const isIndexedDbAvailable = () => typeof indexedDB !== "undefined";
 
@@ -15,8 +36,13 @@ const openGalleryDb = () =>
 
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains(LEGACY_BLOB_STORE)) {
+        db.createObjectStore(LEGACY_BLOB_STORE);
+      }
+      for (const storeName of VERSIONED_STORES) {
+        if (!db.objectStoreNames.contains(storeName)) {
+          db.createObjectStore(storeName);
+        }
       }
     };
 
@@ -26,13 +52,14 @@ const openGalleryDb = () =>
   });
 
 const runGalleryTransaction = async <T>(
+  storeName: StoreName,
   mode: IDBTransactionMode,
   callback: (store: IDBObjectStore) => IDBRequest<T>
 ) => {
   const db = await openGalleryDb();
   return await new Promise<T>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction(storeName, mode);
+    const store = transaction.objectStore(storeName);
     const request = callback(store);
     let settled = false;
 
@@ -62,18 +89,82 @@ const runGalleryTransaction = async <T>(
 };
 
 export const putGalleryBlob = async (id: string, blob: Blob) => {
-  await runGalleryTransaction("readwrite", (store) => store.put(blob, id));
+  await runGalleryTransaction(ASSET_BLOBS_STORE, "readwrite", (store) =>
+    store.put(blob, id)
+  );
 };
 
 export const getGalleryBlob = async (id: string) =>
-  await runGalleryTransaction<Blob | undefined>("readonly", (store) =>
-    store.get(id)
-  );
+  (await runGalleryTransaction<Blob | undefined>(
+    ASSET_BLOBS_STORE,
+    "readonly",
+    (store) => store.get(id)
+  )) ??
+  (await runGalleryTransaction<Blob | undefined>(
+    LEGACY_BLOB_STORE,
+    "readonly",
+    (store) => store.get(id)
+  ));
 
 export const deleteGalleryBlob = async (id: string) => {
-  await runGalleryTransaction("readwrite", (store) => store.delete(id));
+  await runGalleryTransaction(ASSET_BLOBS_STORE, "readwrite", (store) =>
+    store.delete(id)
+  );
+  await runGalleryTransaction(LEGACY_BLOB_STORE, "readwrite", (store) =>
+    store.delete(id)
+  );
 };
 
 export const clearGalleryStore = async () => {
-  await runGalleryTransaction("readwrite", (store) => store.clear());
+  await runGalleryTransaction(ASSET_BLOBS_STORE, "readwrite", (store) =>
+    store.clear()
+  );
+  await runGalleryTransaction(LEGACY_BLOB_STORE, "readwrite", (store) =>
+    store.clear()
+  );
+  await runGalleryTransaction(ASSETS_STORE, "readwrite", (store) =>
+    store.clear()
+  );
+};
+
+export const putReferenceRecord = async <T extends { id: string }>(
+  reference: T
+) => {
+  await runGalleryTransaction(REFERENCES_STORE, "readwrite", (store) =>
+    store.put(reference, reference.id)
+  );
+};
+
+export const listReferenceRecords = async <T>() =>
+  await runGalleryTransaction<T[]>(REFERENCES_STORE, "readonly", (store) =>
+    store.getAll()
+  );
+
+export const deleteReferenceRecord = async (id: string) => {
+  await runGalleryTransaction(REFERENCES_STORE, "readwrite", (store) =>
+    store.delete(id)
+  );
+};
+
+export const putPersistedJobRecord = async <T extends { id: string }>(
+  job: T
+) => {
+  await runGalleryTransaction(JOBS_STORE, "readwrite", (store) =>
+    store.put(job, job.id)
+  );
+};
+
+export const listPersistedJobRecords = async <T>() =>
+  await runGalleryTransaction<T[]>(JOBS_STORE, "readonly", (store) =>
+    store.getAll()
+  );
+
+export const deletePersistedJobRecord = async (id: string) => {
+  await runGalleryTransaction(JOBS_STORE, "readwrite", (store) =>
+    store.delete(id)
+  );
+};
+
+export const clearPersistedJobRecords = async () => {
+  await runGalleryTransaction(JOBS_STORE, "readwrite", (store) => store.clear());
 };

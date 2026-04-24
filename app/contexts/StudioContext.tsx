@@ -31,7 +31,10 @@ import {
 import {
     type GeneratedImage,
     type NavyUsageResponse,
+    type PersistedGenerationJob,
+    type ReferenceRole,
     type StoredMedia,
+    type StoredReference,
 } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
 import {
@@ -42,12 +45,34 @@ import {
     resolveImageSizingOptions,
     resolveImageGenerationModelPipeline,
 } from "@/lib/studio-generation";
+import { normalizeVeoDuration } from "@/lib/studio-validation";
 import {
     clearGalleryStore,
+    deleteGalleryBlob,
+    deletePersistedJobRecord,
+    deleteReferenceRecord,
     getGalleryBlob,
     isIndexedDbAvailable,
+    listPersistedJobRecords,
+    listReferenceRecords,
+    putPersistedJobRecord,
     putGalleryBlob,
+    putReferenceRecord,
 } from "@/lib/gallery-db";
+import {
+    clearAllProviderKeys,
+    detectLegacyProviderKeys,
+    hasDismissedLegacyKeyMigration,
+    markLegacyKeyMigrationDismissed,
+    persistProviderKeys,
+    readKeyStorageMode,
+    readProviderKeys,
+    removeLegacyProviderKeys,
+    writeKeyStorageMode,
+    type KeyStorageMode,
+    type LegacyProviderKey,
+    type ProviderKeys,
+} from "@/lib/client/key-storage";
 
 // --- Types ---
 
@@ -70,7 +95,11 @@ export type GenerationJob = {
     finishedAt?: string;
     error?: string;
     progress?: string;
+    remoteJobId?: string;
+    remoteOperationName?: string;
+    remoteStatus?: string;
     negativePrompt?: string;
+    referenceIds?: string[];
 
     imageCount?: number;
     imageAspect?: string;
@@ -114,8 +143,6 @@ type StorageSnapshot = {
     persistent: boolean | null;
 };
 
-type ProviderKeys = Record<Provider, string>;
-
 const STORAGE_KEYS = {
     provider: "studio_provider",
     mode: "studio_mode",
@@ -124,10 +151,7 @@ const STORAGE_KEYS = {
     settings: "studio_settings",
     generatedImages: "studio_generated_images",
     lastOutput: "studio_last_output",
-    keyGemini: "studio_api_key_gemini",
-    keyNavy: "studio_api_key_navy",
-    keyChutes: "studio_api_key_chutes",
-    keyOpenRouter: "studio_api_key_openrouter",
+    selectedReferences: "studio_selected_references",
     images: "studio_saved_images",
     openRouterModels: "studio_openrouter_models",
     navyImageModels: "studio_navy_image_models",
@@ -172,19 +196,11 @@ type StoredSettings = Partial<{
 }>;
 
 const MAX_CACHED_MODELS = 200;
-const MAX_SAVED_MEDIA = 12;
+const MAX_SAVED_MEDIA = 250;
 const MAX_JOB_HISTORY = 20;
+const MAX_REFERENCES = 24;
 
 // --- Utils ---
-
-const getKeyStorage = (provider: Provider) => {
-    if (provider === "gemini") return STORAGE_KEYS.keyGemini;
-    if (provider === "navy") return STORAGE_KEYS.keyNavy;
-    if (provider === "openrouter") return STORAGE_KEYS.keyOpenRouter;
-    return STORAGE_KEYS.keyChutes;
-};
-
-
 
 const readLocalStorage = <T,>(key: string, fallback: T): T => {
     if (typeof window === "undefined") return fallback;
@@ -220,10 +236,43 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                         (value): value is string => typeof value === "string"
                     )
                     : [];
+            const inputModalities = Array.isArray(record.inputModalities)
+                ? record.inputModalities.filter(
+                    (value): value is string => typeof value === "string"
+                )
+                : Array.isArray(record.input_modalities)
+                    ? record.input_modalities.filter(
+                        (value): value is string => typeof value === "string"
+                    )
+                    : [];
+            const endpoint = typeof record.endpoint === "string" ? record.endpoint : undefined;
+            const provider = typeof record.provider === "string" ? record.provider : undefined;
+            const premium = typeof record.premium === "boolean" ? record.premium : undefined;
+            const requiredPlan =
+                typeof record.requiredPlan === "string"
+                    ? record.requiredPlan
+                    : typeof record.required_plan === "string"
+                        ? record.required_plan
+                        : record.requiredPlan === null || record.required_plan === null
+                            ? null
+                            : undefined;
+            const tokenMultiplier =
+                typeof record.tokenMultiplier === "number"
+                    ? record.tokenMultiplier
+                    : typeof record.token_multiplier === "number"
+                        ? record.token_multiplier
+                        : undefined;
             return {
                 id,
                 label,
+                ...(provider ? { provider } : {}),
+                ...(endpoint ? { endpoint } : {}),
+                ...(inputModalities.length ? { inputModalities } : {}),
                 ...(outputModalities.length ? { outputModalities } : {}),
+                ...(typeof premium === "boolean" ? { premium } : {}),
+                ...(requiredPlan !== undefined ? { requiredPlan } : {}),
+                ...(typeof tokenMultiplier === "number" ? { tokenMultiplier } : {}),
+                ...(record.pricing !== undefined ? { pricing: record.pricing } : {}),
             };
         })
         .filter((item): item is ModelOption => !!item)
@@ -346,6 +395,32 @@ const buildGeneratedImages = (payload: unknown): GeneratedImage[] => {
         .filter((image): image is GeneratedImage => image !== null);
 };
 
+const errorMessageFromPayload = (payload: unknown, fallback: string) => {
+    if (!isRecord(payload)) return fallback;
+    const error = payload.error;
+    return typeof error === "string" && error.trim() ? error : fallback;
+};
+
+const toPersistedJob = (job: GenerationJob): PersistedGenerationJob => ({
+    id: job.id,
+    status: job.status,
+    mode: job.mode,
+    provider: job.provider,
+    model: job.model,
+    prompt: job.prompt,
+    createdAt: job.createdAt,
+    batchId: job.batchId,
+    batchCreatedAt: job.batchCreatedAt,
+    batchOrder: job.batchOrder,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    error: job.error,
+    progress: job.progress,
+    remoteJobId: job.remoteJobId,
+    remoteOperationName: job.remoteOperationName,
+    remoteStatus: job.remoteStatus,
+});
+
 // --- Context Interface ---
 
 interface StudioContextType {
@@ -359,6 +434,12 @@ interface StudioContextType {
     setApiKey: (k: string) => void;
     apiKeys: ProviderKeys;
     setApiKeyForProvider: (provider: Provider, key: string) => void;
+    keyStorageMode: KeyStorageMode;
+    setKeyStorageMode: React.Dispatch<React.SetStateAction<KeyStorageMode>>;
+    legacyProviderKeys: LegacyProviderKey[];
+    migrateLegacyProviderKeys: (mode?: KeyStorageMode) => void;
+    discardLegacyProviderKeys: () => void;
+    clearAllKeys: () => void;
     model: string;
     setModel: (m: string) => void;
 
@@ -465,12 +546,23 @@ interface StudioContextType {
     storageSnapshot: StorageSnapshot | null;
     storageError: string | null;
     refreshStorageEstimate: () => Promise<void>;
+    requestPersistentStorage: () => Promise<boolean>;
+
+    // References
+    references: StoredReference[];
+    selectedReferenceIds: string[];
+    selectedReferences: StoredReference[];
+    addReferenceFile: (file: File, role?: ReferenceRole) => Promise<void>;
+    removeReference: (id: string) => Promise<void>;
+    toggleReferenceSelection: (id: string) => void;
+    clearSelectedReferences: () => void;
 
     // Outputs
     generatedImages: GeneratedImage[];
     setGeneratedImages: React.Dispatch<React.SetStateAction<GeneratedImage[]>>;
     savedMedia: StoredMedia[];
     setSavedMedia: React.Dispatch<React.SetStateAction<StoredMedia[]>>;
+    deleteSavedMedia: (id: string) => Promise<void>;
     videoUrl: string | null;
     setVideoUrl: (s: string | null) => void;
     audioUrl: string | null;
@@ -529,6 +621,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         chutes: "",
         openrouter: "",
     });
+    const [keyStorageMode, setKeyStorageMode] = useState<KeyStorageMode>("session");
+    const [legacyProviderKeys, setLegacyProviderKeys] = useState<LegacyProviderKey[]>([]);
     const apiKey = apiKeys[provider] ?? "";
     const [model, setModel] = useState(DEFAULT_MODELS.gemini.image);
 
@@ -585,6 +679,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     // --- App Logic State ---
     const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
     const [savedMedia, setSavedMedia] = useState<StoredMedia[]>([]);
+    const [references, setReferences] = useState<StoredReference[]>([]);
+    const [selectedReferenceIds, setSelectedReferenceIds] = useState<string[]>([]);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [audioMimeType, setAudioMimeType] = useState<string | null>(null);
@@ -627,6 +723,38 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         },
         [provider, setApiKeyForProvider]
     );
+
+    const migrateLegacyProviderKeys = useCallback((modeOverride?: KeyStorageMode) => {
+        const nextMode = modeOverride ?? keyStorageMode;
+        const legacyKeys = detectLegacyProviderKeys();
+        const nextKeys: ProviderKeys = { ...apiKeys };
+        for (const legacyKey of legacyKeys) {
+            nextKeys[legacyKey.provider] = legacyKey.key;
+        }
+        setKeyStorageMode(nextMode);
+        setApiKeys(nextKeys);
+        persistProviderKeys(nextMode, nextKeys);
+        removeLegacyProviderKeys();
+        markLegacyKeyMigrationDismissed();
+        setLegacyProviderKeys([]);
+    }, [apiKeys, keyStorageMode]);
+
+    const discardLegacyProviderKeys = useCallback(() => {
+        removeLegacyProviderKeys();
+        markLegacyKeyMigrationDismissed();
+        setLegacyProviderKeys([]);
+    }, []);
+
+    const clearAllKeys = useCallback(() => {
+        clearAllProviderKeys();
+        setApiKeys({
+            gemini: "",
+            navy: "",
+            chutes: "",
+            openrouter: "",
+        });
+        setLegacyProviderKeys([]);
+    }, []);
 
     const refreshNavyCatalog = useCallback(async () => {
         const key = apiKeys.navy.trim();
@@ -706,6 +834,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             ),
         [imageModelOrder, model, modelSuggestions]
     );
+    const selectedReferences = useMemo(() => {
+        const selected = new Set(selectedReferenceIds);
+        return references.filter((reference) => selected.has(reference.id));
+    }, [references, selectedReferenceIds]);
 
     // --- Actions ---
 
@@ -808,16 +940,113 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    const addReferenceFile = useCallback(async (file: File, role: ReferenceRole = "general") => {
+        if (!file.type.startsWith("image/")) {
+            setErrorMessage("Only image references are supported.");
+            return;
+        }
+        const id = createId();
+        const blobKey = `reference:${id}`;
+        const objectUrl = URL.createObjectURL(file);
+        const entry: StoredReference = {
+            id,
+            role,
+            label: file.name,
+            dataUrl: objectUrl,
+            blobKey,
+            mimeType: file.type || "image/png",
+            createdAt: new Date().toISOString(),
+            size: file.size,
+        };
+
+        try {
+            if (idbAvailable) {
+                await putGalleryBlob(blobKey, file);
+                await putReferenceRecord({ ...entry, dataUrl: "" });
+            }
+            setReferences((prev) => [entry, ...prev].slice(0, MAX_REFERENCES));
+            setSelectedReferenceIds((prev) => [id, ...prev.filter((entryId) => entryId !== id)]);
+        } catch (error) {
+            URL.revokeObjectURL(objectUrl);
+            setErrorMessage(error instanceof Error ? error.message : "Reference save failed.");
+        }
+    }, [idbAvailable]);
+
+    const removeReference = useCallback(async (id: string) => {
+        setReferences((prev) => {
+            const target = prev.find((reference) => reference.id === id);
+            if (target?.dataUrl.startsWith("blob:")) URL.revokeObjectURL(target.dataUrl);
+            return prev.filter((reference) => reference.id !== id);
+        });
+        setSelectedReferenceIds((prev) => prev.filter((entryId) => entryId !== id));
+        try {
+            await deleteReferenceRecord(id);
+            await deleteGalleryBlob(`reference:${id}`);
+        } catch {
+            // Reference metadata cleanup is best-effort.
+        }
+    }, []);
+
+    const toggleReferenceSelection = useCallback((id: string) => {
+        setSelectedReferenceIds((prev) =>
+            prev.includes(id)
+                ? prev.filter((entryId) => entryId !== id)
+                : [...prev, id].slice(-MAX_REFERENCES)
+        );
+    }, []);
+
+    const clearSelectedReferences = useCallback(() => {
+        setSelectedReferenceIds([]);
+    }, []);
+
+    const buildSelectedReferencePayload = useCallback(async (ids = selectedReferenceIds) => {
+        const selected = new Set(ids);
+        const payload: Array<{ dataUrl: string; role?: string }> = [];
+        for (const reference of references.filter((entry) => selected.has(entry.id))) {
+            try {
+                const dataUrl = reference.dataUrl.startsWith("data:")
+                    ? reference.dataUrl
+                    : await fetchAsDataUrl(reference.dataUrl);
+                payload.push({ dataUrl, role: reference.role });
+            } catch {
+                // Skip references that can no longer be read from local storage.
+            }
+        }
+        return payload;
+    }, [references, selectedReferenceIds]);
+
+    const resolveVideoSourceImage = useCallback(async (ids = selectedReferenceIds) => {
+        if (videoImage) return videoImage;
+        const selected = new Set(ids);
+        const jobReferences = references.filter((reference) => selected.has(reference.id));
+        const source =
+            jobReferences.find((reference) => reference.role === "source_image") ??
+            jobReferences.find((reference) => reference.role === "first_frame") ??
+            jobReferences[0];
+        if (!source) return null;
+        try {
+            return source.dataUrl.startsWith("data:")
+                ? source.dataUrl
+                : await fetchAsDataUrl(source.dataUrl);
+        } catch {
+            return null;
+        }
+    }, [references, selectedReferenceIds, videoImage]);
+
     const generateImages = async (job: GenerationJob) => {
         startJob(job, "Generating image...");
         try {
             let images: GeneratedImage[] = [];
             let url = `/api/${job.provider}/image`;
             let body: Record<string, unknown> = {
-                apiKey: job.apiKey,
                 model: job.model,
                 prompt: job.prompt,
             };
+            const requestHeaders = {
+                "Content-Type": "application/json",
+                "x-user-api-key": job.apiKey,
+            };
+            const referenceImages = await buildSelectedReferencePayload(job.referenceIds);
             const imageSizing = resolveImageSizingOptions(job.provider, {
                 imageAspect: job.imageAspect,
                 imageSize: job.imageSize,
@@ -829,19 +1058,25 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     ...body,
                     ...imageSizing,
                     numberOfImages: job.imageCount,
+                    referenceImages,
                 };
             } else if (job.provider === "openrouter") {
                 body = {
                     ...body,
                     ...imageSizing,
                     outputModalities: job.outputModalities,
+                    referenceImages,
                 };
             } else if (job.provider === "navy") {
+                const sourceReference = referenceImages.find(
+                    (reference) => reference.role === "source_image"
+                ) ?? referenceImages[0];
                 body = {
                     ...body,
                     ...imageSizing,
                     numberOfImages: job.imageCount,
                     negativePrompt: job.negativePrompt,
+                    imageUrl: sourceReference?.dataUrl,
                 };
             } else {
                 url = "/api/chutes/image";
@@ -857,26 +1092,39 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 };
             }
 
-            const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-            });
-            const payload = await response.json();
-            if (!response.ok) {
-                throw new Error(payload?.error ?? "Image generation failed.");
+            let payload: Record<string, unknown> = {};
+            if (job.provider === "navy" && job.remoteJobId) {
+                payload = { id: job.remoteJobId };
+            } else {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: requestHeaders,
+                    body: JSON.stringify(body),
+                });
+                payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(errorMessageFromPayload(payload, "Image generation failed."));
+                }
             }
 
             if (job.provider === "navy") {
                 let navyPayload = payload;
-                if (typeof payload?.id === "string") {
+                const existingJobId = job.remoteJobId;
+                const submittedJobId =
+                    typeof payload?.id === "string" ? payload.id : existingJobId;
+                if (typeof submittedJobId === "string" && submittedJobId) {
+                    updateJob(job.id, {
+                        remoteJobId: submittedJobId,
+                        remoteStatus:
+                            typeof payload?.status === "string" ? payload.status : undefined,
+                    });
                     for (let attempt = 0; attempt < 60; attempt += 1) {
                         updateJob(job.id, {
                             progress: `Waiting for Navy image render (${attempt + 1}/60)...`,
                         });
                         await sleep(5000);
                         const pollResponse = await fetch(
-                            `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
+                            `/api/navy/image?id=${encodeURIComponent(submittedJobId)}`,
                             {
                                 headers: {
                                     "x-user-api-key": job.apiKey,
@@ -885,9 +1133,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         );
                         navyPayload = await pollResponse.json();
                         if (!pollResponse.ok) {
-                            throw new Error(
-                                navyPayload?.error ?? "Unable to poll Navy image job."
-                            );
+                            throw new Error(errorMessageFromPayload(navyPayload, "Unable to poll Navy image job."));
                         }
                         if (navyPayload?.done) {
                             break;
@@ -972,41 +1218,53 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         startJob(job, "Generating Video...");
         try {
             let response: Response;
+            const requestHeaders = {
+                "Content-Type": "application/json",
+                "x-user-api-key": job.apiKey,
+            };
+            const sourceImage = job.videoImage || await resolveVideoSourceImage(job.referenceIds);
+            const referenceImages = await buildSelectedReferencePayload(job.referenceIds);
 
             if (job.provider === "chutes") {
                 response = await fetch("/api/chutes/video", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: requestHeaders,
                     body: JSON.stringify({
-                        apiKey: job.apiKey,
                         prompt: job.prompt,
                         model: job.model,
-                        image: job.videoImage,
+                        image: sourceImage,
                         fps: job.chutesVideoFps,
                         guidance_scale_2: job.chutesVideoGuidanceScale,
                     }),
                 });
             } else if (job.provider === "gemini") {
-                const submitResponse = await fetch("/api/gemini/video", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        apiKey: job.apiKey,
-                        prompt: job.prompt,
-                        model: job.model,
-                        aspectRatio: job.videoAspect,
-                        resolution: job.videoResolution,
-                        durationSeconds: job.videoDuration,
-                        negativePrompt: job.negativePrompt,
-                    }),
-                });
-                const submitPayload = await submitResponse.json();
-                if (!submitResponse.ok) {
-                    throw new Error(submitPayload?.error ?? "Video generation failed.");
-                }
+                let operationName = job.remoteOperationName ?? "";
+                if (!operationName) {
+                    const submitResponse = await fetch("/api/gemini/video", {
+                        method: "POST",
+                        headers: requestHeaders,
+                        body: JSON.stringify({
+                            prompt: job.prompt,
+                            model: job.model,
+                            aspectRatio: job.videoAspect,
+                            resolution: job.videoResolution,
+                            durationSeconds: job.videoDuration,
+                            negativePrompt: job.negativePrompt,
+                            sourceImage,
+                            referenceImages,
+                        }),
+                    });
+                    const submitPayload = await submitResponse.json();
+                    if (!submitResponse.ok) {
+                        throw new Error(errorMessageFromPayload(submitPayload, "Video generation failed."));
+                    }
 
-                const operationName =
-                    typeof submitPayload?.name === "string" ? submitPayload.name : "";
+                    operationName =
+                        typeof submitPayload?.name === "string" ? submitPayload.name : "";
+                    if (operationName) {
+                        updateJob(job.id, { remoteOperationName: operationName });
+                    }
+                }
                 if (!operationName) {
                     throw new Error("No Veo operation name returned.");
                 }
@@ -1041,29 +1299,36 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
                 response = await fetch("/api/gemini/video/download", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: requestHeaders,
                     body: JSON.stringify({
-                        apiKey: job.apiKey,
                         uri: videoUri,
                     }),
                 });
             } else if (job.provider === "navy") {
-                const submitResponse = await fetch("/api/navy/video", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        apiKey: job.apiKey,
-                        prompt: job.prompt,
-                        model: job.model,
-                        imageUrl: job.videoImage,
-                        negativePrompt: job.negativePrompt,
-                        seconds: Number(job.videoDuration),
-                        aspectRatio: job.videoAspect,
-                    }),
-                });
-                const submitPayload = await submitResponse.json();
-                if (!submitResponse.ok) {
-                    throw new Error(submitPayload?.error ?? "Video generation failed.");
+                let submitPayload: Record<string, unknown> = {};
+                if (job.remoteJobId) {
+                    submitPayload = { id: job.remoteJobId };
+                } else {
+                    const submitResponse = await fetch("/api/navy/video", {
+                        method: "POST",
+                        headers: requestHeaders,
+                        body: JSON.stringify({
+                            prompt: job.prompt,
+                            model: job.model,
+                            imageUrl: sourceImage,
+                            negativePrompt: job.negativePrompt,
+                            seconds: Number(job.videoDuration),
+                            aspectRatio: job.videoAspect,
+                        }),
+                    });
+                    submitPayload = await submitResponse.json();
+                    if (!submitResponse.ok) {
+                        throw new Error(
+                            typeof submitPayload?.error === "string"
+                                ? submitPayload.error
+                                : "Video generation failed."
+                        );
+                    }
                 }
 
                 let remoteVideoUrl =
@@ -1071,9 +1336,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         ? submitPayload.videoUrl
                         : "";
                 const generationId =
-                    typeof submitPayload?.id === "string" ? submitPayload.id : "";
+                    typeof submitPayload?.id === "string"
+                        ? submitPayload.id
+                        : job.remoteJobId ?? "";
                 if (!generationId && !remoteVideoUrl) {
                     throw new Error("No Navy generation id returned.");
+                }
+                if (generationId) {
+                    updateJob(job.id, { remoteJobId: generationId });
                 }
 
                 if (!remoteVideoUrl) {
@@ -1195,9 +1465,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 const isCsm = normalizedModel === "csm-1b";
                 const response = await fetch("/api/chutes/audio", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-user-api-key": job.apiKey,
+                    },
                     body: JSON.stringify({
-                        apiKey: job.apiKey,
                         prompt: job.prompt,
                         model: job.model,
                         speed: isCsm ? undefined : job.chutesTtsSpeed,
@@ -1262,9 +1534,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (job.provider === "navy") {
                 const response = await fetch("/api/navy/tts", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-user-api-key": job.apiKey,
+                    },
                     body: JSON.stringify({
-                        apiKey: job.apiKey,
                         model: job.model,
                         input: job.prompt,
                         voice: job.ttsVoice,
@@ -1356,11 +1630,22 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const handleGenerate = () => {
         if (!apiKey.trim()) { setErrorMessage("API Key required"); return; }
         if (!prompt.trim()) { setErrorMessage("Prompt required"); return; }
-        if (mode === "video" && provider === "chutes" && !videoImage) {
-            setErrorMessage("Chutes video generation requires a source image.");
+        if (mode === "video" && provider === "chutes" && !videoImage && selectedReferences.length === 0) {
+            setErrorMessage("Chutes video generation requires a source image or selected reference.");
             return;
         }
         const batchCreatedAt = new Date().toISOString();
+        const effectiveVideoDuration =
+            mode === "video" && provider === "gemini"
+                ? normalizeVeoDuration(videoDuration, {
+                    resolution: videoResolution,
+                    hasReferenceImages: selectedReferenceIds.length > 0 || Boolean(videoImage),
+                })
+                : videoDuration;
+        if (effectiveVideoDuration !== videoDuration) {
+            setVideoDuration(effectiveVideoDuration);
+            setStatusMessage("Veo reference, 1080p, and 4K workflows use 8-second renders.");
+        }
         const modelsToRun =
             mode === "image" && imagePipelineEnabled
                 ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
@@ -1394,9 +1679,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 chutesVideoFps,
                 chutesVideoGuidanceScale,
                 videoImage: videoImage || undefined,
+                referenceIds: selectedReferenceIds,
                 videoAspect,
                 videoResolution,
-                videoDuration,
+                videoDuration: effectiveVideoDuration,
                 ttsVoice,
                 ttsFormat,
                 ttsSpeed,
@@ -1422,8 +1708,27 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     const clearGallery = () => {
         setSavedMedia([]);
-        clearGalleryStore().catch(console.error);
+        for (const url of galleryUrlsRef.current.values()) {
+            URL.revokeObjectURL(url);
+        }
+        galleryUrlsRef.current.clear();
+        clearGalleryStore().catch(() => {
+            setStorageError("Unable to clear all gallery blobs from IndexedDB.");
+        });
     };
+
+    const deleteSavedMedia = useCallback(async (id: string) => {
+        setSavedMedia((prev) => {
+            const target = prev.find((item) => item.id === id);
+            if (target?.dataUrl.startsWith("blob:")) URL.revokeObjectURL(target.dataUrl);
+            return prev.filter((item) => item.id !== id);
+        });
+        try {
+            await deleteGalleryBlob(id);
+        } catch {
+            setStorageError("Unable to remove the asset blob from IndexedDB.");
+        }
+    }, []);
 
     const saveChatImages = async (payload: {
         images: { id: string; dataUrl: string; mimeType: string; model?: string }[];
@@ -1466,6 +1771,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             setStorageError(error instanceof Error ? error.message : "Unable to read storage usage.");
         }
     }, []);
+
+    const requestPersistentStorage = useCallback(async () => {
+        if (typeof navigator === "undefined" || !navigator.storage?.persist) {
+            setStorageError("Persistent storage requests are not available.");
+            return false;
+        }
+        try {
+            const granted = await navigator.storage.persist();
+            await refreshStorageEstimate();
+            return granted;
+        } catch (error) {
+            setStorageError(error instanceof Error ? error.message : "Unable to request persistent storage.");
+            return false;
+        }
+    }, [refreshStorageEstimate]);
 
     const refreshNavyUsage = useCallback(async () => {
         if (provider !== "navy") return;
@@ -1544,7 +1864,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch Chutes models");
-            const models = sanitizeModelOptions(payload);
+            const models = sanitizeModelOptions(payload?.data ?? payload);
             if (models.length) setChutesChatModels(models);
         } catch (error) {
             setChutesChatModelsError(error instanceof Error ? error.message : "Error");
@@ -1574,20 +1894,29 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
         const storedMedia = readLocalStorage<StoredMediaRecord[]>(STORAGE_KEYS.images, []);
         const storedChatProvider = readLocalStorage<ChatProvider | null>(STORAGE_KEYS.chatProvider, null);
-        const storedKeys: ProviderKeys = {
-            gemini: readLocalStorage<string>(STORAGE_KEYS.keyGemini, ""),
-            navy: readLocalStorage<string>(STORAGE_KEYS.keyNavy, ""),
-            chutes: readLocalStorage<string>(STORAGE_KEYS.keyChutes, ""),
-            openrouter: readLocalStorage<string>(STORAGE_KEYS.keyOpenRouter, ""),
-        };
+        const storedKeyStorageMode = readKeyStorageMode();
+        const storedKeys = readProviderKeys(storedKeyStorageMode);
+        const legacyKeys = hasDismissedLegacyKeyMigration()
+            ? []
+            : detectLegacyProviderKeys();
         const storedSettings = readLocalStorage<StoredSettings>(STORAGE_KEYS.settings, {});
         const storedGeneratedImages = readLocalStorage<GeneratedImage[]>(STORAGE_KEYS.generatedImages, []);
         const storedLastOutput = readLocalStorage<unknown>(STORAGE_KEYS.lastOutput, null);
+        const storedSelectedReferences = readLocalStorage<string[]>(STORAGE_KEYS.selectedReferences, []);
 
         if (storedProvider) setProvider(storedProvider);
         if (storedMode) setMode(storedMode);
         if (storedChatProvider && isChatProvider(storedChatProvider)) setChatProvider(storedChatProvider);
+        setKeyStorageMode(storedKeyStorageMode);
         setApiKeys(storedKeys);
+        setLegacyProviderKeys(legacyKeys);
+        if (Array.isArray(storedSelectedReferences)) {
+            setSelectedReferenceIds(
+                storedSelectedReferences.filter(
+                    (entry): entry is string => typeof entry === "string"
+                )
+            );
+        }
 
         const storedOpenRouterModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.openRouterModels, []);
         if (storedOpenRouterModels.length) setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
@@ -1776,6 +2105,57 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         };
         void loadSavedMedia();
 
+        const loadReferences = async () => {
+            if (!idbAvailable) return;
+            try {
+                const storedReferences = await listReferenceRecords<
+                    Omit<StoredReference, "dataUrl"> & { dataUrl?: string }
+                >();
+                const entries: StoredReference[] = [];
+                for (const reference of storedReferences) {
+                    const blob = await getGalleryBlob(reference.blobKey);
+                    if (!blob) continue;
+                    const url = URL.createObjectURL(blob);
+                    galleryUrlsRef.current.set(reference.blobKey, url);
+                    entries.push({
+                        ...reference,
+                        dataUrl: url,
+                        mimeType: reference.mimeType ?? blob.type,
+                    });
+                }
+                if (entries.length) setReferences(entries.slice(0, MAX_REFERENCES));
+            } catch {
+                // Reference restore is best-effort when IndexedDB is unavailable.
+            }
+        };
+        void loadReferences();
+
+        const loadPersistedJobs = async () => {
+            if (!idbAvailable) return;
+            try {
+                const persistedJobs = await listPersistedJobRecords<PersistedGenerationJob>();
+                const restorable = persistedJobs
+                    .filter(
+                        (job) =>
+                            (job.status === "queued" || job.status === "running") &&
+                            (job.remoteJobId || job.remoteOperationName)
+                    )
+                    .map<GenerationJob>((job) => ({
+                        ...job,
+                        status: "queued",
+                        apiKey: storedKeys[job.provider] ?? "",
+                        saveToGallery: true,
+                        progress: job.progress ?? "Restoring remote job polling...",
+                    }));
+                if (restorable.length) {
+                    setJobs((prev) => [...prev, ...restorable]);
+                }
+            } catch {
+                // Persisted remote jobs are a convenience, not a hard dependency.
+            }
+        };
+        void loadPersistedJobs();
+
     }, [idbAvailable]);
 
     useEffect(() => {
@@ -1786,17 +2166,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
-        (Object.entries(apiKeys) as [Provider, string][]).forEach(([entry, key]) => {
-            const storageKey = getKeyStorage(entry);
-            if (key) writeLocalStorage(storageKey, JSON.stringify(key));
-            else window.localStorage.removeItem(storageKey);
-        });
-    }, [apiKeys, hydrated]);
+        writeKeyStorageMode(keyStorageMode);
+        persistProviderKeys(keyStorageMode, apiKeys);
+    }, [apiKeys, keyStorageMode, hydrated]);
 
     useEffect(() => {
         if (!hydrated) return;
         writeLocalStorage(STORAGE_KEYS.chatProvider, JSON.stringify(chatProvider));
     }, [chatProvider, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.selectedReferences, JSON.stringify(selectedReferenceIds));
+    }, [selectedReferenceIds, hydrated]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -1959,6 +2341,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [navyTtsModels, hydrated]);
 
     useEffect(() => {
+        if (!hydrated || !idbAvailable) return;
+        for (const job of jobs) {
+            const hasRemoteHandle = Boolean(job.remoteJobId || job.remoteOperationName);
+            if (hasRemoteHandle && (job.status === "queued" || job.status === "running")) {
+                void putPersistedJobRecord(toPersistedJob(job));
+            }
+            if (job.status === "success" || job.status === "error") {
+                void deletePersistedJobRecord(job.id);
+            }
+        }
+    }, [jobs, hydrated, idbAvailable]);
+
+    useEffect(() => {
         if (!hydrated) return;
         writeLocalStorage(STORAGE_KEYS.chutesChatModels, JSON.stringify(chutesChatModels));
     }, [chutesChatModels, hydrated]);
@@ -2064,12 +2459,27 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     }, [savedMedia, lastOutput, hydrated, videoUrl, audioUrl, generatedImages.length]);
 
+    useEffect(() => {
+        const galleryUrls = galleryUrlsRef.current;
+        return () => {
+            for (const url of galleryUrls.values()) {
+                URL.revokeObjectURL(url);
+            }
+            galleryUrls.clear();
+        };
+    }, []);
+
     const value: StudioContextType = {
         hydrated,
         provider, setProvider,
         mode, setMode,
         apiKey, setApiKey,
         apiKeys, setApiKeyForProvider,
+        keyStorageMode, setKeyStorageMode,
+        legacyProviderKeys,
+        migrateLegacyProviderKeys,
+        discardLegacyProviderKeys,
+        clearAllKeys,
         model, setModel,
         prompt, setPrompt,
         negativePrompt, setNegativePrompt,
@@ -2115,9 +2525,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         errorMessage, setErrorMessage,
         modelsLoading, modelsError,
         navyUsage, navyUsageError, navyUsageLoading, navyUsageUpdatedAt, refreshNavyUsage,
-        storageSnapshot, storageError, refreshStorageEstimate,
+        storageSnapshot, storageError, refreshStorageEstimate, requestPersistentStorage,
+        references,
+        selectedReferenceIds,
+        selectedReferences,
+        addReferenceFile,
+        removeReference,
+        toggleReferenceSelection,
+        clearSelectedReferences,
         generatedImages, setGeneratedImages,
-        savedMedia, setSavedMedia,
+        savedMedia, setSavedMedia, deleteSavedMedia,
         videoUrl, setVideoUrl,
         audioUrl, setAudioUrl,
         audioMimeType, setAudioMimeType,
