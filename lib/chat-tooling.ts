@@ -174,13 +174,23 @@ export const buildChatCompletionPayload = ({
 export const toChatCompletionMessages = (
   messages: ChatCompletionMessageInput[],
   { includeReasoningContent = false }: ChatCompletionMessagesOptions = {}
-) =>
-  messages.flatMap((message) => {
+) => {
+  const pendingToolCallIds = new Set<string>();
+  return messages.flatMap((message) => {
     if (
       message.role === "tool" &&
       /^Invoking\s+[a-z0-9_]+\.\.\.$/i.test(message.content.trim())
     ) {
       return [];
+    }
+
+    if (message.role === "tool") {
+      const toolCallId =
+        typeof message.toolCallId === "string" ? message.toolCallId : "";
+      if (!toolCallId || !pendingToolCallIds.has(toolCallId)) {
+        return [];
+      }
+      pendingToolCallIds.delete(toolCallId);
     }
 
     const hasToolCalls =
@@ -204,6 +214,13 @@ export const toChatCompletionMessages = (
 
     if (hasToolCalls) {
       base.tool_calls = message.toolCalls;
+      for (const toolCall of message.toolCalls ?? []) {
+        if (!toolCall || typeof toolCall !== "object") continue;
+        const id = (toolCall as Record<string, unknown>).id;
+        if (typeof id === "string" && id) {
+          pendingToolCallIds.add(id);
+        }
+      }
     }
 
     if (message.role === "tool") {
@@ -213,6 +230,7 @@ export const toChatCompletionMessages = (
 
     return [base];
   });
+};
 
 const extractTaggedBlock = (assistantContent: string, labels: string[]) => {
   for (const label of labels) {

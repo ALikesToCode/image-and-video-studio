@@ -71,6 +71,7 @@ import {
   buildProviderPolicyHintForImageModels,
   isFluxModel,
   prepareImageModelRequests,
+  resolveNavyChatImageSizing,
   summarizeImageModelPrompts,
 } from "@/lib/studio-generation";
 
@@ -1229,7 +1230,7 @@ ${defaultPrompt}`;
       const size = getStringArg(finalArgs, ["size"]);
       const quality = getStringArg(finalArgs, ["quality"]);
       const style = getStringArg(finalArgs, ["style"]);
-      if (size) baseBody.size = size;
+      if (size) Object.assign(baseBody, resolveNavyChatImageSizing(size));
       if (quality) baseBody.quality = quality;
       if (style) baseBody.style = style;
       if (numberOfImages && numberOfImages > 0) {
@@ -1941,6 +1942,15 @@ ${defaultPrompt}`;
                   arguments: JSON.stringify(fallbackToolCall.arguments),
                 },
               };
+              const assistantWithSyntheticToolCall: ChatMessage = {
+                ...finalizedAssistantMessage,
+                toolCalls: [syntheticToolCall],
+              };
+              currentMessages = [
+                ...currentMessages.slice(0, -1),
+                assistantWithSyntheticToolCall,
+              ];
+              setMessages(currentMessages);
               const toolMessages = await handleToolCalls(
                 [syntheticToolCall],
                 undefined,

@@ -71,6 +71,11 @@ type ImageSizingOptions = {
   size?: string;
 };
 
+type NavyChatImageSizing = {
+  aspectRatio?: string;
+  size?: string;
+};
+
 const normalizeModalities = (modalities?: string[]) =>
   (modalities ?? []).map((value) => value.toLowerCase());
 
@@ -136,6 +141,27 @@ const NEGATIVE_PROMPT_UPGRADES: Array<[RegExp, string]> = [
 
 const ADULT_IMAGE_PROMPT_PATTERN =
   /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
+const NAVY_IMAGE_ASPECT_RATIOS = new Set([
+  "1:1",
+  "16:9",
+  "9:16",
+  "4:3",
+  "3:4",
+  "3:2",
+  "2:3",
+  "2:1",
+  "1:2",
+  "19.5:9",
+  "9:19.5",
+  "20:9",
+  "9:20",
+  "4:5",
+  "5:4",
+  "auto",
+  "match_input_image",
+  "custom",
+]);
+const NAVY_IMAGE_PIXEL_SIZES = new Set(["1024x1024", "512x512", "768x768"]);
 
 export const isImagenModel = (model: string) => model.startsWith("imagen-");
 
@@ -352,6 +378,18 @@ export const resolveImageSizingOptions = (
   }
 
   return sizing;
+};
+
+export const resolveNavyChatImageSizing = (value: string): NavyChatImageSizing => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return {};
+  if (NAVY_IMAGE_ASPECT_RATIOS.has(normalized)) {
+    return { aspectRatio: normalized };
+  }
+  if (NAVY_IMAGE_PIXEL_SIZES.has(normalized)) {
+    return { size: normalized };
+  }
+  return {};
 };
 
 const sanitizeReferenceImages = (

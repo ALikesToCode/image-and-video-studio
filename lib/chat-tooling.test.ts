@@ -325,6 +325,39 @@ test("Chat completion messages drop local tool progress placeholders", () => {
   ]);
 });
 
+test("Chat completion messages drop orphaned tool responses from older synthetic fallback runs", () => {
+  const messages = toChatCompletionMessages(
+    [
+      {
+        role: "assistant",
+        content: "I drafted the image prompt.",
+      },
+      {
+        role: "tool",
+        content: "Generated 1 image(s) using flux.",
+        toolCallId: "synthetic-call-1",
+        name: "generate_image",
+      },
+      {
+        role: "user",
+        content: "Continue.",
+      },
+    ],
+    { includeReasoningContent: true }
+  );
+
+  assert.deepEqual(messages, [
+    {
+      role: "assistant",
+      content: "I drafted the image prompt.",
+    },
+    {
+      role: "user",
+      content: "Continue.",
+    },
+  ]);
+});
+
 test("Chat messages omit UI-only thinking without a tool call", () => {
   assert.deepEqual(
     toChatCompletionMessages(

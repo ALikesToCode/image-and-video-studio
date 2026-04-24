@@ -19,6 +19,7 @@ import {
   resolveImageGenerationModelPipeline,
   resolveImageSizingOptions,
   resolveActiveImageToolModels,
+  resolveNavyChatImageSizing,
   groupNavyModelsByCapability,
   isLikelyImagePolicyError,
   isNavyGenerationPending,
@@ -520,6 +521,17 @@ test("Explicit image sizing preserves the selected override values", () => {
       size: "1024x1024",
     }
   );
+});
+
+test("Navy chat image sizing ignores composition text and keeps valid dimensions", () => {
+  assert.deepEqual(resolveNavyChatImageSizing("16:9"), {
+    aspectRatio: "16:9",
+  });
+  assert.deepEqual(resolveNavyChatImageSizing("1024x1024"), {
+    size: "1024x1024",
+  });
+  assert.deepEqual(resolveNavyChatImageSizing("medium-wide shot"), {});
+  assert.deepEqual(resolveNavyChatImageSizing("slightly low angle"), {});
 });
 
 test("Navy model catalog is normalized into image, video, and TTS groups", () => {
