@@ -118,6 +118,16 @@ const imageDownloadError = () =>
     { status: 502 }
   );
 
+const imageJobFailure = (data: unknown) =>
+  Response.json(
+    { error: providerErrorMessage(data, "Image generation job failed.") },
+    { status: 502 }
+  );
+
+const isFailedNavyGenerationStatus = (status: unknown) =>
+  typeof status === "string" &&
+  /^(failed|failure|error|errored|cancelled|canceled)$/i.test(status.trim());
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
@@ -198,6 +208,9 @@ export async function POST(req: Request) {
 
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (isFailedNavyGenerationStatus(dataRecord.status)) {
+    return imageJobFailure(data);
+  }
   if (typeof dataRecord.id === "string" && !Array.isArray(dataRecord.data)) {
     return Response.json({ id: dataRecord.id, status: dataRecord.status ?? null });
   }
@@ -257,6 +270,9 @@ export async function GET(req: Request) {
 
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  if (isFailedNavyGenerationStatus(dataRecord.status)) {
+    return imageJobFailure(data);
+  }
   if (isNavyGenerationPending(typeof dataRecord.status === "string" ? dataRecord.status : null)) {
     return Response.json({ done: false, status: dataRecord.status });
   }

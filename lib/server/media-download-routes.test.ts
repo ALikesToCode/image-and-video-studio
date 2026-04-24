@@ -327,6 +327,73 @@ test("Navy image route treats poll rate limits as pending jobs", async () => {
   }
 });
 
+test("Navy image route returns upstream failed job messages", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      id: "job_failed",
+      status: "failed",
+      error: {
+        code: "job_failed",
+        message: "No image data received, did the output get flagged as NSFW?",
+      },
+    });
+
+  try {
+    const response = await navyImageGet(
+      new Request("https://studio.test/api/navy/image?id=job_failed", {
+        headers: {
+          "x-user-api-key": "navy-secret",
+        },
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.equal(
+      payload.error,
+      "No image data received, did the output get flagged as NSFW?"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy image route returns immediate failed job messages", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      id: "job_failed",
+      status: "failed",
+      error: {
+        code: "job_failed",
+        message: "aspect_ratio must be one of the supported values",
+      },
+    });
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "flux",
+          prompt: "Generate an image.",
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.equal(payload.error, "aspect_ratio must be one of the supported values");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route rejects untrusted generated image hosts before fetch", async () => {
   const originalFetch = globalThis.fetch;
   const calls: string[] = [];
