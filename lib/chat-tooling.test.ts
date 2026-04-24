@@ -200,15 +200,18 @@ test("Navy chat messages pass assistant reasoning content back for thinking-mode
   ]);
 });
 
-test("Chat messages omit UI-only thinking unless reasoning passthrough is enabled", () => {
+test("Chat messages omit UI-only thinking without a tool call", () => {
   assert.deepEqual(
-    toChatCompletionMessages([
-      {
-        role: "assistant",
-        content: "Done.",
-        thinking: "Hidden provider reasoning.",
-      },
-    ]),
+    toChatCompletionMessages(
+      [
+        {
+          role: "assistant",
+          content: "Done.",
+          thinking: "Hidden provider reasoning.",
+        },
+      ],
+      { includeReasoningContent: true }
+    ),
     [
       {
         role: "assistant",

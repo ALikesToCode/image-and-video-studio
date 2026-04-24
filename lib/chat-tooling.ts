@@ -137,6 +137,10 @@ export const toChatCompletionMessages = (
   { includeReasoningContent = false }: ChatCompletionMessagesOptions = {}
 ) =>
   messages.map((message) => {
+    const hasToolCalls =
+      message.role === "assistant" &&
+      Array.isArray(message.toolCalls) &&
+      message.toolCalls.length > 0;
     const base: Record<string, unknown> = {
       role: message.role,
       content: message.content,
@@ -145,17 +149,14 @@ export const toChatCompletionMessages = (
     if (
       includeReasoningContent &&
       message.role === "assistant" &&
+      hasToolCalls &&
       typeof message.thinking === "string" &&
       message.thinking.trim()
     ) {
       base.reasoning_content = message.thinking;
     }
 
-    if (
-      message.role === "assistant" &&
-      Array.isArray(message.toolCalls) &&
-      message.toolCalls.length
-    ) {
+    if (hasToolCalls) {
       base.tool_calls = message.toolCalls;
     }
 
