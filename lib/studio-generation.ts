@@ -931,13 +931,19 @@ export const buildNavyImageGenerationPayload = ({
   aspectRatio,
 }: NavyImageGenerationInput) => {
   const preparedPrompt = prepareImagePromptForModel(model, prompt, negativePrompt);
+  const promptWithNegativeGuidance = preparedPrompt.negativePrompt
+    ? appendPromptNote(
+        preparedPrompt.prompt,
+        `Avoid these visual issues: ${preparedPrompt.negativePrompt}.`
+      )
+    : preparedPrompt.prompt;
   const shouldPreferAspectRatio =
     typeof aspectRatio === "string" && aspectRatio.trim() !== "" && aspectRatio !== "1:1";
   const isLikelyVideoModel = NAVY_VIDEO_MODEL_PATTERN.test(model);
 
   return {
   model,
-  prompt: preparedPrompt.prompt,
+  prompt: promptWithNegativeGuidance,
   ...(!shouldPreferAspectRatio && size ? { size } : {}),
   ...(typeof numberOfImages === "number" && numberOfImages > 0
     ? { n: numberOfImages }
@@ -945,9 +951,6 @@ export const buildNavyImageGenerationPayload = ({
   ...(quality || !isLikelyVideoModel ? { quality: quality ?? "medium" } : {}),
   ...(style ? { style } : {}),
   ...(imageUrl ? { image_url: imageUrl } : {}),
-  ...(preparedPrompt.negativePrompt
-    ? { negative_prompt: preparedPrompt.negativePrompt }
-    : {}),
   ...(typeof seed === "number" ? { seed } : {}),
   ...(typeof seconds === "number" ? { seconds } : {}),
   ...(typeof sync === "boolean" ? { sync } : {}),

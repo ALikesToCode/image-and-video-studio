@@ -220,6 +220,18 @@ test("Navy image payload maps OpenAI-compatible fields to Navy API fields", () =
   assert.match(payload.prompt, /clean surfaces without embedded typography or branding/i);
 });
 
+test("Navy image payload folds negative prompts into prompt text for non-Flux models", () => {
+  const payload = buildNavyImageGenerationPayload({
+    model: "gpt-image-1.5",
+    prompt: "A polished anime apartment lobby scene.",
+    negativePrompt: "watermark, bad hands",
+  });
+
+  assert.equal("negative_prompt" in payload, false);
+  assert.match(payload.prompt, /A polished anime apartment lobby scene\./i);
+  assert.match(payload.prompt, /Avoid these visual issues: watermark, bad hands\./i);
+});
+
 test("Flux prompt preparation rewrites structured prompts into positive natural language", () => {
   const prepared = prepareImagePromptForModel(
     "flux",
