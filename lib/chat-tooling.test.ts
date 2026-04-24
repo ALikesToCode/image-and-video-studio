@@ -7,6 +7,7 @@ import {
   detectForcedToolCall,
   isDeepSeekV4Model,
   normalizeDeepSeekReasoningEffort,
+  normalizeImageToolModelRequest,
   repairImageToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
@@ -104,6 +105,30 @@ test("Image tool argument repair leaves valid image prompts intact", () => {
     "High-detail anime portrait in a neon arcade, cinematic rim light."
   );
   assert.equal(repaired.negative_prompt, "watermark, bad hands");
+});
+
+test("Flux image tool repair prefers the assistant draft when tool args echo the raw request", () => {
+  const userPrompt = `Create a high-detail modern anime illustration.
+
+Background/setting: A sleek apartment lobby.
+Main character (focus): Three figures at the entrance.`;
+  const repaired = repairImageToolArguments(
+    {
+      prompt: userPrompt,
+      model: "flux",
+    },
+    {
+      assistantContent:
+        "Final Flux prompt: modern anime lobby entrance scene, three sharply composed figures, cool marble reflections, warm doorway rim light.",
+      userPrompt,
+    },
+    { preferAssistantPrompt: true }
+  );
+
+  assert.equal(
+    repaired.prompt,
+    "modern anime lobby entrance scene, three sharply composed figures, cool marble reflections, warm doorway rim light."
+  );
 });
 
 test("DeepSeek-family chat payloads omit explicit tool_choice while keeping tools", () => {
@@ -241,6 +266,65 @@ test("Navy chat messages pass assistant reasoning content back for thinking-mode
   ]);
 });
 
+test("Chat completion messages drop local tool progress placeholders", () => {
+  const messages = toChatCompletionMessages(
+    [
+      {
+        role: "assistant",
+        content: "",
+        thinking: "Need image generation.",
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "generate_image",
+              arguments: "{\"prompt\":\"sky\"}",
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: "Invoking generate_image...",
+        toolCallId: "call_1",
+        name: "generate_image",
+      },
+      {
+        role: "tool",
+        content: "Generated 1 image(s) using flux.",
+        toolCallId: "call_1",
+        name: "generate_image",
+      },
+    ],
+    { includeReasoningContent: true }
+  );
+
+  assert.deepEqual(messages, [
+    {
+      role: "assistant",
+      content: "",
+      reasoning_content: "Need image generation.",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "generate_image",
+            arguments: "{\"prompt\":\"sky\"}",
+          },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: "Generated 1 image(s) using flux.",
+      tool_call_id: "call_1",
+      name: "generate_image",
+    },
+  ]);
+});
+
 test("Chat messages omit UI-only thinking without a tool call", () => {
   assert.deepEqual(
     toChatCompletionMessages(
@@ -285,6 +369,33 @@ test("Requested image models stay pinned when a non-default model is explicitly 
       availableModels: ["flux", "gpt-image-1.5"],
     }),
     ["gpt-image-1.5"]
+  );
+});
+
+test("Chat image model requests ignore model drift unless the user asked for that model", () => {
+  assert.equal(
+    normalizeImageToolModelRequest({
+      requestedModel: "grok-imagine",
+      defaultModel: "flux",
+      userPrompt: "Create a high-detail modern anime illustration.",
+    }),
+    ""
+  );
+  assert.equal(
+    normalizeImageToolModelRequest({
+      requestedModel: "grok-imagine",
+      defaultModel: "flux",
+      userPrompt: "Use grok imagine for this image.",
+    }),
+    "grok-imagine"
+  );
+  assert.equal(
+    normalizeImageToolModelRequest({
+      requestedModel: "flux",
+      defaultModel: "flux",
+      userPrompt: "Create a high-detail modern anime illustration.",
+    }),
+    "flux"
   );
 });
 

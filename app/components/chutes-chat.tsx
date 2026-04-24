@@ -59,6 +59,7 @@ import {
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
   isDeepSeekV4Model,
+  normalizeImageToolModelRequest,
   repairImageToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
@@ -68,6 +69,7 @@ import {
 } from "@/lib/chat-tooling";
 import {
   buildProviderPolicyHintForImageModels,
+  isFluxModel,
   prepareImageModelRequests,
   summarizeImageModelPrompts,
 } from "@/lib/studio-generation";
@@ -1187,16 +1189,19 @@ ${defaultPrompt}`;
       reader.readAsDataURL(blob);
     });
 
-  const runGenerateImage = async (args: Record<string, unknown>) => {
+  const runGenerateImage = async (
+    args: Record<string, unknown>,
+    context?: { assistantContent: string; userPrompt: string }
+  ) => {
     if (!apiKey.trim()) {
       throw new Error("Missing API key for image tool.");
     }
-    const prompt = getStringArg(args, ["prompt"]);
-    if (!prompt) {
-      throw new Error("Tool call missing prompt.");
-    }
-    const negativePrompt = getStringArg(args, ["negative_prompt"]);
-    const requestedModel = getStringArg(args, ["model"]);
+    const rawRequestedModel = getStringArg(args, ["model"]);
+    const requestedModel = normalizeImageToolModelRequest({
+      requestedModel: rawRequestedModel,
+      defaultModel: toolImageModel,
+      userPrompt: context?.userPrompt ?? "",
+    });
     const modelOverride = requestedModel || toolImageModel;
     const modelsToRun = resolveRequestedImageModels({
       requestedModel,
@@ -1208,13 +1213,22 @@ ${defaultPrompt}`;
     if (!modelsToRun.length) {
       throw new Error("No image models are available for the image tool.");
     }
+    const finalArgs =
+      context && modelsToRun.some(isFluxModel)
+        ? repairImageToolArguments(args, context, { preferAssistantPrompt: true })
+        : args;
+    const prompt = getStringArg(finalArgs, ["prompt"]);
+    if (!prompt) {
+      throw new Error("Tool call missing prompt.");
+    }
+    const negativePrompt = getStringArg(finalArgs, ["negative_prompt"]);
     const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
     const baseBody: Record<string, unknown> = {};
     if (provider === "navy") {
-      const numberOfImages = getNumberArg(args, ["n"]);
-      const size = getStringArg(args, ["size"]);
-      const quality = getStringArg(args, ["quality"]);
-      const style = getStringArg(args, ["style"]);
+      const numberOfImages = getNumberArg(finalArgs, ["n"]);
+      const size = getStringArg(finalArgs, ["size"]);
+      const quality = getStringArg(finalArgs, ["quality"]);
+      const style = getStringArg(finalArgs, ["style"]);
       if (size) baseBody.size = size;
       if (quality) baseBody.quality = quality;
       if (style) baseBody.style = style;
@@ -1223,12 +1237,12 @@ ${defaultPrompt}`;
       }
       baseBody.sync = false;
     } else {
-      const guidanceScale = getNumberArg(args, ["guidance_scale"]);
-      const width = getNumberArg(args, ["width"]);
-      const height = getNumberArg(args, ["height"]);
-      const steps = getNumberArg(args, ["num_inference_steps"]);
-      const seed = getNumberArg(args, ["seed"]);
-      const resolution = getStringArg(args, ["resolution"]);
+      const guidanceScale = getNumberArg(finalArgs, ["guidance_scale"]);
+      const width = getNumberArg(finalArgs, ["width"]);
+      const height = getNumberArg(finalArgs, ["height"]);
+      const steps = getNumberArg(finalArgs, ["num_inference_steps"]);
+      const seed = getNumberArg(finalArgs, ["seed"]);
+      const resolution = getStringArg(finalArgs, ["resolution"]);
       baseBody.guidanceScale = guidanceScale ?? undefined;
       baseBody.width = width ? Math.round(width) : undefined;
       baseBody.height = height ? Math.round(height) : undefined;
@@ -1745,7 +1759,7 @@ ${defaultPrompt}`;
         }
 
         if (toolName === "generate_image") {
-          const result = await runGenerateImage(args);
+          const result = await runGenerateImage(args, context);
           if (saveToGallery && onSaveImages) {
             await onSaveImages({
               images: result.images,
@@ -1929,10 +1943,7 @@ ${defaultPrompt}`;
               };
               const toolMessages = await handleToolCalls(
                 [syntheticToolCall],
-                (progressMessage) => {
-                  currentMessages = [...currentMessages, progressMessage];
-                  setMessages(currentMessages);
-                },
+                undefined,
                 { assistantContent: finalResult.content, userPrompt: trimmed }
               );
               if (toolMessages.length) {
@@ -1948,10 +1959,7 @@ ${defaultPrompt}`;
         // Run tools
         const toolMessages = await handleToolCalls(
           finalToolCalls,
-          (progressMessage) => {
-            currentMessages = [...currentMessages, progressMessage];
-            setMessages(currentMessages);
-          },
+          undefined,
           { assistantContent: finalResult.content, userPrompt: trimmed }
         );
         currentMessages = [...currentMessages, ...toolMessages];

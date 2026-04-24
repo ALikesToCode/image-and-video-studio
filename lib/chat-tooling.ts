@@ -77,8 +77,15 @@ type ChatCompletionMessagesOptions = {
 };
 
 const normalizeValue = (value: string) => value.trim().replace(/\r\n/g, "\n");
+const stripOuterQuotes = (value: string) =>
+  normalizeValue(value).replace(/^["']|["']$/g, "");
 const normalizeComparable = (value: string) =>
-  normalizeValue(value).replace(/\s+/g, " ").toLowerCase();
+  stripOuterQuotes(value).replace(/\s+/g, " ").toLowerCase();
+const normalizeModelMention = (value: string) =>
+  normalizeComparable(value)
+    .replace(/[/:._+-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 const NEGATIVE_PROMPT_PATTERN =
   /\b(blurry|blur|bad anatomy|bad hands|extra limbs?|extra fingers?|deformed|malformed|mutated|disfigured|watermark|logo|text|caption|signature|low detail|low quality|flat shading|artifact|noise|grainy|duplicate|poorly drawn)\b/i;
@@ -168,7 +175,14 @@ export const toChatCompletionMessages = (
   messages: ChatCompletionMessageInput[],
   { includeReasoningContent = false }: ChatCompletionMessagesOptions = {}
 ) =>
-  messages.map((message) => {
+  messages.flatMap((message) => {
+    if (
+      message.role === "tool" &&
+      /^Invoking\s+[a-z0-9_]+\.\.\.$/i.test(message.content.trim())
+    ) {
+      return [];
+    }
+
     const hasToolCalls =
       message.role === "assistant" &&
       Array.isArray(message.toolCalls) &&
@@ -197,7 +211,7 @@ export const toChatCompletionMessages = (
       if (message.name) base.name = message.name;
     }
 
-    return base;
+    return [base];
   });
 
 const extractTaggedBlock = (assistantContent: string, labels: string[]) => {
@@ -277,16 +291,26 @@ export const repairImageToolArguments = (
   }: {
     assistantContent: string;
     userPrompt: string;
-  }
+  },
+  {
+    preferAssistantPrompt = false,
+  }: {
+    preferAssistantPrompt?: boolean;
+  } = {}
 ) => {
   const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
   const assistantPrompt = extractImagePromptForToolCall(assistantContent, userPrompt);
   const assistantNegativePrompt = extractNegativePromptFromAssistant(assistantContent);
   const repairedArgs = { ...args };
 
+  const promptIsRawUserText =
+    prompt && normalizeComparable(prompt) === normalizeComparable(userPrompt);
+
   if (
     assistantPrompt &&
-    (!prompt || isLikelyNegativeImagePrompt(prompt, assistantNegativePrompt))
+    (!prompt ||
+      isLikelyNegativeImagePrompt(prompt, assistantNegativePrompt) ||
+      (preferAssistantPrompt && promptIsRawUserText))
   ) {
     repairedArgs.prompt = assistantPrompt;
     if (!repairedArgs.negative_prompt && prompt) {
@@ -297,6 +321,45 @@ export const repairImageToolArguments = (
   }
 
   return repairedArgs;
+};
+
+export const normalizeImageToolModelRequest = ({
+  requestedModel,
+  defaultModel,
+  userPrompt,
+}: {
+  requestedModel: string;
+  defaultModel: string;
+  userPrompt: string;
+}) => {
+  const normalizedRequestedModel = requestedModel.trim();
+  const normalizedDefaultModel = defaultModel.trim();
+  if (!normalizedRequestedModel) return "";
+  if (normalizedRequestedModel === normalizedDefaultModel) {
+    return normalizedRequestedModel;
+  }
+
+  const normalizedUserPrompt = normalizeModelMention(userPrompt);
+  if (!normalizedUserPrompt) return "";
+
+  const requestedMentions = [
+    normalizedRequestedModel,
+    normalizedRequestedModel.split(/[/:]/).at(-1) ?? "",
+  ]
+    .flatMap((value) => {
+      const normalized = normalizeModelMention(value);
+      return normalized ? [normalized, normalized.replace(/\s+/g, "")] : [];
+    })
+    .filter(Boolean);
+
+  const compactUserPrompt = normalizedUserPrompt.replace(/\s+/g, "");
+  return requestedMentions.some(
+    (mention) =>
+      normalizedUserPrompt.includes(mention) ||
+      compactUserPrompt.includes(mention)
+  )
+    ? normalizedRequestedModel
+    : "";
 };
 
 const coercePositiveNumber = (value?: string | number | null) => {
