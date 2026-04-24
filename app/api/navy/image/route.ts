@@ -35,9 +35,24 @@ type NavyImagePayload = {
 const NAVY_IMAGE_MEDIA_HOSTS = [
   "api.navy",
   ".api.navy",
+  "api.together.ai",
   "replicate.delivery",
   ".replicate.delivery",
 ];
+
+const retryAfterMs = (response: Response, fallbackMs = 8_000) => {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) return fallbackMs;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(1_000, Math.ceil(seconds * 1000));
+  }
+  const timestamp = Date.parse(retryAfter);
+  if (Number.isFinite(timestamp)) {
+    return Math.max(1_000, timestamp - Date.now());
+  }
+  return fallbackMs;
+};
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
@@ -222,6 +237,17 @@ export async function GET(req: Request) {
   });
 
   const data = await jsonOrNull(response);
+  if (response.status === 429) {
+    const delayMs = retryAfterMs(response);
+    return Response.json(
+      { done: false, status: "rate_limited", retryAfterMs: delayMs },
+      {
+        status: 200,
+        headers: { "Retry-After": String(Math.ceil(delayMs / 1000)) },
+      }
+    );
+  }
+
   if (!response.ok) {
     return Response.json(
       { error: providerErrorMessage(data, "Unable to fetch job.", [apiKey]) },

@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { POST as geminiVideoDownload } from "../../app/api/gemini/video/download/route.ts";
-import { POST as navyImagePost } from "../../app/api/navy/image/route.ts";
+import {
+  GET as navyImageGet,
+  POST as navyImagePost,
+} from "../../app/api/navy/image/route.ts";
 import { POST as navyVideoDownload } from "../../app/api/navy/video/download/route.ts";
 
 test("Gemini video download route rejects untrusted media hosts before fetch", async () => {
@@ -145,6 +148,7 @@ test("Navy image route downloads generated CDN URLs server-side", async () => {
         data: [
           { url: "https://s3.api.navy/generated.png" },
           { url: "https://replicate.delivery/xezq/generated.jpg" },
+          { url: "https://api.together.ai/shrt/generated.jpeg" },
         ],
       });
     }
@@ -158,6 +162,12 @@ test("Navy image route downloads generated CDN URLs server-side", async () => {
     if (url === "https://replicate.delivery/xezq/generated.jpg") {
       return new Response(new Uint8Array([4, 5]), {
         headers: { "content-type": "image/jpeg", "content-length": "2" },
+      });
+    }
+
+    if (url === "https://api.together.ai/shrt/generated.jpeg") {
+      return new Response(new Uint8Array([6, 7, 8, 9]), {
+        headers: { "content-type": "image/jpeg", "content-length": "4" },
       });
     }
 
@@ -184,10 +194,12 @@ test("Navy image route downloads generated CDN URLs server-side", async () => {
     assert.deepEqual(payload.images, [
       { data: "AQID", mimeType: "image/png" },
       { data: "BAU=", mimeType: "image/jpeg" },
+      { data: "BgcICQ==", mimeType: "image/jpeg" },
     ]);
     assert.equal(calls[0]?.authorization, "Bearer navy-secret");
     assert.equal(calls[1]?.authorization, null);
     assert.equal(calls[2]?.authorization, null);
+    assert.equal(calls[3]?.authorization, null);
     const capturedBody = navyRequestBody as Record<string, unknown> | null;
     assert.equal(capturedBody?.sync, false);
   } finally {
@@ -277,6 +289,39 @@ test("Navy image route retries flagged OpenAI image prompts with safer wording",
     );
     assert.doesNotMatch(prompts[0] ?? "", /Safety recovery/i);
     assert.match(prompts[1] ?? "", /policy-compliant OpenAI image prompt/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy image route treats poll rate limits as pending jobs", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json(
+      { error: { message: "Too many requests" } },
+      {
+        status: 429,
+        headers: { "retry-after": "7" },
+      }
+    );
+
+  try {
+    const response = await navyImageGet(
+      new Request("https://studio.test/api/navy/image?id=job_rate_limited", {
+        headers: {
+          "x-user-api-key": "navy-secret",
+        },
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, {
+      done: false,
+      status: "rate_limited",
+      retryAfterMs: 7000,
+    });
+    assert.equal(response.headers.get("retry-after"), "7");
   } finally {
     globalThis.fetch = originalFetch;
   }

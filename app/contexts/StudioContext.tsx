@@ -1119,11 +1119,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         remoteStatus:
                             typeof payload?.status === "string" ? payload.status : undefined,
                     });
+                    let delayMs = 5000;
                     for (let attempt = 0; attempt < 60; attempt += 1) {
                         updateJob(job.id, {
                             progress: `Waiting for Navy image render (${attempt + 1}/60)...`,
                         });
-                        await sleep(5000);
+                        await sleep(delayMs);
                         const pollResponse = await fetch(
                             `/api/navy/image?id=${encodeURIComponent(submittedJobId)}`,
                             {
@@ -1133,12 +1134,32 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             }
                         );
                         navyPayload = await pollResponse.json();
-                        if (!pollResponse.ok) {
+                        if (!pollResponse.ok && pollResponse.status !== 429) {
                             throw new Error(errorMessageFromPayload(navyPayload, "Unable to poll Navy image job."));
+                        }
+                        if (
+                            typeof navyPayload?.retryAfterMs === "number" &&
+                            Number.isFinite(navyPayload.retryAfterMs)
+                        ) {
+                            delayMs = Math.min(Math.max(navyPayload.retryAfterMs, 1000), 30000);
+                            updateJob(job.id, {
+                                remoteStatus: "rate_limited",
+                                progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
+                            });
+                            continue;
+                        }
+                        if (pollResponse.status === 429) {
+                            delayMs = Math.min(delayMs * 2, 30000);
+                            updateJob(job.id, {
+                                remoteStatus: "rate_limited",
+                                progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
+                            });
+                            continue;
                         }
                         if (navyPayload?.done) {
                             break;
                         }
+                        delayMs = 5000;
                     }
                 }
 

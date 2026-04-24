@@ -1249,6 +1249,7 @@ ${defaultPrompt}`;
 
       if (provider === "navy" && typeof payload?.id === "string" && payload.id) {
         const maxAttempts = 60;
+        let delayMs = 3000;
         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
           const pollResponse = await fetch(
             `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
@@ -1259,14 +1260,21 @@ ${defaultPrompt}`;
             }
           );
           const pollPayload = await pollResponse.json();
-          if (!pollResponse.ok) {
+          if (!pollResponse.ok && pollResponse.status !== 429) {
             throw new Error(pollPayload?.error ?? "Unable to poll image job.");
           }
           if (pollPayload?.done) {
             payload = pollPayload;
             break;
           }
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+          delayMs =
+            typeof pollPayload?.retryAfterMs === "number" &&
+            Number.isFinite(pollPayload.retryAfterMs)
+              ? Math.min(Math.max(pollPayload.retryAfterMs, 1000), 30_000)
+              : pollResponse.status === 429
+                ? Math.min(delayMs * 2, 30_000)
+                : 3000;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
       }
 
