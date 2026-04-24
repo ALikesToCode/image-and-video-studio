@@ -196,3 +196,17 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+html,
+body {
+  min-height: 100%;
+  overscroll-behavior: none;
+}
+
+button,
+[role="button"],
+input,
+textarea,
+select {
+  touch-action: manipulation;
+}

@@ -21,6 +21,7 @@ import {
   Copy,
   Check,
   Layers3,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import {
@@ -54,9 +55,13 @@ import {
   putStudioState,
 } from "@/lib/studio-state-db";
 import {
+  type ChatImageAsset,
+  type ChatMediaAsset,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
   resolveRequestedImageModels,
+  sanitizeChatImageAssets,
+  sanitizeChatMediaAssets,
   stripHeavyMediaFromMessagesForStorage,
 } from "@/lib/chat-tooling";
 import {
@@ -81,8 +86,8 @@ type ChatMessage = {
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
-  images?: { id: string; dataUrl: string; mimeType: string }[];
-  media?: { id: string; kind: "image" | "video" | "audio"; dataUrl: string; mimeType: string }[];
+  images?: ChatImageAsset[];
+  media?: ChatMediaAsset[];
 };
 
 type ChutesChatProps = {
@@ -112,7 +117,7 @@ type ChutesChatProps = {
   ttsFormat?: string;
   ttsSpeed?: string;
   onSaveImages?: (payload: {
-    images: { id: string; dataUrl: string; mimeType: string }[];
+    images: ChatImageAsset[];
     prompt: string;
     model: string;
   }) => Promise<void> | void;
@@ -261,54 +266,12 @@ const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
       }
 
       if (Array.isArray(record.images)) {
-        const images = record.images
-          .map((img) => {
-            if (!img || typeof img !== "object") return null;
-            const imgRecord = img as Record<string, unknown>;
-            const imgId = typeof imgRecord.id === "string" ? imgRecord.id : "";
-            const dataUrl = typeof imgRecord.dataUrl === "string" ? imgRecord.dataUrl : "";
-            const mimeType = typeof imgRecord.mimeType === "string" ? imgRecord.mimeType : "";
-            if (!imgId || !dataUrl) return null;
-            return { id: imgId, dataUrl, mimeType: mimeType || "image/png" };
-          })
-          .filter((entry): entry is { id: string; dataUrl: string; mimeType: string } => !!entry);
+        const images = sanitizeChatImageAssets(record.images);
         if (images.length) message.images = images;
       }
 
       if (Array.isArray(record.media)) {
-        const media = record.media
-          .map((item) => {
-            if (!item || typeof item !== "object") return null;
-            const mediaRecord = item as Record<string, unknown>;
-            const mediaId = typeof mediaRecord.id === "string" ? mediaRecord.id : "";
-            const kind = mediaRecord.kind;
-            const dataUrl = typeof mediaRecord.dataUrl === "string" ? mediaRecord.dataUrl : "";
-            const mimeType = typeof mediaRecord.mimeType === "string" ? mediaRecord.mimeType : "";
-            if (!mediaId || !dataUrl) return null;
-            if (kind !== "image" && kind !== "video" && kind !== "audio") return null;
-            return {
-              id: mediaId,
-              kind,
-              dataUrl,
-              mimeType:
-                mimeType ||
-                (kind === "video"
-                  ? "video/mp4"
-                  : kind === "audio"
-                    ? "audio/mpeg"
-                    : "image/png"),
-            };
-          })
-          .filter(
-            (
-              entry
-            ): entry is {
-              id: string;
-              kind: "image" | "video" | "audio";
-              dataUrl: string;
-              mimeType: string;
-            } => !!entry
-          );
+        const media = sanitizeChatMediaAssets(record.media);
         if (media.length) message.media = media;
       } else if (message.images?.length) {
         message.media = message.images.map((image) => ({
@@ -316,6 +279,7 @@ const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
           kind: "image" as const,
           dataUrl: image.dataUrl,
           mimeType: image.mimeType,
+          ...(image.model ? { model: image.model } : {}),
         }));
       }
 
@@ -437,6 +401,7 @@ export function ChutesChat({
   );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
   const [headerCollapsed, setHeaderCollapsed] = useState(true);
+  const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const [toolVideoModel, setToolVideoModel] = useState(
     videoModels[0]?.id ?? ""
   );
@@ -1945,9 +1910,44 @@ ${defaultPrompt}`;
   return (
     <div className="flex flex-col h-full bg-background/50 isolate">
       {/* Header */}
-      <header className="flex-none p-4 glass border-b sticky top-0 z-10">
-        <div className="flex flex-col gap-3 justify-between items-start sm:flex-row sm:items-center max-w-5xl mx-auto w-full">
-          <div className="flex items-center gap-2">
+      <header className="glass sticky top-0 z-10 flex-none border-b p-2.5 sm:p-4">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="flex items-center justify-between gap-2 sm:hidden">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="rounded-xl bg-primary/10 p-2 text-primary">
+                <Bot className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold leading-none">
+                  {provider === "navy" ? "NavyAI Chat" : "Chutes Agent"}
+                </h2>
+                <p className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  Online
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant={mobileControlsOpen ? "secondary" : "ghost"}
+              size="icon"
+              onClick={() =>
+                setMobileControlsOpen((prev) => {
+                  const next = !prev;
+                  if (!next) setHeaderCollapsed(true);
+                  return next;
+                })
+              }
+              className="h-9 w-9 shrink-0"
+              title="Chat controls"
+              aria-label="Chat controls"
+              aria-expanded={mobileControlsOpen}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="hidden items-center gap-2 sm:flex">
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -1966,9 +1966,14 @@ ${defaultPrompt}`;
             </div>
           </div>
 
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end">
+          <div
+            className={cn(
+              "no-scrollbar w-full items-center gap-1.5 overflow-x-auto pb-1 sm:w-auto sm:flex-nowrap sm:justify-end sm:overflow-visible sm:pb-0",
+              mobileControlsOpen ? "flex" : "hidden sm:flex"
+            )}
+          >
             <Select value={provider} onValueChange={(value) => setProvider(value as ChatProvider)}>
-              <SelectTrigger className="h-9 min-w-0 flex-1 sm:w-[140px] sm:flex-none glass-card border-0 bg-secondary/50">
+              <SelectTrigger className="glass-card h-9 min-w-[7.25rem] flex-none border-0 bg-secondary/50 sm:w-[140px]">
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
@@ -1978,7 +1983,7 @@ ${defaultPrompt}`;
             </Select>
 
             <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className="h-9 min-w-[10rem] flex-[1.6] sm:w-[200px] sm:flex-none glass-card border-0 bg-secondary/50">
+              <SelectTrigger className="glass-card h-9 min-w-[11rem] flex-none border-0 bg-secondary/50 sm:w-[200px]">
                 <SelectValue placeholder="Select a model" />
               </SelectTrigger>
               <SelectContent>
@@ -2266,21 +2271,21 @@ ${defaultPrompt}`;
       </header>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto min-h-0 container mx-auto" ref={scrollRef}>
-        <div className="max-w-3xl mx-auto py-6 space-y-6 px-4">
+      <div className="container mx-auto min-h-0 flex-1 overflow-y-auto" ref={scrollRef}>
+        <div className="mx-auto max-w-3xl space-y-4 px-3 py-4 sm:space-y-6 sm:px-4 sm:py-6">
           <AnimatePresence initial={false} mode="popLayout">
             {messages.length === 0 ? (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="flex flex-col items-center justify-center min-h-[400px] text-center space-y-4"
+                className="flex min-h-[240px] flex-col items-center justify-center space-y-4 text-center sm:min-h-[400px]"
               >
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
                   <Sparkles className="h-8 w-8 text-primary/60" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-xl font-medium">How can I help you create?</h3>
+                  <h3 className="text-lg font-medium sm:text-xl">How can I help you create?</h3>
                   <p className="text-sm text-muted-foreground max-w-sm">
                     Ask me to generate images, videos, audio, refine prompts, or brainstorm ideas.
                   </p>
@@ -2366,7 +2371,7 @@ ${defaultPrompt}`;
 
                         {displayContent ? (
                           isUser ? (
-                            <p className="whitespace-pre-wrap leading-relaxed">{displayContent}</p>
+                            <p className="whitespace-pre-wrap break-words leading-relaxed">{displayContent}</p>
                           ) : (
                             <div className="prose prose-sm dark:prose-invert max-w-none break-words leading-relaxed">
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -2434,6 +2439,13 @@ ${defaultPrompt}`;
                                       alt="Generated"
                                       className="w-full h-full object-cover transition-transform duration-500 group-hover/image:scale-110"
                                     />
+                                    {item.model ? (
+                                      <div className="absolute left-2 top-2 flex flex-wrap gap-2">
+                                        <span className="rounded-full bg-background/85 px-2 py-1 text-[10px] font-semibold text-foreground shadow-sm backdrop-blur">
+                                          {item.model}
+                                        </span>
+                                      </div>
+                                    ) : null}
                                     <div className="absolute inset-0 bg-black/50 opacity-100 sm:opacity-0 sm:group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                       <Button size="icon" variant="secondary" className="h-8 w-8 rounded-full" onClick={() => window.open(item.dataUrl, "_blank")}>
                                         <ChevronDown className="h-4 w-4" />
@@ -2484,7 +2496,7 @@ ${defaultPrompt}`;
       </div>
 
       {/* Input Area */}
-      <footer className="flex-none p-3 sm:p-4 glass border-t mt-auto">
+      <footer className="glass mt-auto flex-none border-t p-2.5 sm:p-4">
         <div className="max-w-3xl mx-auto w-full relative">
           <AnimatePresence>
             {messages.length > 0 && (
@@ -2492,7 +2504,7 @@ ${defaultPrompt}`;
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
-                className="absolute -top-10 sm:-top-12 right-0"
+                className="absolute -top-9 right-0 sm:-top-12"
               >
                 <Button
                   variant="ghost"
@@ -2507,14 +2519,14 @@ ${defaultPrompt}`;
             )}
           </AnimatePresence>
 
-          <div className="relative glass-card rounded-3xl p-1.5 flex items-end gap-2 shadow-lg ring-1 ring-white/20">
+          <div className="glass-card relative flex items-end gap-2 rounded-2xl p-1.5 shadow-lg ring-1 ring-white/20 sm:rounded-3xl">
             <div className="flex-1">
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={`Message ${providerLabel} Agent...`}
-                className="min-h-[48px] max-h-[200px] w-full resize-none border-0 bg-transparent py-3 px-4 focus-visible:ring-0 text-base"
+                className="max-h-[140px] min-h-[46px] w-full resize-none border-0 bg-transparent px-3 py-3 text-base focus-visible:ring-0 sm:max-h-[200px] sm:px-4"
                 rows={1}
               />
             </div>

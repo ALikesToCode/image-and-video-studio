@@ -79,17 +79,17 @@ export function VideoGenView() {
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-h-0 bg-background/50 relative isolate">
                 {/* Header (Mobile Settings Toggle could go here) */}
-                <header className="flex-none border-b glass p-4 sm:p-6 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
+                <header className="glass flex flex-none items-center justify-between gap-3 border-b p-3 sm:p-6">
+                    <div className="flex min-w-0 items-center gap-2">
                         <div className="p-2 rounded-xl bg-primary/10 text-primary">
                             <VideoIcon className="h-5 w-5" />
                         </div>
-                        <h2 className="font-semibold text-lg">Video Generation</h2>
+                        <h2 className="truncate text-base font-semibold sm:text-lg">Video Generation</h2>
                     </div>
                     <Button
                         variant="outline"
                         size="sm"
-                        className="lg:hidden"
+                        className="shrink-0 lg:hidden"
                         onClick={() => setSettingsOpen((prev) => !prev)}
                     >
                         <Settings2 className="mr-2 h-4 w-4" />
@@ -97,7 +97,7 @@ export function VideoGenView() {
                     </Button>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8">
+                <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-5 sm:space-y-8">
                     <AnimatePresence initial={false}>
                         {settingsOpen ? (
                             <motion.div
@@ -105,7 +105,7 @@ export function VideoGenView() {
                                 initial={{ opacity: 0, y: -8 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -8 }}
-                                className="lg:hidden max-w-3xl mx-auto"
+                                className="mx-auto max-w-3xl lg:hidden"
                             >
                                 <ImgGenSettings
                                     {...context}
@@ -119,7 +119,7 @@ export function VideoGenView() {
 
                     {/* Source Image Uploader (Required for Chutes) */}
                     {provider === "chutes" && (
-                        <div className="max-w-3xl mx-auto space-y-4">
+                        <div className="mx-auto max-w-3xl space-y-3 sm:space-y-4">
                             <h3 className="text-sm font-medium text-muted-foreground">Source Image</h3>
                             <div
                                 className={cn(
@@ -153,7 +153,7 @@ export function VideoGenView() {
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="text-center space-y-2 p-8">
+                                    <div className="space-y-2 p-5 text-center sm:p-8">
                                         <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-4">
                                             <Upload className="h-6 w-6 text-muted-foreground" />
                                         </div>
@@ -200,7 +200,7 @@ export function VideoGenView() {
                                     key="empty"
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
-                                    className="flex flex-col items-center justify-center min-h-[300px] text-center space-y-4 text-muted-foreground"
+                                    className="flex min-h-[220px] flex-col items-center justify-center space-y-4 text-center text-muted-foreground sm:min-h-[300px]"
                                 >
                                     <div className="w-16 h-16 rounded-2xl bg-muted/30 flex items-center justify-center">
                                         <Sparkles className="h-8 w-8 opacity-50" />
@@ -230,7 +230,7 @@ export function VideoGenView() {
                 </div>
 
                 {/* Footer Input */}
-                <div className="flex-none p-4 sm:p-6 glass border-t">
+                <div className="glass flex-none border-t p-3 sm:p-6">
                     <div className="max-w-3xl mx-auto w-full">
                         <PromptInput
                             prompt={context.prompt}

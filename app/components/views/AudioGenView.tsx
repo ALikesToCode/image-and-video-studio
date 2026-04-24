@@ -47,17 +47,17 @@ export function AudioGenView() {
 
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-h-0 bg-background/50 relative isolate">
-                <header className="flex-none p-4 sm:p-6 border-b glass flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
+                <header className="glass flex flex-none items-center justify-between gap-3 border-b p-3 sm:p-6">
+                    <div className="flex min-w-0 items-center gap-2">
                         <div className="p-2 rounded-xl bg-primary/10 text-primary">
                             <AudioLines className="h-5 w-5" />
                         </div>
-                        <h2 className="font-semibold text-lg">Audio / TTS</h2>
+                        <h2 className="truncate text-base font-semibold sm:text-lg">Audio / TTS</h2>
                     </div>
                     <Button
                         variant="outline"
                         size="sm"
-                        className="lg:hidden"
+                        className="shrink-0 lg:hidden"
                         onClick={() => setSettingsOpen((prev) => !prev)}
                     >
                         <Settings2 className="mr-2 h-4 w-4" />
@@ -65,7 +65,7 @@ export function AudioGenView() {
                     </Button>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center justify-center space-y-6 md:space-y-8">
+                <div className="flex flex-1 flex-col items-center justify-start space-y-5 overflow-y-auto p-3 sm:p-6 md:justify-center md:space-y-8 md:p-8">
                     <AnimatePresence initial={false}>
                         {settingsOpen ? (
                             <motion.div
@@ -135,7 +135,7 @@ export function AudioGenView() {
                 </div>
 
                 {/* Input Area */}
-                <div className="p-4 md:p-6 glass-panel border-t border-white/10 mt-auto z-10 bg-background/50 backdrop-blur-xl">
+                <div className="glass-panel z-10 mt-auto border-t border-white/10 bg-background/50 p-3 backdrop-blur-xl md:p-6">
                     <div className="max-w-3xl mx-auto">
                         <PromptInput
                             prompt={context.prompt}

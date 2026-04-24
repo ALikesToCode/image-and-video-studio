@@ -14,6 +14,7 @@ import {
     type LucideIcon,
 } from "lucide-react";
 import { SettingsDialog } from "@/app/components/SettingsDialog";
+import { InstallAppButton } from "@/app/components/install-app-button";
 
 type Tab = "chat" | "image" | "video" | "audio" | "gallery";
 
@@ -120,7 +121,7 @@ export function Dashboard() {
             {/* Content Shell */}
             <div className="flex min-w-0 flex-1 flex-col">
                 {/* Mobile Header */}
-                <header className="glass border-b px-3 py-2 lg:hidden">
+                <header className="glass shrink-0 border-b px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] lg:hidden">
                     <div className="flex items-center justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-2">
                             <div className="rounded-lg bg-primary/10 p-2 text-primary">
@@ -131,13 +132,16 @@ export function Dashboard() {
                                 <p className="truncate text-xs text-muted-foreground">{activeTabMeta.label}</p>
                             </div>
                         </div>
-                        <SettingsDialog />
+                        <div className="flex shrink-0 items-center gap-1">
+                            <InstallAppButton />
+                            <SettingsDialog />
+                        </div>
                     </div>
                 </header>
 
                 {/* Main Content */}
                 <main className="relative min-h-0 flex-1 overflow-hidden bg-muted/10">
-                    <div className="absolute inset-0 overflow-y-auto no-scrollbar p-0 pb-20 lg:pb-0">
+                    <div className="absolute inset-0 overflow-y-auto no-scrollbar p-0">
                         <div className={cn("h-full", activeTab === "chat" ? "block" : "hidden")}>
                             <ChatView />
                         </div>
@@ -149,7 +153,7 @@ export function Dashboard() {
                 </main>
 
                 {/* Mobile Bottom Navigation */}
-                <nav className="glass border-t px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] lg:hidden">
+                <nav className="glass shrink-0 border-t px-1.5 pb-[calc(env(safe-area-inset-bottom)+0.375rem)] pt-1.5 lg:hidden">
                     <div className="grid grid-cols-5 gap-1">
                         {TAB_META.map((tab) => {
                             const Icon = tab.icon;
@@ -159,14 +163,15 @@ export function Dashboard() {
                                     key={tab.id}
                                     variant={isActive ? "secondary" : "ghost"}
                                     className={cn(
-                                        "h-14 flex-col gap-1 px-1 text-[11px]",
+                                        "h-12 flex-col gap-1 px-1 text-[10px]",
                                         isActive && "bg-secondary/70"
                                     )}
                                     onClick={() => setActiveTab(tab.id)}
                                     title={tab.label}
+                                    aria-current={isActive ? "page" : undefined}
                                 >
                                     <Icon className={cn("h-4 w-4", isActive && "text-primary")} />
-                                    <span className="leading-none">{tab.label}</span>
+                                    <span className="max-w-full truncate leading-none">{tab.label}</span>
                                 </Button>
                             );
                         })}

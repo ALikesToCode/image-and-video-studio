@@ -5,7 +5,7 @@
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Sparkles,
@@ -14,12 +14,14 @@ import {
     Image as ImageIcon,
     Clock3,
     Loader2,
+    Settings2,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 
 export function ImageGenView() {
     const context = useStudio();
     const { mode, setMode, generatedImages, setGeneratedImages } = context;
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     // Force mode to image when entering this view
     useEffect(() => {
@@ -41,22 +43,34 @@ export function ImageGenView() {
 
     return (
         <div className="h-full w-full overflow-y-auto bg-background/50">
-            <div className="mx-auto max-w-[1800px] grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 p-3 sm:p-4 lg:p-6 min-h-full items-start">
+            <div className="mx-auto grid min-h-full max-w-[1800px] grid-cols-1 items-start gap-3 p-3 sm:gap-6 sm:p-4 lg:grid-cols-12 lg:p-6">
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/70 p-2 shadow-sm lg:hidden">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                            <ImageIcon className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold">Image Generation</p>
+                            <p className="truncate text-xs text-muted-foreground">{context.provider}</p>
+                        </div>
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => setSettingsOpen((prev) => !prev)}
+                    >
+                        <Settings2 className="h-4 w-4" />
+                        Settings
+                    </Button>
+                </div>
                 {/* Settings Column - Collapsible/Sticky */}
                 <motion.div
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
-                    className="lg:col-span-3 xl:col-span-3 space-y-4 lg:sticky lg:top-6"
+                    className={`space-y-4 lg:sticky lg:top-6 lg:col-span-3 xl:col-span-3 ${settingsOpen ? "block" : "hidden lg:block"}`}
                 >
-                    <div className="glass-card rounded-2xl p-4 sm:p-5 shadow-lg space-y-6">
-                        <div className="flex items-center gap-2 pb-4 border-b border-border/50">
-                            <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                                <ImageIcon className="h-5 w-5" />
-                            </div>
-                            <h2 className="font-semibold">Settings</h2>
-                        </div>
-
-                        <ImgGenSettings
+                    <ImgGenSettings
                             provider={context.provider}
                             setProvider={context.setProvider}
                             mode={context.mode}
@@ -116,16 +130,15 @@ export function ImageGenView() {
                             navyUsageUpdatedAt={context.navyUsageUpdatedAt}
                             onRefreshUsage={context.refreshNavyUsage}
                         />
-                    </div>
                 </motion.div>
 
                 {/* Main Content Column */}
-                <div className="lg:col-span-9 xl:col-span-9 space-y-6 lg:min-h-[calc(100vh-3rem)] flex flex-col">
+                <div className="flex min-h-0 flex-col space-y-4 lg:col-span-9 lg:min-h-[calc(100vh-3rem)] xl:col-span-9 sm:space-y-6">
                     {/* Input Area */}
                     <motion.div
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="glass-card rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden group"
+                        className="glass-card group relative overflow-hidden rounded-xl p-4 shadow-xl sm:p-6"
                     >
                         <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                         <PromptInput
@@ -197,7 +210,7 @@ export function ImageGenView() {
                     </motion.div>
 
                     {/* Output Grid */}
-                    <div className="flex-1 min-h-[320px] sm:min-h-[400px] glass p-4 sm:p-6 rounded-2xl border flex flex-col gap-4">
+                    <div className="glass flex min-h-[240px] flex-1 flex-col gap-4 rounded-xl border p-4 sm:min-h-[400px] sm:p-6">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 text-muted-foreground">
                                 <Sparkles className="h-4 w-4" />
@@ -219,10 +232,10 @@ export function ImageGenView() {
                                     exit={{ opacity: 0 }}
                                     className="flex-1 flex flex-col items-center justify-center text-muted-foreground/50 gap-4"
                                 >
-                                    <div className="w-24 h-24 rounded-full bg-secondary/30 flex items-center justify-center">
-                                        <ImageIcon className="h-10 w-10 text-secondary" />
+                                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-secondary/30 sm:h-24 sm:w-24">
+                                        <ImageIcon className="h-8 w-8 text-secondary sm:h-10 sm:w-10" />
                                     </div>
-                                    <p className="text-lg font-medium">Ready to create masterpieces</p>
+                                    <p className="text-base font-medium sm:text-lg">Ready to create masterpieces</p>
                                     <p className="text-sm">Enter a prompt above and hit Generate</p>
                                 </motion.div>
                             ) : (

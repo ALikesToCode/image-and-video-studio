@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Serif_Display, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "./components/theme-provider";
@@ -19,9 +19,39 @@ const text = IBM_Plex_Sans({
 });
 
 export const metadata: Metadata = {
+  applicationName: "Image & Video Studio",
   title: "Image & Video Studio",
   description:
     "Local-first studio for generating images and videos with Gemini and NavyAI.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Studio",
+    statusBarStyle: "default",
+  },
+  icons: {
+    icon: [
+      { url: "/studio-icon.svg", type: "image/svg+xml" },
+      { url: "/studio-icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/studio-icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  formatDetection: {
+    telephone: false,
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-visual",
+  colorScheme: "light dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fafafa" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+  ],
 };
 
 export default function RootLayout({
