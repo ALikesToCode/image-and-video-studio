@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildChatCompletionPayload,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
+  repairImageToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
+  shouldOmitToolChoiceForModel,
   stripHeavyMediaFromMessagesForStorage,
 } from "./chat-tooling.ts";
 
@@ -51,6 +54,102 @@ test("Synthetic fallback builds an image tool call from the drafted prompt witho
       prompt: "sharp modern anime portrait, blue rim light, clean silhouette.",
     },
   });
+});
+
+test("Image tool argument repair replaces negative-only prompt with assistant draft", () => {
+  const assistantContent = `Let me craft this prompt carefully, preserving all the specific details the user provided.
+
+A high-detail modern anime illustration of three figures in a tense triangular confrontation inside a slightly run-down shopping mall corridor during late afternoon. Center: a tall imposing young man with a lean densely muscular build and pale skin, wearing an intricate dark metal mask covering his entire face with etched sacred geometry and faintly glowing cyan circuitry patterns.
+
+Optional negative prompt: blurry characters, extra limbs, deformed hands, watermark, text, logo, low detail, flat shading
+
+Video readiness note: Stable triangular composition with clear character separation.`;
+
+  const repaired = repairImageToolArguments(
+    {
+      prompt:
+        "blurry characters, extra limbs, deformed hands, watermark, text, logo, low detail, flat shading",
+    },
+    {
+      assistantContent,
+      userPrompt: "Generate the mall confrontation image now.",
+    }
+  );
+
+  assert.match(String(repaired.prompt), /high-detail modern anime illustration/i);
+  assert.match(String(repaired.prompt), /shopping mall corridor/i);
+  assert.equal(
+    repaired.negative_prompt,
+    "blurry characters, extra limbs, deformed hands, watermark, text, logo, low detail, flat shading"
+  );
+});
+
+test("Image tool argument repair leaves valid image prompts intact", () => {
+  const repaired = repairImageToolArguments(
+    {
+      prompt: "High-detail anime portrait in a neon arcade, cinematic rim light.",
+      negative_prompt: "watermark, bad hands",
+    },
+    {
+      assistantContent: "Optional negative prompt: watermark, bad hands",
+      userPrompt: "Generate the image now.",
+    }
+  );
+
+  assert.equal(
+    repaired.prompt,
+    "High-detail anime portrait in a neon arcade, cinematic rim light."
+  );
+  assert.equal(repaired.negative_prompt, "watermark, bad hands");
+});
+
+test("DeepSeek-family chat payloads omit explicit tool_choice while keeping tools", () => {
+  assert.equal(shouldOmitToolChoiceForModel("deepseek-v4-pro"), true);
+  assert.equal(shouldOmitToolChoiceForModel("deepseek-reasoner"), true);
+  assert.equal(shouldOmitToolChoiceForModel("deepseek-ai/DeepSeek-V3"), true);
+
+  const payload = buildChatCompletionPayload({
+    model: "deepseek-v4-pro",
+    messages: [{ role: "user", content: "Generate an image now." }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+    toolChoice: "auto",
+    maxTokens: 256,
+    temperature: 0.7,
+    omitToolChoiceForUnsupportedModels: true,
+  });
+
+  assert.equal("tool_choice" in payload, false);
+  assert.equal(payload.tools instanceof Array, true);
+  assert.equal(payload.max_tokens, 256);
+  assert.equal(payload.temperature, 0.7);
+});
+
+test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {
+  const payload = buildChatCompletionPayload({
+    model: "gpt-4o",
+    messages: [{ role: "user", content: "Generate an image now." }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+    toolChoice: "auto",
+    omitToolChoiceForUnsupportedModels: true,
+  });
+
+  assert.equal(payload.tool_choice, "auto");
 });
 
 test("Requested image models use the pipeline when the request targets the default model", () => {

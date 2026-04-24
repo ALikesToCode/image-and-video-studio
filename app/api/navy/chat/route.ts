@@ -1,5 +1,7 @@
 export const runtime = "edge";
 
+import { buildChatCompletionPayload } from "@/lib/chat-tooling";
+
 type ChatRequest = {
   apiKey: string;
   model: string;
@@ -24,24 +26,15 @@ export async function POST(req: Request) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
-  const payload: Record<string, unknown> = {
+  const payload = buildChatCompletionPayload({
     model,
     messages,
-    stream: true,
-  };
-
-  if (Array.isArray(tools) && tools.length) {
-    payload.tools = tools;
-  }
-  if (toolChoice !== undefined) {
-    payload.tool_choice = toolChoice;
-  }
-  if (typeof maxTokens === "number" && Number.isFinite(maxTokens)) {
-    payload.max_tokens = maxTokens;
-  }
-  if (typeof temperature === "number" && Number.isFinite(temperature)) {
-    payload.temperature = temperature;
-  }
+    tools,
+    toolChoice,
+    maxTokens,
+    temperature,
+    omitToolChoiceForUnsupportedModels: true,
+  });
 
   const response = await fetch("https://api.navy/v1/chat/completions", {
     method: "POST",

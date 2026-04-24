@@ -50,7 +50,74 @@ type SyntheticFallbackToolCall = {
   arguments: Record<string, unknown>;
 };
 
+type ChatCompletionPayloadInput = {
+  model: string;
+  messages: Array<Record<string, unknown>>;
+  tools?: Array<Record<string, unknown>>;
+  toolChoice?: unknown;
+  maxTokens?: number;
+  temperature?: number;
+  stream?: boolean;
+  omitToolChoiceForUnsupportedModels?: boolean;
+};
+
 const normalizeValue = (value: string) => value.trim().replace(/\r\n/g, "\n");
+const normalizeComparable = (value: string) =>
+  normalizeValue(value).replace(/\s+/g, " ").toLowerCase();
+
+const NEGATIVE_PROMPT_PATTERN =
+  /\b(blurry|blur|bad anatomy|bad hands|extra limbs?|extra fingers?|deformed|malformed|mutated|disfigured|watermark|logo|text|caption|signature|low detail|low quality|flat shading|artifact|noise|grainy|duplicate|poorly drawn)\b/i;
+
+const PROMPT_STOP_LABEL_PATTERN =
+  /^\s*(?:optional\s+)?(?:negative prompt|video readiness note|audio mood note|image model|model)\s*:/im;
+
+export const shouldOmitToolChoiceForModel = (model: string) => {
+  const normalized = model.trim().toLowerCase();
+  return (
+    normalized === "deepseek-reasoner" ||
+    normalized.startsWith("deepseek-") ||
+    normalized.includes("/deepseek-") ||
+    normalized.includes("deepseek-ai/")
+  );
+};
+
+export const buildChatCompletionPayload = ({
+  model,
+  messages,
+  tools,
+  toolChoice,
+  maxTokens,
+  temperature,
+  stream = true,
+  omitToolChoiceForUnsupportedModels = false,
+}: ChatCompletionPayloadInput) => {
+  const payload: Record<string, unknown> = {
+    model,
+    messages,
+    stream,
+  };
+
+  if (Array.isArray(tools) && tools.length) {
+    payload.tools = tools;
+  }
+  if (
+    toolChoice !== undefined &&
+    !(
+      omitToolChoiceForUnsupportedModels &&
+      shouldOmitToolChoiceForModel(model)
+    )
+  ) {
+    payload.tool_choice = toolChoice;
+  }
+  if (typeof maxTokens === "number" && Number.isFinite(maxTokens)) {
+    payload.max_tokens = maxTokens;
+  }
+  if (typeof temperature === "number" && Number.isFinite(temperature)) {
+    payload.temperature = temperature;
+  }
+
+  return payload;
+};
 
 const extractTaggedBlock = (assistantContent: string, labels: string[]) => {
   for (const label of labels) {
@@ -69,6 +136,86 @@ const extractTaggedBlock = (assistantContent: string, labels: string[]) => {
     }
   }
   return "";
+};
+
+const extractNegativePromptFromAssistant = (assistantContent: string) =>
+  extractTaggedBlock(assistantContent, [
+    "optional negative prompt",
+    "negative prompt",
+  ]);
+
+const stripAssistantPreamble = (value: string) =>
+  value
+    .replace(
+      /^\s*(?:let me|i(?:'|’)?ll|i will|here(?:'|’)?s|here is)[^\n]*(?:\n+|$)/i,
+      ""
+    )
+    .trim();
+
+export const extractImagePromptForToolCall = (
+  assistantContent: string,
+  userPrompt: string
+) => {
+  const tagged = extractTaggedBlock(assistantContent, [
+    "final flux prompt",
+    "final image prompt",
+    "image prompt",
+    "final prompt",
+  ]);
+  if (tagged) return tagged;
+
+  const beforeMetadata = assistantContent.split(PROMPT_STOP_LABEL_PATTERN)[0] ?? "";
+  const cleaned = stripAssistantPreamble(beforeMetadata);
+  if (cleaned.length > 20) return cleaned;
+
+  return normalizeValue(userPrompt);
+};
+
+export const isLikelyNegativeImagePrompt = (
+  prompt: string,
+  knownNegativePrompt?: string
+) => {
+  const normalizedPrompt = normalizeComparable(prompt);
+  if (!normalizedPrompt) return false;
+  if (
+    knownNegativePrompt &&
+    normalizedPrompt === normalizeComparable(knownNegativePrompt)
+  ) {
+    return true;
+  }
+  if (!NEGATIVE_PROMPT_PATTERN.test(prompt)) return false;
+  const commaSeparatedParts = prompt.split(",").filter((part) => part.trim());
+  return commaSeparatedParts.length >= 2 && prompt.length < 260;
+};
+
+export const repairImageToolArguments = (
+  args: Record<string, unknown>,
+  {
+    assistantContent,
+    userPrompt,
+  }: {
+    assistantContent: string;
+    userPrompt: string;
+  }
+) => {
+  const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+  const assistantPrompt = extractImagePromptForToolCall(assistantContent, userPrompt);
+  const assistantNegativePrompt = extractNegativePromptFromAssistant(assistantContent);
+  const repairedArgs = { ...args };
+
+  if (
+    assistantPrompt &&
+    (!prompt || isLikelyNegativeImagePrompt(prompt, assistantNegativePrompt))
+  ) {
+    repairedArgs.prompt = assistantPrompt;
+    if (!repairedArgs.negative_prompt && prompt) {
+      repairedArgs.negative_prompt = prompt;
+    } else if (!repairedArgs.negative_prompt && assistantNegativePrompt) {
+      repairedArgs.negative_prompt = assistantNegativePrompt;
+    }
+  }
+
+  return repairedArgs;
 };
 
 const coercePositiveNumber = (value?: string | number | null) => {

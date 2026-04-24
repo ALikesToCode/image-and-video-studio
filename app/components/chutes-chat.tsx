@@ -58,6 +58,7 @@ import {
   type ChatMediaAsset,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
+  repairImageToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
@@ -1627,7 +1628,8 @@ ${defaultPrompt}`;
 
   const handleToolCalls = async (
     toolCalls: ToolCall[],
-    onProgress?: (message: ChatMessage) => void
+    onProgress?: (message: ChatMessage) => void,
+    context?: { assistantContent: string; userPrompt: string }
   ) => {
     const toolMessages: ChatMessage[] = [];
     for (const toolCall of toolCalls) {
@@ -1647,6 +1649,9 @@ ${defaultPrompt}`;
         continue;
       }
 
+      if (toolName === "generate_image" && context) {
+        args = repairImageToolArguments(args, context);
+      }
       const invocationPrompt = getStringArg(args, ["prompt", "input", "text"]);
 
       const disabledByUser =
@@ -1865,7 +1870,8 @@ ${defaultPrompt}`;
                 (progressMessage) => {
                   currentMessages = [...currentMessages, progressMessage];
                   setMessages(currentMessages);
-                }
+                },
+                { assistantContent: finalResult.content, userPrompt: trimmed }
               );
               if (toolMessages.length) {
                 currentMessages = [...currentMessages, ...toolMessages];
@@ -1878,10 +1884,14 @@ ${defaultPrompt}`;
         }
 
         // Run tools
-        const toolMessages = await handleToolCalls(finalToolCalls, (progressMessage) => {
-          currentMessages = [...currentMessages, progressMessage];
-          setMessages(currentMessages);
-        });
+        const toolMessages = await handleToolCalls(
+          finalToolCalls,
+          (progressMessage) => {
+            currentMessages = [...currentMessages, progressMessage];
+            setMessages(currentMessages);
+          },
+          { assistantContent: finalResult.content, userPrompt: trimmed }
+        );
         currentMessages = [...currentMessages, ...toolMessages];
         setMessages(currentMessages);
       }
