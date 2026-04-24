@@ -128,6 +128,7 @@ test("Navy video download route sends bearer only to Navy hosts", async () => {
 test("Navy image route downloads generated CDN URLs server-side", async () => {
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; authorization: string | null }> = [];
+  let navyRequestBody: Record<string, unknown> | null = null;
   globalThis.fetch = async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     calls.push({
@@ -136,6 +137,10 @@ test("Navy image route downloads generated CDN URLs server-side", async () => {
     });
 
     if (url === "https://api.navy/v1/images/generations") {
+      navyRequestBody =
+        typeof init?.body === "string"
+          ? (JSON.parse(init.body) as Record<string, unknown>)
+          : null;
       return Response.json({
         data: [
           { url: "https://s3.api.navy/generated.png" },
@@ -183,6 +188,45 @@ test("Navy image route downloads generated CDN URLs server-side", async () => {
     assert.equal(calls[0]?.authorization, "Bearer navy-secret");
     assert.equal(calls[1]?.authorization, null);
     assert.equal(calls[2]?.authorization, null);
+    const capturedBody = navyRequestBody as Record<string, unknown> | null;
+    assert.equal(capturedBody?.sync, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy image route returns async job ids without waiting for media", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | null = null;
+  globalThis.fetch = async (_input, init) => {
+    requestBody =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : null;
+    return Response.json({ id: "job_123", status: "queued" });
+  };
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "flux",
+          prompt: "Generate an image.",
+          sync: true,
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, { id: "job_123", status: "queued" });
+    const capturedBody = requestBody as Record<string, unknown> | null;
+    assert.equal(capturedBody?.sync, false);
   } finally {
     globalThis.fetch = originalFetch;
   }

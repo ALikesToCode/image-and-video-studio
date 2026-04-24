@@ -1205,6 +1205,7 @@ ${defaultPrompt}`;
       if (numberOfImages && numberOfImages > 0) {
         baseBody.numberOfImages = Math.max(1, Math.round(numberOfImages));
       }
+      baseBody.sync = false;
     } else {
       const guidanceScale = getNumberArg(args, ["guidance_scale"]);
       const width = getNumberArg(args, ["width"]);
@@ -1241,12 +1242,42 @@ ${defaultPrompt}`;
         },
         body: JSON.stringify(request.body),
       });
-      const payload = await response.json();
+      let payload = await response.json();
       if (!response.ok) {
         throw new Error(payload?.error ?? "Image tool failed.");
       }
+
+      if (provider === "navy" && typeof payload?.id === "string" && payload.id) {
+        const maxAttempts = 60;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          const pollResponse = await fetch(
+            `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
+            {
+              headers: {
+                "x-user-api-key": apiKey,
+              },
+            }
+          );
+          const pollPayload = await pollResponse.json();
+          if (!pollResponse.ok) {
+            throw new Error(pollPayload?.error ?? "Unable to poll image job.");
+          }
+          if (pollPayload?.done) {
+            payload = pollPayload;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      }
+
       const images = Array.isArray(payload?.images)
-        ? (payload.images as Array<{ data?: unknown; mimeType?: unknown; url?: unknown }>)
+        ? (payload.images as Array<{
+            data?: unknown;
+            b64_json?: unknown;
+            mimeType?: unknown;
+            mime_type?: unknown;
+            url?: unknown;
+          }>)
         : [];
       if (!images.length) {
         throw new Error("No images returned by tool.");
@@ -1254,9 +1285,18 @@ ${defaultPrompt}`;
       const parsedImages = (
         await Promise.all(
           images.map(async (image) => {
-            const data = typeof image?.data === "string" ? image.data : "";
+            const data =
+              typeof image?.data === "string" && image.data
+                ? image.data
+                : typeof image?.b64_json === "string" && image.b64_json
+                  ? image.b64_json
+                  : "";
             const mimeType =
-              typeof image?.mimeType === "string" ? image.mimeType : "image/png";
+              typeof image?.mimeType === "string"
+                ? image.mimeType
+                : typeof image?.mime_type === "string"
+                  ? image.mime_type
+                  : "image/png";
             if (data) {
               return {
                 id: createId(),

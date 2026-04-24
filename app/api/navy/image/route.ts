@@ -119,7 +119,6 @@ export async function POST(req: Request) {
     negativePrompt,
     seed,
     seconds,
-    sync,
     responseFormat,
     aspectRatio,
   } = body;
@@ -146,7 +145,7 @@ export async function POST(req: Request) {
         negativePrompt,
         seed,
         seconds,
-        sync,
+        sync: false,
         responseFormat,
         aspectRatio,
       })

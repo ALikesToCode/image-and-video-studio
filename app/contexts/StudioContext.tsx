@@ -1077,6 +1077,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     numberOfImages: job.imageCount,
                     negativePrompt: job.negativePrompt,
                     imageUrl: sourceReference?.dataUrl,
+                    sync: false,
                 };
             } else {
                 url = "/api/chutes/image";
