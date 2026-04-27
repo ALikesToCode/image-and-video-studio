@@ -100,6 +100,7 @@ export type GenerationJob = {
     remoteOperationName?: string;
     remoteStatus?: string;
     negativePrompt?: string;
+    promptAgentModel?: string;
     referenceIds?: string[];
 
     imageCount?: number;
@@ -1086,6 +1087,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     ...imageSizing,
                     numberOfImages: job.imageCount,
                     negativePrompt: job.negativePrompt,
+                    promptAgentModel: job.promptAgentModel,
                     imageUrl: sourceReference?.dataUrl,
                     sync: false,
                 };
@@ -1751,6 +1753,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 ttsSpeed,
                 saveToGallery,
                 negativePrompt,
+                promptAgentModel: provider === "navy" ? navyChatModel : undefined,
                 chutesTtsSpeed,
                 chutesTtsSpeaker,
                 chutesTtsMaxDuration,
