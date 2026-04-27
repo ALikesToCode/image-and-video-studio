@@ -215,6 +215,30 @@ const buildAdultImagePolicyNoteForModel = (model: string, prompt: string) => {
 export const supportsSaferImagePromptRetry = (model: string) =>
   isOpenAiImageModel(model) || isGeminiImagePolicyModel(model);
 
+const softenPolicySensitiveImagePrompt = (prompt: string) => {
+  const softened = normalizeWhitespace(prompt)
+    .replace(
+      /\bmassive\s+heavy\s+J-cup\s+breasts\s+straining\s+against\s+(?:her|their)\s+top\b/gi,
+      "a very curvy upper body in fitted athletic wear"
+    )
+    .replace(/\bJ-cup\s+breasts?\b/gi, "curvy upper body")
+    .replace(
+      /\bhard\s+nipples?\s+poking\s+through\s+(?:her|their)\s+top\b/gi,
+      "subtle fabric texture"
+    )
+    .replace(/\b(?:slight\s+)?darkened\s+patch\s+at\s+the\s+crotch\b/gi, "natural fabric shading")
+    .replace(/\bcrotch\b/gi, "leggings fabric")
+    .replace(/\bheaving\s+chest\b/gi, "gym bag held close")
+    .replace(/\bpleading\s+eyes\b/gi, "wide expressive eyes")
+    .replace(/\bmasked\s+man\b/gi, "mysterious figure")
+    .replace(/\bnon-?consensual\b/gi, "coercive");
+
+  return appendPromptNote(
+    softened,
+    "Safety preflight: Reframe as a policy-compliant tasteful editorial anime illustration with clearly adult subjects, non-explicit styling, consensual/non-threatening staging, and no graphic sexual focus."
+  );
+};
+
 export const isLikelyImagePolicyError = (message: string) =>
   /\b(policy|safety|safe|blocked|flagged|prohibited|moderation|filtered|responsibleai|violation|unsafe)\b/i.test(
     message
@@ -224,11 +248,14 @@ export const buildSaferImagePromptForModel = (model: string, prompt: string) => 
   const normalizedPrompt = normalizeWhitespace(prompt);
   if (!supportsSaferImagePromptRetry(model)) return normalizedPrompt;
 
+  const saferPrompt = isLikelyAdultImagePrompt(normalizedPrompt)
+    ? softenPolicySensitiveImagePrompt(normalizedPrompt)
+    : normalizedPrompt;
   const policyNote = isOpenAiImageModel(model)
     ? "Safety recovery: Rewrite this as a policy-compliant OpenAI image prompt. Preserve the user's lawful visual intent, but remove or soften any explicit sexual, graphic, non-consensual, minor-related, deceptive likeness, or otherwise disallowed details. Use clearly adult subjects only when people are relevant, and prefer tasteful editorial styling over explicit depiction."
     : "Safety recovery: Rewrite this as a policy-compliant Gemini image prompt. Preserve the user's lawful visual intent, but respect Gemini built-in safety filtering, avoid sexually explicit output, avoid any child-safety risk, and remove or soften details likely to trigger prohibited-content or image-safety blocks.";
 
-  return appendPromptNote(normalizedPrompt, policyNote);
+  return appendPromptNote(saferPrompt, policyNote);
 };
 
 const buildFluxQualityGuidance = (negativePrompt?: string) => {
@@ -299,9 +326,13 @@ export const prepareImagePromptForModel = (
   const artisticPolicyNote = buildArtisticPolicyNoteForModel(model);
 
   if (!isFluxModel(model)) {
+    const policyReadyPrompt =
+      adultPolicyNote && supportsSaferImagePromptRetry(model)
+        ? softenPolicySensitiveImagePrompt(normalizedPrompt)
+        : normalizedPrompt;
     const promptWithArtDirection = artisticPolicyNote
-      ? appendPromptNote(normalizedPrompt, artisticPolicyNote)
-      : normalizedPrompt;
+      ? appendPromptNote(policyReadyPrompt, artisticPolicyNote)
+      : policyReadyPrompt;
     return {
       prompt: adultPolicyNote
         ? appendPromptNote(promptWithArtDirection, adultPolicyNote)

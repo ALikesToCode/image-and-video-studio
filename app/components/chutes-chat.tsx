@@ -69,7 +69,9 @@ import {
   toChatCompletionMessages,
 } from "@/lib/chat-tooling";
 import {
+  buildSaferImagePromptForModel,
   buildProviderPolicyHintForImageModels,
+  isLikelyImagePolicyError,
   isFluxModel,
   prepareImageModelRequests,
   resolveNavyChatImageSizing,
@@ -96,6 +98,7 @@ type ChatMessage = {
   name?: string;
   images?: ChatImageAsset[];
   media?: ChatMediaAsset[];
+  transient?: boolean;
 };
 
 type ChutesChatProps = {
@@ -325,6 +328,63 @@ function ThinkingBlock({ content }: { content: string }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function ToolCallsBlock({ toolCalls }: { toolCalls: ToolCall[] }) {
+  if (!toolCalls.length) return null;
+
+  return (
+    <div className="mt-3 space-y-2">
+      {toolCalls.map((toolCall) => {
+        const rawArgs = toolCall.function.arguments;
+        let formattedArgs = rawArgs;
+        let promptPreview = "";
+
+        try {
+          const parsed = JSON.parse(rawArgs) as Record<string, unknown>;
+          formattedArgs = JSON.stringify(parsed, null, 2);
+          const promptValue = parsed.prompt ?? parsed.input ?? parsed.text;
+          promptPreview = typeof promptValue === "string" ? promptValue : "";
+        } catch {
+          // Tool arguments arrive as streamed JSON fragments, so invalid JSON is expected mid-stream.
+        }
+
+        return (
+          <div
+            key={toolCall.id}
+            className="rounded-xl border border-primary/15 bg-primary/5 p-2.5 text-xs"
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2 font-medium text-primary">
+                <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+                <span className="truncate">Calling {toolCall.function.name}</span>
+              </div>
+              <span className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                streaming
+              </span>
+            </div>
+            {promptPreview ? (
+              <div className="mb-2 rounded-lg border border-border/40 bg-background/60 p-2">
+                <p className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Prompt
+                </p>
+                <p className="max-h-24 overflow-y-auto whitespace-pre-wrap leading-relaxed text-foreground/85">
+                  {promptPreview}
+                </p>
+              </div>
+            ) : null}
+            {formattedArgs ? (
+              <pre className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-background/60 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                {formattedArgs}
+              </pre>
+            ) : (
+              <p className="text-muted-foreground">Waiting for tool arguments...</p>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -658,7 +718,7 @@ export function ChutesChat({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const trimmed = stripHeavyMediaFromMessagesForStorage(
-      messages,
+      messages.filter((message) => !message.transient),
       MAX_CHAT_MESSAGES
     );
     const persist = async () => {
@@ -943,14 +1003,14 @@ export function ChutesChat({
       "When image generation is requested, optimize prompts so the output can also be used as a strong keyframe for video and as artwork aligned with narration/voice mood.";
 
     const fluxHint = fluxModelActive
-      ? `Flux mode is active (active image models: ${activeImageModelSummary || toolImageModel}). Strictly follow the Flux Cross-Modal Prompt Protocol below whenever a Flux-family image model is active.`
+      ? `Flux mode is active (active image models: ${activeImageModelSummary || toolImageModel}). Strictly follow the Flux Cross-Modal Prompt Protocol below whenever a Flux-family image model is active. The tool layer will also convert Flux-family image requests into an "Artwork direction" prompt with "Desired qualities"; do not send raw negative-prompt style text for Flux.`
       : "If the user asks for Flux or selects a Flux model, switch into Flux Cross-Modal Prompt Protocol.";
     const policyScopeHint = providerPolicyHint
       ? `${providerPolicyHint}
 Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
       : "";
     const imagePromptInstruction =
-      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Do not include a model in generate_image arguments unless the user explicitly asks for that exact model. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details.";
+      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Do not include a model in generate_image arguments unless the user explicitly asks for that exact model. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
 
     const defaultPrompt = `${promptGuide}
 ${FLUX_CROSS_MODAL_GUIDE}
@@ -998,9 +1058,12 @@ ${defaultPrompt}`;
         model,
         messages: [
           { role: "system", content: systemPrompt },
-          ...toChatCompletionMessages(items, {
-            includeReasoningContent: provider === "navy",
-          }),
+          ...toChatCompletionMessages(
+            items.filter((item) => !item.transient),
+            {
+              includeReasoningContent: provider === "navy",
+            }
+          ),
         ],
         ...(
           hasEnabledTools
@@ -1193,7 +1256,14 @@ ${defaultPrompt}`;
 
   const runGenerateImage = async (
     args: Record<string, unknown>,
-    context?: { assistantContent: string; userPrompt: string }
+    context?: { assistantContent: string; userPrompt: string },
+    onModelProgress?: (update: {
+      model: string;
+      status: "running" | "success" | "error";
+      prompt?: string;
+      images?: ChatImageAsset[];
+      error?: string;
+    }) => void
   ) => {
     if (!apiKey.trim()) {
       throw new Error("Missing API key for image tool.");
@@ -1266,111 +1336,161 @@ ${defaultPrompt}`;
       if (!request) {
         throw new Error(`Image model ${targetModel} is not prepared.`);
       }
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-api-key": apiKey,
-        },
-        body: JSON.stringify(request.body),
-      });
-      let payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload?.error ?? "Image tool failed.");
-      }
-
-      if (provider === "navy" && typeof payload?.id === "string" && payload.id) {
-        const maxAttempts = 60;
-        let delayMs = 3000;
-        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-          const pollResponse = await fetch(
-            `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
-            {
-              headers: {
-                "x-user-api-key": apiKey,
-              },
-            }
-          );
-          const pollPayload = await pollResponse.json();
-          if (!pollResponse.ok && pollResponse.status !== 429) {
-            throw new Error(pollPayload?.error ?? "Unable to poll image job.");
-          }
-          if (pollPayload?.done) {
-            payload = pollPayload;
-            break;
-          }
-          delayMs =
-            typeof pollPayload?.retryAfterMs === "number" &&
-            Number.isFinite(pollPayload.retryAfterMs)
-              ? Math.min(Math.max(pollPayload.retryAfterMs, 1000), 30_000)
-              : pollResponse.status === 429
-                ? Math.min(delayMs * 2, 30_000)
-                : 3000;
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const executeRequest = async () => {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-api-key": apiKey,
+          },
+          body: JSON.stringify(request.body),
+        });
+        let payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "Image tool failed.");
         }
-      }
 
-      const images = Array.isArray(payload?.images)
-        ? (payload.images as Array<{
-            data?: unknown;
-            b64_json?: unknown;
-            mimeType?: unknown;
-            mime_type?: unknown;
-            url?: unknown;
-          }>)
-        : [];
-      if (!images.length) {
-        throw new Error("No images returned by tool.");
-      }
-      const parsedImages = (
-        await Promise.all(
-          images.map(async (image) => {
-            const data =
-              typeof image?.data === "string" && image.data
-                ? image.data
-                : typeof image?.b64_json === "string" && image.b64_json
-                  ? image.b64_json
-                  : "";
-            const mimeType =
-              typeof image?.mimeType === "string"
-                ? image.mimeType
-                : typeof image?.mime_type === "string"
-                  ? image.mime_type
-                  : "image/png";
-            if (data) {
-              return {
-                id: createId(),
-                dataUrl: dataUrlFromBase64(data, mimeType),
-                mimeType,
-                model: targetModel,
-              };
+        if (provider === "navy" && typeof payload?.id === "string" && payload.id) {
+          const maxAttempts = 60;
+          let delayMs = 3000;
+          for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            const pollResponse = await fetch(
+              `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
+              {
+                headers: {
+                  "x-user-api-key": apiKey,
+                },
+              }
+            );
+            const pollPayload = await pollResponse.json();
+            if (!pollResponse.ok && pollResponse.status !== 429) {
+              throw new Error(pollPayload?.error ?? "Unable to poll image job.");
             }
-            if (typeof image?.url === "string") {
-              const dataUrl = await fetchAsDataUrl(image.url);
-              return {
-                id: createId(),
-                dataUrl,
-                mimeType,
-                model: targetModel,
-              };
+            if (pollPayload?.done) {
+              if (typeof pollPayload?.error === "string" && pollPayload.error) {
+                throw new Error(pollPayload.error);
+              }
+              payload = pollPayload;
+              break;
             }
-            return null;
-          })
-        )
-      ).filter(
-        (
-          item
-        ): item is { id: string; dataUrl: string; mimeType: string; model: string } =>
-          !!item
-      );
-      if (!parsedImages.length) {
-        throw new Error("No usable images returned by tool.");
+            delayMs =
+              typeof pollPayload?.retryAfterMs === "number" &&
+              Number.isFinite(pollPayload.retryAfterMs)
+                ? Math.min(Math.max(pollPayload.retryAfterMs, 1000), 30_000)
+                : pollResponse.status === 429
+                  ? Math.min(delayMs * 2, 30_000)
+                  : 3000;
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+        }
+
+        const images = Array.isArray(payload?.images)
+          ? (payload.images as Array<{
+              data?: unknown;
+              b64_json?: unknown;
+              mimeType?: unknown;
+              mime_type?: unknown;
+              url?: unknown;
+            }>)
+          : [];
+        if (!images.length) {
+          throw new Error("No images returned by tool.");
+        }
+        const parsedImages = (
+          await Promise.all(
+            images.map(async (image) => {
+              const data =
+                typeof image?.data === "string" && image.data
+                  ? image.data
+                  : typeof image?.b64_json === "string" && image.b64_json
+                    ? image.b64_json
+                    : "";
+              const mimeType =
+                typeof image?.mimeType === "string"
+                  ? image.mimeType
+                  : typeof image?.mime_type === "string"
+                    ? image.mime_type
+                    : "image/png";
+              if (data) {
+                return {
+                  id: createId(),
+                  dataUrl: dataUrlFromBase64(data, mimeType),
+                  mimeType,
+                  model: targetModel,
+                };
+              }
+              if (typeof image?.url === "string") {
+                const dataUrl = await fetchAsDataUrl(image.url);
+                return {
+                  id: createId(),
+                  dataUrl,
+                  mimeType,
+                  model: targetModel,
+                };
+              }
+              return null;
+            })
+          )
+        ).filter(
+          (
+            item
+          ): item is { id: string; dataUrl: string; mimeType: string; model: string } =>
+            !!item
+        );
+        if (!parsedImages.length) {
+          throw new Error("No usable images returned by tool.");
+        }
+        return parsedImages;
+      };
+
+      try {
+        return await executeRequest();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Image tool failed.";
+        const currentPrompt =
+          typeof request.body.prompt === "string" ? request.body.prompt : prompt;
+        const retryPrompt = buildSaferImagePromptForModel(targetModel, currentPrompt);
+        if (retryPrompt === currentPrompt || !isLikelyImagePolicyError(message)) {
+          throw error;
+        }
+        request.prompt = retryPrompt;
+        request.body.prompt = retryPrompt;
+        return await executeRequest();
       }
-      return parsedImages;
     };
 
-    const results = await Promise.allSettled(
-      modelsToRun.map((targetModel) => invokeImageModel(targetModel))
+    const results = await Promise.all(
+      modelsToRun.map(async (targetModel) => {
+        const request = imageRequestByModel.get(targetModel);
+        const promptForModel =
+          typeof request?.body.prompt === "string" ? request.body.prompt : prompt;
+        onModelProgress?.({
+          model: targetModel,
+          status: "running",
+          prompt: promptForModel,
+        });
+
+        try {
+          const value = await invokeImageModel(targetModel);
+          onModelProgress?.({
+            model: targetModel,
+            status: "success",
+            prompt: promptForModel,
+            images: value,
+          });
+          return { status: "fulfilled" as const, value };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Image generation failed.";
+          onModelProgress?.({
+            model: targetModel,
+            status: "error",
+            prompt: promptForModel,
+            error: message,
+          });
+          return { status: "rejected" as const, reason: error };
+        }
+      })
     );
     const parsedImages = results.flatMap((result) =>
       result.status === "fulfilled" ? result.value : []
@@ -1746,17 +1866,40 @@ ${defaultPrompt}`;
       try {
         if (toolName) {
           onProgress?.({
-            id: createId(),
+            id: `${toolCall.id}:invoking`,
             role: "tool",
             content: `Invoking ${toolName}...`,
             promptUsed: invocationPrompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
+            transient: true,
           });
         }
 
         if (toolName === "generate_image") {
-          const result = await runGenerateImage(args, context);
+          const result = await runGenerateImage(args, context, (update) => {
+            const imageCount = update.images?.length ?? 0;
+            const content =
+              update.status === "running"
+                ? `Generating image with ${update.model}...`
+                : update.status === "success"
+                  ? `Generated ${imageCount} image${imageCount === 1 ? "" : "s"} with ${update.model}.`
+                  : `Image generation failed with ${update.model}: ${update.error ?? "Unknown error."}`;
+            onProgress?.({
+              id: `${toolCall.id}:image:${update.model}`,
+              role: "tool",
+              content,
+              promptUsed: update.prompt || undefined,
+              toolCallId: toolCall.id,
+              name: toolName,
+              images: update.images,
+              media: update.images?.map((image) => ({
+                ...image,
+                kind: "image" as const,
+              })),
+              transient: true,
+            });
+          });
           if (saveToGallery && onSaveImages) {
             await onSaveImages({
               images: result.images,
@@ -1909,6 +2052,27 @@ ${defaultPrompt}`;
         // Replace the placeholder in currentMessages with the finalized one
         currentMessages = [...currentMessages.slice(0, -1), finalizedAssistantMessage];
         setMessages(currentMessages);
+        const applyProgressMessage = (message: ChatMessage) => {
+          currentMessages = currentMessages.some((item) => item.id === message.id)
+            ? currentMessages.map((item) => item.id === message.id ? message : item)
+            : [...currentMessages, message];
+          setMessages(currentMessages);
+        };
+        const removeProgressMessages = (completedToolCalls: ToolCall[]) => {
+          const completedToolCallIds = new Set(
+            completedToolCalls.map((toolCall) => toolCall.id).filter(Boolean)
+          );
+          if (!completedToolCallIds.size) return;
+          currentMessages = currentMessages.filter(
+            (message) =>
+              !(
+                message.transient &&
+                message.toolCallId &&
+                completedToolCallIds.has(message.toolCallId)
+              )
+          );
+          setMessages(currentMessages);
+        };
 
         // Check for tool calls
         if (!finalToolCalls.length) {
@@ -1949,10 +2113,11 @@ ${defaultPrompt}`;
               setMessages(currentMessages);
               const toolMessages = await handleToolCalls(
                 [syntheticToolCall],
-                undefined,
+                applyProgressMessage,
                 { assistantContent: finalResult.content, userPrompt: trimmed }
               );
               if (toolMessages.length) {
+                removeProgressMessages([syntheticToolCall]);
                 currentMessages = [...currentMessages, ...toolMessages];
                 setMessages(currentMessages);
                 continue;
@@ -1965,9 +2130,10 @@ ${defaultPrompt}`;
         // Run tools
         const toolMessages = await handleToolCalls(
           finalToolCalls,
-          undefined,
+          applyProgressMessage,
           { assistantContent: finalResult.content, userPrompt: trimmed }
         );
+        removeProgressMessages(finalToolCalls);
         currentMessages = [...currentMessages, ...toolMessages];
         setMessages(currentMessages);
       }
@@ -2510,6 +2676,10 @@ ${defaultPrompt}`;
                                   .join(", ")}...`
                               : "Thinking..."}
                           </div>
+                        ) : null}
+
+                        {isAssistant && message.toolCalls?.length ? (
+                          <ToolCallsBlock toolCalls={message.toolCalls} />
                         ) : null}
 
                         {isTool && message.promptUsed ? (

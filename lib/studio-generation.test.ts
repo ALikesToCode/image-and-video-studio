@@ -440,6 +440,25 @@ test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompt
   assert.equal(isLikelyImagePolicyError("blocked by image safety policy"), true);
 });
 
+test("Policy-sensitive OpenAI and Gemini prompts are softened before the first request", () => {
+  const prompt = `Create a high-detail modern anime illustration.
+Main character: a 29-year-old adult woman with massive heavy J-cup breasts straining against her top and impossibly wide hips.
+Outfit: skin-tight pink sports crop top with a darkened patch at the crotch.
+Lighting: shadows emphasize hard nipples poking through her top.`;
+
+  const openAi = prepareImagePromptForModel("gpt-image-2", prompt).prompt;
+  const gemini = prepareImagePromptForModel("nano-banana-2", prompt).prompt;
+  const flux = prepareImagePromptForModel("flux.2-pro", prompt).prompt;
+
+  assert.doesNotMatch(openAi, /J-cup|hard nipples|crotch/i);
+  assert.doesNotMatch(gemini, /J-cup|hard nipples|crotch/i);
+  assert.match(openAi, /clearly adult/i);
+  assert.match(openAi, /tasteful editorial/i);
+  assert.match(gemini, /clearly adult/i);
+  assert.match(gemini, /tasteful editorial/i);
+  assert.match(flux, /J-cup|hard nipples|crotch/i);
+});
+
 test("Non-NSFW prompts remain unchanged for non-policy non-Flux models", () => {
   const prepared = prepareImagePromptForModel(
     "plain-image-model",
