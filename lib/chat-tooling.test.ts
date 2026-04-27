@@ -9,6 +9,7 @@ import {
   normalizeDeepSeekReasoningEffort,
   normalizeImageToolModelRequest,
   repairImageToolArguments,
+  resolveToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
@@ -105,6 +106,23 @@ test("Image tool argument repair leaves valid image prompts intact", () => {
     "High-detail anime portrait in a neon arcade, cinematic rim light."
   );
   assert.equal(repaired.negative_prompt, "watermark, bad hands");
+});
+
+test("Malformed image tool arguments recover from assistant draft instead of erroring", () => {
+  const resolved = resolveToolArguments({
+    toolName: "generate_image",
+    rawArgs: "{prompt:}",
+    context: {
+      assistantContent:
+        "Final Flux prompt: cinematic anime rooftop duel, blue storm light, sharp silhouettes.",
+      userPrompt: "Generate that image now.",
+    },
+  });
+
+  assert.equal(resolved.recovered, true);
+  assert.deepEqual(resolved.args, {
+    prompt: "cinematic anime rooftop duel, blue storm light, sharp silhouettes.",
+  });
 });
 
 test("Flux image tool repair prefers the assistant draft when tool args echo the raw request", () => {

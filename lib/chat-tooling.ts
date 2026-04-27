@@ -341,6 +341,42 @@ export const repairImageToolArguments = (
   return repairedArgs;
 };
 
+export const parseToolArguments = (rawArgs: string) => {
+  if (!rawArgs) return {};
+  const parsed = JSON.parse(rawArgs);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid tool arguments.");
+  }
+  return parsed as Record<string, unknown>;
+};
+
+export const resolveToolArguments = ({
+  toolName,
+  rawArgs,
+  context,
+}: {
+  toolName: string;
+  rawArgs: string;
+  context?: { assistantContent: string; userPrompt: string };
+}) => {
+  try {
+    return { args: parseToolArguments(rawArgs), recovered: false };
+  } catch (error) {
+    if (toolName === "generate_image" && context) {
+      return {
+        args: {
+          prompt: extractImagePromptForToolCall(
+            context.assistantContent,
+            context.userPrompt
+          ),
+        },
+        recovered: true,
+      };
+    }
+    throw error;
+  }
+};
+
 export const normalizeImageToolModelRequest = ({
   requestedModel,
   defaultModel,

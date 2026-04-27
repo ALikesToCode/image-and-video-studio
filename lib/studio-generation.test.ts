@@ -629,4 +629,6 @@ test("Chutes chat system prompt explicitly instructs tool usage", () => {
 
   assert.match(prompt, /call generate_image/i);
   assert.match(prompt, /default image model: z-image-turbo/i);
+  assert.match(prompt, /always include a prompt/i);
+  assert.match(prompt, /do not include a model/i);
 });

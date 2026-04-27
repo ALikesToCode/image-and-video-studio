@@ -61,6 +61,7 @@ import {
   isDeepSeekV4Model,
   normalizeImageToolModelRequest,
   repairImageToolArguments,
+  resolveToolArguments,
   resolveRequestedImageModels,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
@@ -949,7 +950,7 @@ export function ChutesChat({
 Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
       : "";
     const imagePromptInstruction =
-      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details.";
+      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Do not include a model in generate_image arguments unless the user explicitly asks for that exact model. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details.";
 
     const defaultPrompt = `${promptGuide}
 ${FLUX_CROSS_MODAL_GUIDE}
@@ -1680,15 +1681,6 @@ ${defaultPrompt}`;
     };
   };
 
-  const parseToolArgs = (rawArgs: string) => {
-    if (!rawArgs) return {};
-    const parsed = JSON.parse(rawArgs);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("Invalid tool arguments.");
-    }
-    return parsed as Record<string, unknown>;
-  };
-
   const copyPromptText = async (messageId: string, promptText: string) => {
     if (!promptText.trim()) return;
     try {
@@ -1714,7 +1706,11 @@ ${defaultPrompt}`;
       let args: Record<string, unknown> = {};
 
       try {
-        args = parseToolArgs(toolCall.function?.arguments ?? "");
+        args = resolveToolArguments({
+          toolName,
+          rawArgs: toolCall.function?.arguments ?? "",
+          context,
+        }).args;
       } catch {
         toolMessages.push({
           id: createId(),

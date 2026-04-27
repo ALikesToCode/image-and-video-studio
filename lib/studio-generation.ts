@@ -1003,6 +1003,8 @@ Rules:
 - If the user explicitly asks to generate, create, render, or make an image and the request is specific enough, call generate_image.
 - If the request is missing essential details, ask one short clarification question instead of guessing.
 - Use the default image model unless the user asks for a specific model.
+- When calling generate_image, always include a prompt string.
+- Do not include a model in generate_image arguments unless the user explicitly asks for that exact model.
 - For FLUX-style models, avoid negative prompts and rewrite exclusions as positive visual instructions.
 - After the tool returns, briefly confirm what was generated and keep the response concise.
 

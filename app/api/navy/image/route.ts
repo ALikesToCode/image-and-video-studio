@@ -139,6 +139,21 @@ const normalizeNavyImages = async (items: unknown[]) => {
   return images;
 };
 
+const navyImageCandidates = (record: Record<string, unknown>) => {
+  const result =
+    record.result && typeof record.result === "object"
+      ? (record.result as Record<string, unknown>)
+      : record;
+  const items = Array.isArray(result.data) ? [...result.data] : [];
+  if (Array.isArray(result.images)) {
+    items.push(...result.images);
+  }
+  if (typeof result.url === "string" || typeof result.data === "string") {
+    items.push(result);
+  }
+  return items;
+};
+
 const imageDownloadError = () =>
   Response.json(
     { error: "Unable to download generated image." },
@@ -244,9 +259,7 @@ export async function POST(req: Request) {
 
   let images: NavyImagePayload[];
   try {
-    images = Array.isArray(dataRecord.data)
-      ? await normalizeNavyImages(dataRecord.data)
-      : [];
+    images = await normalizeNavyImages(navyImageCandidates(dataRecord));
   } catch {
     return imageDownloadError();
   }
@@ -304,15 +317,9 @@ export async function GET(req: Request) {
     return Response.json({ done: false, status: dataRecord.status });
   }
 
-  const result =
-    dataRecord.result && typeof dataRecord.result === "object"
-      ? (dataRecord.result as Record<string, unknown>)
-      : dataRecord;
   let images: NavyImagePayload[];
   try {
-    images = Array.isArray(result.data)
-      ? await normalizeNavyImages(result.data)
-      : [];
+    images = await normalizeNavyImages(navyImageCandidates(dataRecord));
   } catch {
     return imageDownloadError();
   }

@@ -394,6 +394,48 @@ test("Navy image route accepts data URL result URLs from async jobs", async () =
   }
 });
 
+test("Navy image route accepts direct result URLs from async jobs", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    calls.push(url);
+    if (url === "https://api.navy/v1/images/generations/job_direct_url") {
+      return Response.json({
+        id: "job_direct_url",
+        status: "completed",
+        result: {
+          url: "data:image/png;base64,BAU=",
+        },
+      });
+    }
+
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const response = await navyImageGet(
+      new Request("https://studio.test/api/navy/image?id=job_direct_url", {
+        headers: {
+          "x-user-api-key": "navy-secret",
+        },
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, {
+      done: true,
+      images: [{ data: "BAU=", mimeType: "image/png" }],
+    });
+    assert.deepEqual(calls, [
+      "https://api.navy/v1/images/generations/job_direct_url",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route returns immediate failed job messages", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
