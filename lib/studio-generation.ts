@@ -189,6 +189,13 @@ const isGeminiImagePolicyModel = (model: string) => {
 const isLikelyAdultImagePrompt = (prompt: string) =>
   ADULT_IMAGE_PROMPT_PATTERN.test(prompt);
 
+const POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN =
+  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+eyes|masked\s+man|non-?consensual)\b/i;
+
+const isPolicySensitiveImagePrompt = (prompt: string) =>
+  isLikelyAdultImagePrompt(prompt) ||
+  POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN.test(prompt);
+
 const buildOpenAiAdultImagePolicyNote = () =>
   "Policy guardrails: Keep any adult sexual content limited to clearly consenting adults. Do not include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse. Respect OpenAI safety policies and moderation instead of trying to bypass them.";
 
@@ -231,7 +238,7 @@ const softenPolicySensitiveImagePrompt = (prompt: string) => {
     .replace(/\bheaving\s+chest\b/gi, "gym bag held close")
     .replace(/\bpleading\s+eyes\b/gi, "wide expressive eyes")
     .replace(/\bmasked\s+man\b/gi, "mysterious figure")
-    .replace(/\bnon-?consensual\b/gi, "coercive");
+    .replace(/\bnon-?consensual\b/gi, "consensual");
 
   return appendPromptNote(
     softened,
@@ -248,7 +255,7 @@ export const buildSaferImagePromptForModel = (model: string, prompt: string) => 
   const normalizedPrompt = normalizeWhitespace(prompt);
   if (!supportsSaferImagePromptRetry(model)) return normalizedPrompt;
 
-  const saferPrompt = isLikelyAdultImagePrompt(normalizedPrompt)
+  const saferPrompt = isPolicySensitiveImagePrompt(normalizedPrompt)
     ? softenPolicySensitiveImagePrompt(normalizedPrompt)
     : normalizedPrompt;
   const policyNote = isOpenAiImageModel(model)
@@ -327,7 +334,8 @@ export const prepareImagePromptForModel = (
 
   if (!isFluxModel(model)) {
     const policyReadyPrompt =
-      adultPolicyNote && supportsSaferImagePromptRetry(model)
+      supportsSaferImagePromptRetry(model) &&
+      isPolicySensitiveImagePrompt(normalizedPrompt)
         ? softenPolicySensitiveImagePrompt(normalizedPrompt)
         : normalizedPrompt;
     const promptWithArtDirection = artisticPolicyNote

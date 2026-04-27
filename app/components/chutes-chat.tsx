@@ -1368,7 +1368,7 @@ ${defaultPrompt}`;
             }
             if (pollPayload?.done) {
               if (typeof pollPayload?.error === "string" && pollPayload.error) {
-                throw new Error(pollPayload.error);
+                throw new Error(`Async image job failed: ${pollPayload.error}`);
               }
               payload = pollPayload;
               break;
@@ -1450,7 +1450,11 @@ ${defaultPrompt}`;
         const currentPrompt =
           typeof request.body.prompt === "string" ? request.body.prompt : prompt;
         const retryPrompt = buildSaferImagePromptForModel(targetModel, currentPrompt);
-        if (retryPrompt === currentPrompt || !isLikelyImagePolicyError(message)) {
+        const shouldRetry =
+          retryPrompt !== currentPrompt &&
+          isLikelyImagePolicyError(message) &&
+          (provider !== "navy" || message.startsWith("Async image job failed:"));
+        if (!shouldRetry) {
           throw error;
         }
         request.prompt = retryPrompt;

@@ -459,6 +459,19 @@ Lighting: shadows emphasize hard nipples poking through her top.`;
   assert.match(flux, /J-cup|hard nipples|crotch/i);
 });
 
+test("Threat-framed OpenAI and Gemini prompts are softened before the first request", () => {
+  const prompt =
+    "Create an anime scene with a nervous adult woman looking up with pleading eyes at a masked man in a dark doorway.";
+
+  const openAi = prepareImagePromptForModel("gpt-image-2", prompt).prompt;
+  const gemini = prepareImagePromptForModel("nano-banana-2", prompt).prompt;
+
+  assert.doesNotMatch(openAi, /pleading eyes|masked man/i);
+  assert.doesNotMatch(gemini, /pleading eyes|masked man/i);
+  assert.match(openAi, /non-threatening/i);
+  assert.match(gemini, /non-threatening/i);
+});
+
 test("Non-NSFW prompts remain unchanged for non-policy non-Flux models", () => {
   const prepared = prepareImagePromptForModel(
     "plain-image-model",
