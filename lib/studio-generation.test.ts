@@ -469,6 +469,33 @@ Lighting: shadows emphasize hard nipples faintly outlined through her top.`;
   assert.match(flux, /J-cup|hard nipples|crotch/i);
 });
 
+test("Selected image models receive separate family-specific prompt rewrites", () => {
+  const requests = prepareImageModelRequests({
+    models: ["gpt-image-2", "nano-banana-2", "flux.2-pro"],
+    baseBody: { size: "1024x1024" },
+    prompt:
+      "Create a high-detail anime portrait of an adult woman with a very large bust, hard nipples faintly outlined through her top, and nervous tension in a tidy bedroom.",
+  });
+  const byModel = new Map(requests.map((request) => [request.model, request.prompt]));
+  const gptPrompt = byModel.get("gpt-image-2") ?? "";
+  const nanoPrompt = byModel.get("nano-banana-2") ?? "";
+  const fluxPrompt = byModel.get("flux.2-pro") ?? "";
+
+  assert.match(gptPrompt, /OpenAI GPT Image rewrite/i);
+  assert.match(gptPrompt, /tasteful editorial anime illustration/i);
+  assert.match(gptPrompt, /rich composition/i);
+  assert.doesNotMatch(gptPrompt, /very large bust|hard nipples/i);
+
+  assert.match(nanoPrompt, /Gemini Nano Banana rewrite/i);
+  assert.match(nanoPrompt, /painterly anime illustration/i);
+  assert.match(nanoPrompt, /strong lighting/i);
+  assert.doesNotMatch(nanoPrompt, /very large bust|hard nipples/i);
+
+  assert.notEqual(gptPrompt, nanoPrompt);
+  assert.match(fluxPrompt, /very large bust|hard nipples/i);
+  assert.match(fluxPrompt, /Desired qualities/i);
+});
+
 test("Threat-framed OpenAI and Gemini prompts are softened before the first request", () => {
   const prompt =
     "Create an anime scene with a nervous adult woman looking up with pleading eyes at a masked man in a dark doorway.";

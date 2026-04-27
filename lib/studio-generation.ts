@@ -204,10 +204,10 @@ const buildGeminiAdultImagePolicyNote = () =>
 
 const buildArtisticPolicyNoteForModel = (model: string) => {
   if (isOpenAiImageModel(model)) {
-    return "System prompt: Create a policy-compliant artistic image prompt. Preserve all concrete subject, setting, composition, style, mood, and detail from the user request while rendering it with rich composition, tasteful art direction, and high visual clarity.";
+    return "OpenAI GPT Image rewrite: Create a policy-compliant artistic image prompt for a tasteful editorial anime illustration. Preserve all concrete subject, setting, composition, style, mood, and story details while removing explicit sexual focus and rendering the image with rich composition, refined lighting, and high visual clarity.";
   }
   if (isGeminiNativeImageModel(model)) {
-    return "System prompt: Create a policy-compliant Gemini Nano Banana image prompt. Preserve all concrete subject, setting, composition, style, mood, and detail from the user request while adding painterly visual detail, strong lighting, and high visual clarity.";
+    return "Gemini Nano Banana rewrite: Create a policy-compliant Gemini Nano Banana image prompt for a painterly anime illustration. Preserve all concrete subject, setting, composition, style, mood, and story details while avoiding explicit sexual focus and adding painterly visual detail, strong lighting, and high visual clarity.";
   }
   return "";
 };
@@ -228,6 +228,7 @@ const softenPolicySensitiveImagePrompt = (prompt: string) => {
       /\bmassive\s+heavy\s+J-cup\s+breasts\s+straining\s+against\s+(?:her|their)\s+top\b/gi,
       "an athletic curvy figure in fitted activewear"
     )
+    .replace(/\ba\s+(?:very\s+large|large)\s+bust\b/gi, "an athletic curvy figure")
     .replace(/\b(?:very\s+large|large)\s+bust\b/gi, "athletic curvy figure")
     .replace(/\bmassive\s+heavy\s+breasts?\b/gi, "athletic curvy figure")
     .replace(/\bJ-cup\s+breasts?\b/gi, "curvy upper body")
