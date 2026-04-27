@@ -376,7 +376,7 @@ test("Chat completion messages drop orphaned tool responses from older synthetic
   ]);
 });
 
-test("Chat messages omit UI-only thinking without a tool call", () => {
+test("Navy chat messages pass assistant reasoning content back without a tool call", () => {
   assert.deepEqual(
     toChatCompletionMessages(
       [
@@ -388,6 +388,25 @@ test("Chat messages omit UI-only thinking without a tool call", () => {
       ],
       { includeReasoningContent: true }
     ),
+    [
+      {
+        role: "assistant",
+        content: "Done.",
+        reasoning_content: "Hidden provider reasoning.",
+      },
+    ]
+  );
+});
+
+test("Chat messages omit assistant thinking unless reasoning content is requested", () => {
+  assert.deepEqual(
+    toChatCompletionMessages([
+      {
+        role: "assistant",
+        content: "Done.",
+        thinking: "Hidden provider reasoning.",
+      },
+    ]),
     [
       {
         role: "assistant",

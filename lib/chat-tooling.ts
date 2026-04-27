@@ -205,7 +205,6 @@ export const toChatCompletionMessages = (
     if (
       includeReasoningContent &&
       message.role === "assistant" &&
-      hasToolCalls &&
       typeof message.thinking === "string" &&
       message.thinking.trim()
     ) {
