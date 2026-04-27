@@ -99,13 +99,16 @@ test("Gemini image payload keeps Imagen separate from Gemini edit payloads", () 
   });
 
   assert.match(imagen.endpoint, /:predict$/);
-  assert.deepEqual(imagen.payload, {
-    instances: [{ prompt: "A product photo" }],
-    parameters: {
-      sampleCount: 2,
-      aspectRatio: "1:1",
-      imageSize: "2K",
-    },
+  const imagenPayload = imagen.payload as {
+    instances: Array<{ prompt: string }>;
+    parameters: Record<string, unknown>;
+  };
+  assert.match(imagenPayload.instances[0]?.prompt ?? "", /A product photo/);
+  assert.match(imagenPayload.instances[0]?.prompt ?? "", /Safety preflight/i);
+  assert.deepEqual(imagenPayload.parameters, {
+    sampleCount: 2,
+    aspectRatio: "1:1",
+    imageSize: "2K",
   });
 
   const gemini = buildGeminiImagePayload({
@@ -392,6 +395,7 @@ test("OpenAI image prompts add artistic policy guidance without losing details",
 
   assert.match(prepared.prompt, /ceramic robot painter/i);
   assert.match(prepared.prompt, /policy-compliant artistic image prompt/i);
+  assert.match(prepared.prompt, /Safety preflight/i);
   assert.match(prepared.prompt, /preserve all concrete subject/i);
   assert.match(prepared.prompt, /rich composition/i);
 });
@@ -404,6 +408,7 @@ test("Nano Banana image prompts add artistic policy guidance", () => {
 
   assert.match(prepared.prompt, /fantasy greenhouse/i);
   assert.match(prepared.prompt, /policy-compliant Gemini Nano Banana image prompt/i);
+  assert.match(prepared.prompt, /Safety preflight/i);
   assert.match(prepared.prompt, /painterly visual detail/i);
 });
 
@@ -444,14 +449,19 @@ test("Policy-sensitive OpenAI and Gemini prompts are softened before the first r
   const prompt = `Create a high-detail modern anime illustration.
 Main character: a 29-year-old adult woman with massive heavy J-cup breasts straining against her top and impossibly wide hips.
 Outfit: skin-tight pink sports crop top with a darkened patch at the crotch.
-Lighting: shadows emphasize hard nipples poking through her top.`;
+Pose: clutching a small gym bag to her heaving chest while looking up with pleading eyes at a masked man.
+Lighting: shadows emphasize hard nipples faintly outlined through her top.`;
 
   const openAi = prepareImagePromptForModel("gpt-image-2", prompt).prompt;
   const gemini = prepareImagePromptForModel("nano-banana-2", prompt).prompt;
   const flux = prepareImagePromptForModel("flux.2-pro", prompt).prompt;
 
-  assert.doesNotMatch(openAi, /J-cup|hard nipples|crotch/i);
-  assert.doesNotMatch(gemini, /J-cup|hard nipples|crotch/i);
+  assert.doesNotMatch(openAi, /J-cup|hard nipples|crotch|heaving chest|pleading eyes|masked man/i);
+  assert.doesNotMatch(gemini, /J-cup|hard nipples|crotch|heaving chest|pleading eyes|masked man/i);
+  assert.doesNotMatch(openAi, /massive heavy curvy upper body|leggings fabric of the leggings/i);
+  assert.doesNotMatch(gemini, /massive heavy curvy upper body|leggings fabric of the leggings/i);
+  assert.match(openAi, /athletic curvy figure/i);
+  assert.match(openAi, /natural fabric shading/i);
   assert.match(openAi, /clearly adult/i);
   assert.match(openAi, /tasteful editorial/i);
   assert.match(gemini, /clearly adult/i);

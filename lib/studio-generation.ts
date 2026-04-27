@@ -190,7 +190,7 @@ const isLikelyAdultImagePrompt = (prompt: string) =>
   ADULT_IMAGE_PROMPT_PATTERN.test(prompt);
 
 const POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN =
-  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+eyes|masked\s+man|non-?consensual)\b/i;
+  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust)\b/i;
 
 const isPolicySensitiveImagePrompt = (prompt: string) =>
   isLikelyAdultImagePrompt(prompt) ||
@@ -226,17 +226,26 @@ const softenPolicySensitiveImagePrompt = (prompt: string) => {
   const softened = normalizeWhitespace(prompt)
     .replace(
       /\bmassive\s+heavy\s+J-cup\s+breasts\s+straining\s+against\s+(?:her|their)\s+top\b/gi,
-      "a very curvy upper body in fitted athletic wear"
+      "an athletic curvy figure in fitted activewear"
     )
+    .replace(/\b(?:very\s+large|large)\s+bust\b/gi, "athletic curvy figure")
+    .replace(/\bmassive\s+heavy\s+breasts?\b/gi, "athletic curvy figure")
     .replace(/\bJ-cup\s+breasts?\b/gi, "curvy upper body")
     .replace(
       /\bhard\s+nipples?\s+poking\s+through\s+(?:her|their)\s+top\b/gi,
       "subtle fabric texture"
     )
+    .replace(
+      /\bhard\s+nipples?\s+faintly\s+outlined\s+through\s+(?:her|their)\s+top\b/gi,
+      "subtle fabric texture"
+    )
+    .replace(/\bhard\s+nipples?\b/gi, "subtle fabric texture")
     .replace(/\b(?:slight\s+)?darkened\s+patch\s+at\s+the\s+crotch\b/gi, "natural fabric shading")
     .replace(/\bcrotch\b/gi, "leggings fabric")
-    .replace(/\bheaving\s+chest\b/gi, "gym bag held close")
-    .replace(/\bpleading\s+eyes\b/gi, "wide expressive eyes")
+    .replace(/\bclutching\s+a\s+small\s+gym\s+bag\s+to\s+(?:her|their)\s+heaving\s+chest\b/gi, "holding a small gym bag close")
+    .replace(/\bto\s+(?:her|their)\s+heaving\s+chest\b/gi, "held close")
+    .replace(/\bheaving\s+chest\b/gi, "upper body")
+    .replace(/\bpleading\s+(?:wide\s+)?eyes\b/gi, "wide expressive eyes")
     .replace(/\bmasked\s+man\b/gi, "mysterious figure")
     .replace(/\bnon-?consensual\b/gi, "consensual");
 
@@ -334,8 +343,7 @@ export const prepareImagePromptForModel = (
 
   if (!isFluxModel(model)) {
     const policyReadyPrompt =
-      supportsSaferImagePromptRetry(model) &&
-      isPolicySensitiveImagePrompt(normalizedPrompt)
+      supportsSaferImagePromptRetry(model)
         ? softenPolicySensitiveImagePrompt(normalizedPrompt)
         : normalizedPrompt;
     const promptWithArtDirection = artisticPolicyNote
