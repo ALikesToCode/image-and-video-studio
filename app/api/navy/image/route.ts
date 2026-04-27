@@ -39,6 +39,10 @@ const NAVY_IMAGE_MEDIA_HOSTS = [
   "api.together.ai",
   "replicate.delivery",
   ".replicate.delivery",
+  ".blob.core.windows.net",
+  "storage.googleapis.com",
+  ".storage.googleapis.com",
+  ".googleusercontent.com",
 ];
 
 const retryAfterMs = (response: Response, fallbackMs = 8_000) => {

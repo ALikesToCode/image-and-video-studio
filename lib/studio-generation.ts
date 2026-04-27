@@ -170,8 +170,11 @@ const isOpenAiImageModel = (model: string) =>
 
 const isGeminiNativeImageModel = (model: string) => {
   const normalized = model.toLowerCase();
-  return normalized.includes("gemini-") &&
-    (normalized.includes("flash-image") || normalized.includes("pro-image"));
+  return (
+    normalized.includes("nano-banana") ||
+    (normalized.includes("gemini-") &&
+      (normalized.includes("flash-image") || normalized.includes("pro-image")))
+  );
 };
 
 const isGeminiImagePolicyModel = (model: string) => {
@@ -191,6 +194,16 @@ const buildOpenAiAdultImagePolicyNote = () =>
 
 const buildGeminiAdultImagePolicyNote = () =>
   "Policy guardrails: Respect Gemini safety settings for sexually explicit content and the built-in child safety protections. Keep any adult sexual content limited to adults, and do not try to bypass Gemini filtering.";
+
+const buildArtisticPolicyNoteForModel = (model: string) => {
+  if (isOpenAiImageModel(model)) {
+    return "System prompt: Create a policy-compliant artistic image prompt. Preserve all concrete subject, setting, composition, style, mood, and detail from the user request while rendering it with rich composition, tasteful art direction, and high visual clarity.";
+  }
+  if (isGeminiNativeImageModel(model)) {
+    return "System prompt: Create a policy-compliant Gemini Nano Banana image prompt. Preserve all concrete subject, setting, composition, style, mood, and detail from the user request while adding painterly visual detail, strong lighting, and high visual clarity.";
+  }
+  return "";
+};
 
 const buildAdultImagePolicyNoteForModel = (model: string, prompt: string) => {
   if (!isLikelyAdultImagePrompt(prompt)) return "";
@@ -283,12 +296,16 @@ export const prepareImagePromptForModel = (
     model,
     normalizedPrompt
   );
+  const artisticPolicyNote = buildArtisticPolicyNoteForModel(model);
 
   if (!isFluxModel(model)) {
+    const promptWithArtDirection = artisticPolicyNote
+      ? appendPromptNote(normalizedPrompt, artisticPolicyNote)
+      : normalizedPrompt;
     return {
       prompt: adultPolicyNote
-        ? appendPromptNote(normalizedPrompt, adultPolicyNote)
-        : normalizedPrompt,
+        ? appendPromptNote(promptWithArtDirection, adultPolicyNote)
+        : promptWithArtDirection,
       negativePrompt: trimmedNegativePrompt,
     };
   }
@@ -854,12 +871,12 @@ export const buildProviderPolicyHintForImageModels = (models: string[]) => {
   const hints: string[] = [];
   if (models.some(isOpenAiImageModel)) {
     hints.push(
-      "For OpenAI GPT Image models, preserve lawful adult intent when requested, but keep prompts limited to consenting adults and never include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse."
+      "For OpenAI GPT Image models, preserve lawful adult intent and concrete visual details while adding artistic direction, but keep prompts policy-compliant: consenting adults only when adult themes are relevant, and never include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse."
     );
   }
   if (models.some(isGeminiNativeImageModel)) {
     hints.push(
-      "For Gemini Nano Banana models, preserve lawful adult intent when requested, but respect Gemini safety settings for sexually explicit content and the built-in child safety protections."
+      "For Gemini Nano Banana models, preserve lawful adult intent and concrete visual details while adding painterly art direction, but respect Gemini safety settings for sexually explicit content and the built-in child safety protections."
     );
   }
   return hints.join("\n");

@@ -203,6 +203,15 @@ const MAX_REFERENCES = 24;
 
 // --- Utils ---
 
+const yieldToPaint = () =>
+    new Promise<void>((resolve) => {
+        if (typeof window !== "undefined" && window.requestAnimationFrame) {
+            window.requestAnimationFrame(() => resolve());
+            return;
+        }
+        setTimeout(resolve, 0);
+    });
+
 const readLocalStorage = <T,>(key: string, fallback: T): T => {
     if (typeof window === "undefined") return fallback;
     try {
@@ -1096,8 +1105,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
             let payload: Record<string, unknown> = {};
             if (job.provider === "navy" && job.remoteJobId) {
+                updateJob(job.id, {
+                    progress: `Resuming Navy image job ${job.remoteJobId}...`,
+                });
                 payload = { id: job.remoteJobId };
             } else {
+                updateJob(job.id, {
+                    progress: `Submitting image request to ${job.model}...`,
+                });
                 const response = await fetch(url, {
                     method: "POST",
                     headers: requestHeaders,
@@ -1218,11 +1233,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 createdAt: new Date().toISOString(),
             }));
 
-            React.startTransition(() => {
-                setGeneratedImages((prev) =>
-                    mergeGeneratedImagesInDisplayOrder(prev, finalizedImages)
-                );
-            });
+            for (let index = 0; index < finalizedImages.length; index += 1) {
+                const image = finalizedImages[index];
+                updateJob(job.id, {
+                    progress: `Received image ${index + 1}/${finalizedImages.length} from ${job.model}.`,
+                });
+                React.startTransition(() => {
+                    setGeneratedImages((prev) =>
+                        mergeGeneratedImagesInDisplayOrder(prev, [image])
+                    );
+                });
+                await yieldToPaint();
+            }
             const galleryEntries = await addMediaToGallery(
                 images.map((image) => ({ url: image.dataUrl, mimeType: image.mimeType })),
                 {
@@ -1649,7 +1671,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             })),
             {
                 activeIds: Array.from(processingRef.current),
-                maxConcurrentImageJobs: 3,
+                maxConcurrentImageJobs: 4,
                 maxConcurrentNonImageJobs: 1,
             }
         );
@@ -1738,7 +1760,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setJobs((prev) => [...prev, ...jobsToQueue]);
         setStatusMessage(
             jobsToQueue.length > 1
-                ? `Queued ${jobsToQueue.length} image jobs in pipeline order.`
+                ? `Queued ${jobsToQueue.length} image jobs to run in parallel.`
                 : "Queued..."
         );
     };

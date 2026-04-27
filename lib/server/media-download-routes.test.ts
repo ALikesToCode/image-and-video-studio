@@ -436,6 +436,59 @@ test("Navy image route accepts direct result URLs from async jobs", async () => 
   }
 });
 
+test("Navy image route downloads generated images from provider blob storage", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    calls.push(url);
+    if (url === "https://api.navy/v1/images/generations/job_blob_url") {
+      return Response.json({
+        id: "job_blob_url",
+        status: "completed",
+        result: {
+          data: [
+            {
+              url: "https://oaidalleapiprodscus.blob.core.windows.net/private/generated.png",
+            },
+          ],
+        },
+      });
+    }
+
+    if (url === "https://oaidalleapiprodscus.blob.core.windows.net/private/generated.png") {
+      return new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "image/png" },
+      });
+    }
+
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const response = await navyImageGet(
+      new Request("https://studio.test/api/navy/image?id=job_blob_url", {
+        headers: {
+          "x-user-api-key": "navy-secret",
+        },
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, {
+      done: true,
+      images: [{ data: "AQID", mimeType: "image/png" }],
+    });
+    assert.deepEqual(calls, [
+      "https://api.navy/v1/images/generations/job_blob_url",
+      "https://oaidalleapiprodscus.blob.core.windows.net/private/generated.png",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route returns immediate failed job messages", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

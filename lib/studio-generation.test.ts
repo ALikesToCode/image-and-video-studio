@@ -118,7 +118,8 @@ test("Gemini image payload keeps Imagen separate from Gemini edit payloads", () 
   }).contents[0]?.parts;
 
   assert.match(gemini.endpoint, /:generateContent$/);
-  assert.equal(parts?.[0]?.text, "Edit this into a product hero image");
+  assert.match(String(parts?.[0]?.text), /Edit this into a product hero image/);
+  assert.match(String(parts?.[0]?.text), /policy-compliant Gemini Nano Banana image prompt/i);
   assert.deepEqual(parts?.[1], {
     inline_data: {
       mime_type: "image/png",
@@ -145,7 +146,9 @@ test("OpenRouter image payload puts text first before image references", () => {
   const content = (payload.messages[0] as {
     content: Array<Record<string, unknown>>;
   }).content;
-  assert.deepEqual(content[0], { type: "text", text: "Use this product as reference" });
+  assert.equal(content[0]?.type, "text");
+  assert.match(String(content[0]?.text), /Use this product as reference/);
+  assert.match(String(content[0]?.text), /policy-compliant Gemini Nano Banana image prompt/i);
   assert.deepEqual(content[1], {
     type: "image_url",
     image_url: { url: "data:image/jpeg;base64,ZA==" },
@@ -381,6 +384,29 @@ test("OpenAI image prompts add adult-content policy guidance only for likely NSF
   assert.match(prepared.prompt, /deceptive likeness/i);
 });
 
+test("OpenAI image prompts add artistic policy guidance without losing details", () => {
+  const prepared = prepareImagePromptForModel(
+    "gpt-image-2",
+    "Create a cinematic portrait of a ceramic robot painter in a rainlit neon studio."
+  );
+
+  assert.match(prepared.prompt, /ceramic robot painter/i);
+  assert.match(prepared.prompt, /policy-compliant artistic image prompt/i);
+  assert.match(prepared.prompt, /preserve all concrete subject/i);
+  assert.match(prepared.prompt, /rich composition/i);
+});
+
+test("Nano Banana image prompts add artistic policy guidance", () => {
+  const prepared = prepareImagePromptForModel(
+    "nano-banana-2",
+    "Make an ornate fantasy greenhouse with glass butterflies and mossy statues."
+  );
+
+  assert.match(prepared.prompt, /fantasy greenhouse/i);
+  assert.match(prepared.prompt, /policy-compliant Gemini Nano Banana image prompt/i);
+  assert.match(prepared.prompt, /painterly visual detail/i);
+});
+
 test("Gemini image prompts add safety guidance only for likely NSFW requests", () => {
   const prepared = prepareImagePromptForModel(
     "gemini-3-pro-image-preview",
@@ -414,9 +440,9 @@ test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompt
   assert.equal(isLikelyImagePolicyError("blocked by image safety policy"), true);
 });
 
-test("Non-NSFW prompts remain unchanged for non-Flux models", () => {
+test("Non-NSFW prompts remain unchanged for non-policy non-Flux models", () => {
   const prepared = prepareImagePromptForModel(
-    "gpt-image-1.5",
+    "plain-image-model",
     "Create a ceramic teapot on a walnut table beside morning window light."
   );
 
