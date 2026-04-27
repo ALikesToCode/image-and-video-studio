@@ -294,6 +294,72 @@ test("Navy image route retries flagged OpenAI image prompts with safer wording",
   }
 });
 
+test("Navy image route uses a prompt agent before strict-filter image models", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  let imagePrompt = "";
+  globalThis.fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    calls.push(url);
+    const requestBody =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : {};
+
+    if (url === "https://api.navy/v1/chat/completions") {
+      assert.equal(requestBody.model, "deepseek-v4-pro");
+      assert.equal(requestBody.stream, false);
+      return Response.json({
+        choices: [
+          {
+            message: {
+              content:
+                "Agent fixed prompt: tasteful editorial anime portrait in a tidy bedroom, athletic curvy figure, expressive nervous mood, refined lighting.",
+            },
+          },
+        ],
+      });
+    }
+
+    if (url === "https://api.navy/v1/images/generations") {
+      imagePrompt = String(requestBody.prompt ?? "");
+      return Response.json({ id: "job_agent", status: "queued" });
+    }
+
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-image-2",
+          promptAgentModel: "deepseek-v4-pro",
+          prompt:
+            "Create an anime portrait with a very large bust and hard nipples faintly outlined.",
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, { id: "job_agent", status: "queued" });
+    assert.deepEqual(calls, [
+      "https://api.navy/v1/chat/completions",
+      "https://api.navy/v1/images/generations",
+    ]);
+    assert.match(imagePrompt, /Agent fixed prompt/i);
+    assert.doesNotMatch(imagePrompt, /very large bust|hard nipples/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route treats poll rate limits as pending jobs", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

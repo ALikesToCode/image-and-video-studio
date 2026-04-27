@@ -26,6 +26,7 @@ type ImageRequest = {
   sync?: boolean;
   responseFormat?: string;
   aspectRatio?: string;
+  promptAgentModel?: string;
 };
 
 type NavyImagePayload = {
@@ -44,7 +45,6 @@ const NAVY_IMAGE_MEDIA_HOSTS = [
   ".storage.googleapis.com",
   ".googleusercontent.com",
 ];
-
 const retryAfterMs = (response: Response, fallbackMs = 8_000) => {
   const retryAfter = response.headers.get("retry-after");
   if (!retryAfter) return fallbackMs;
@@ -57,6 +57,76 @@ const retryAfterMs = (response: Response, fallbackMs = 8_000) => {
     return Math.max(1_000, timestamp - Date.now());
   }
   return fallbackMs;
+};
+
+const promptAgentSystemPrompt = (model: string) => {
+  const family = model.toLowerCase().includes("nano-banana")
+    ? "Gemini Nano Banana"
+    : "OpenAI GPT Image";
+
+  return `You are a prompt safety and art-direction agent for ${family} image generation.
+Rewrite the user's image prompt for this exact target model before image generation.
+Preserve concrete subject, setting, composition, style, pose, mood, lighting, and story details.
+Replace explicit sexual focus, coercive/threatening framing, minor-risk ambiguity, and fetishized anatomy with policy-compliant tasteful editorial art direction.
+Keep clearly adult subjects when age is given. Do not add new characters or story events.
+Return only the final rewritten image prompt, with no markdown, labels, quotes, or explanation.`;
+};
+
+const extractPromptAgentContent = (data: unknown) => {
+  if (!data || typeof data !== "object") return "";
+  const record = data as Record<string, unknown>;
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  const firstChoice = choices[0];
+  if (!firstChoice || typeof firstChoice !== "object") return "";
+  const choice = firstChoice as Record<string, unknown>;
+  const message =
+    choice.message && typeof choice.message === "object"
+      ? (choice.message as Record<string, unknown>)
+      : null;
+  const content = message?.content ?? choice.text;
+  return typeof content === "string" ? content.trim() : "";
+};
+
+const rewritePromptWithPromptAgent = async ({
+  apiKey,
+  model,
+  prompt,
+  promptAgentModel,
+}: {
+  apiKey: string;
+  model: string;
+  prompt: string;
+  promptAgentModel?: string;
+}) => {
+  if (!supportsSaferImagePromptRetry(model)) return prompt;
+  const agentModel = promptAgentModel?.trim();
+  if (!agentModel) return prompt;
+
+  try {
+    const response = await fetch("https://api.navy/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: agentModel,
+        stream: false,
+        temperature: 0.2,
+        max_tokens: 700,
+        messages: [
+          { role: "system", content: promptAgentSystemPrompt(model) },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) return prompt;
+    const rewritten = extractPromptAgentContent(await jsonOrNull(response));
+    return rewritten || prompt;
+  } catch {
+    return prompt;
+  }
 };
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
@@ -195,6 +265,7 @@ export async function POST(req: Request) {
     seconds,
     responseFormat,
     aspectRatio,
+    promptAgentModel,
   } = body;
   const userApiKey = getUserApiKey(req, body);
   if (!userApiKey || !model || !prompt) {
@@ -226,7 +297,14 @@ export async function POST(req: Request) {
     ),
   });
 
-  let response = await postGeneration(prompt);
+  const promptAgentPrompt = await rewritePromptWithPromptAgent({
+    apiKey: userApiKey,
+    model,
+    prompt,
+    promptAgentModel,
+  });
+
+  let response = await postGeneration(promptAgentPrompt);
   let data = await jsonOrNull(response);
   if (!response.ok) {
     const errorMessage = providerErrorMessage(data, "Image generation failed.", [
@@ -236,7 +314,7 @@ export async function POST(req: Request) {
       supportsSaferImagePromptRetry(model) &&
       isLikelyImagePolicyError(errorMessage)
     ) {
-      response = await postGeneration(buildSaferImagePromptForModel(model, prompt));
+      response = await postGeneration(buildSaferImagePromptForModel(model, promptAgentPrompt));
       data = await jsonOrNull(response);
     }
   }
