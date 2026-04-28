@@ -145,11 +145,13 @@ export const buildChatCompletionPayload = ({
     }
   }
 
-  if (Array.isArray(tools) && tools.length) {
+  const hasTools = Array.isArray(tools) && tools.length > 0;
+  if (hasTools) {
     payload.tools = tools;
   }
   if (
     toolChoice !== undefined &&
+    hasTools &&
     !(
       omitToolChoiceForUnsupportedModels &&
       shouldOmitToolChoiceForModel(model)
@@ -169,6 +171,79 @@ export const buildChatCompletionPayload = ({
   }
 
   return payload;
+};
+
+const clonePayload = (payload: Record<string, unknown>) =>
+  JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+
+const withoutPayloadFields = (
+  payload: Record<string, unknown>,
+  fields: string[]
+) => {
+  const next = clonePayload(payload);
+  let changed = false;
+  for (const field of fields) {
+    if (field in next) {
+      delete next[field];
+      changed = true;
+    }
+  }
+  return changed ? next : null;
+};
+
+export const stripReasoningContentFromChatPayload = (
+  payload: Record<string, unknown>
+) => {
+  const messages = Array.isArray(payload.messages) ? payload.messages : null;
+  if (!messages) return null;
+
+  let changed = false;
+  const next = clonePayload(payload);
+  next.messages = messages.map((message) => {
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      return message;
+    }
+    const record = { ...(message as Record<string, unknown>) };
+    if ("reasoning_content" in record) {
+      delete record.reasoning_content;
+      changed = true;
+    }
+    if ("reasoning" in record) {
+      delete record.reasoning;
+      changed = true;
+    }
+    return record;
+  });
+
+  return changed ? next : null;
+};
+
+export const buildChatCompletionRecoveryPayloads = (
+  payload: Record<string, unknown>
+) => {
+  const candidates: Array<{ label: string; payload: Record<string, unknown> }> = [];
+  const seen = new Set<string>();
+  const addCandidate = (label: string, candidate: Record<string, unknown> | null) => {
+    if (!candidate) return;
+    const key = JSON.stringify(candidate);
+    if (seen.has(key) || key === JSON.stringify(payload)) return;
+    seen.add(key);
+    candidates.push({ label, payload: candidate });
+  };
+
+  const withoutReasoning = stripReasoningContentFromChatPayload(payload);
+  addCandidate("strip-reasoning", withoutReasoning);
+
+  const toolChoiceBase = withoutReasoning ?? payload;
+  addCandidate("omit-tool-choice", withoutPayloadFields(toolChoiceBase, ["tool_choice"]));
+
+  const textOnlyBase = withoutReasoning ?? payload;
+  addCandidate(
+    "text-only",
+    withoutPayloadFields(textOnlyBase, ["tools", "tool_choice"])
+  );
+
+  return candidates;
 };
 
 export const toChatCompletionMessages = (

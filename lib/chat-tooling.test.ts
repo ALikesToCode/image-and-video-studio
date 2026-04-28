@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildChatCompletionPayload,
+  buildChatCompletionRecoveryPayloads,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
   isDeepSeekV4Model,
@@ -14,6 +15,7 @@ import {
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   shouldOmitToolChoiceForModel,
+  stripReasoningContentFromChatPayload,
   stripHeavyMediaFromMessagesForStorage,
   toChatCompletionMessages,
 } from "./chat-tooling.ts";
@@ -235,6 +237,65 @@ test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {
   assert.equal(payload.tool_choice, "auto");
   assert.equal("thinking" in payload, false);
   assert.equal("reasoning_effort" in payload, false);
+});
+
+test("Chat payloads omit tool_choice when no tools are present", () => {
+  const payload = buildChatCompletionPayload({
+    model: "glm-5.1-venice",
+    messages: [{ role: "user", content: "Reply briefly." }],
+    toolChoice: "none",
+    omitToolChoiceForUnsupportedModels: true,
+  });
+
+  assert.equal("tools" in payload, false);
+  assert.equal("tool_choice" in payload, false);
+});
+
+test("Chat recovery payloads strip reasoning before dropping tools", () => {
+  const payload = {
+    model: "glm-5.1-venice",
+    stream: true,
+    messages: [
+      { role: "user", content: "Generate an image." },
+      {
+        role: "assistant",
+        content: "",
+        reasoning_content: "Need to call the image tool.",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "generate_image", arguments: "{\"prompt\":\"sky\"}" },
+          },
+        ],
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: { name: "generate_image", parameters: { type: "object" } },
+      },
+    ],
+    tool_choice: "auto",
+  };
+
+  const stripped = stripReasoningContentFromChatPayload(payload);
+  assert.ok(stripped);
+  assert.equal(
+    "reasoning_content" in
+      ((stripped?.messages as Array<Record<string, unknown>>)[1] ?? {}),
+    false
+  );
+  assert.equal("tools" in (stripped ?? {}), true);
+
+  const recoveries = buildChatCompletionRecoveryPayloads(payload);
+  assert.deepEqual(
+    recoveries.map((recovery) => recovery.label),
+    ["strip-reasoning", "omit-tool-choice", "text-only"]
+  );
+  assert.equal("tools" in recoveries[0].payload, true);
+  assert.equal("tool_choice" in recoveries[1].payload, false);
+  assert.equal("tools" in recoveries[2].payload, false);
 });
 
 test("Navy chat messages pass assistant reasoning content back for thinking-mode tool turns", () => {

@@ -1,7 +1,10 @@
 export const runtime = "edge";
 
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
-import { buildChatCompletionPayload } from "@/lib/chat-tooling";
+import {
+  buildChatCompletionPayload,
+  buildChatCompletionRecoveryPayloads,
+} from "@/lib/chat-tooling";
 
 type ChatRequest = {
   apiKey?: string;
@@ -14,6 +17,31 @@ type ChatRequest = {
   thinking?: { type?: unknown };
   reasoningEffort?: unknown;
 };
+
+const isRecoverableChatStatus = (status: number) => status === 400 || status === 422;
+
+const upstreamChatCompletion = (
+  apiKey: string,
+  payload: Record<string, unknown>
+) =>
+  fetch("https://api.navy/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+const streamingResponse = (response: Response, recoveryLabel?: string) =>
+  new Response(response.body, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      ...(recoveryLabel ? { "x-studio-chat-recovery": recoveryLabel } : {}),
+    },
+  });
 
 export async function POST(req: Request) {
   let body: ChatRequest;
@@ -50,28 +78,34 @@ export async function POST(req: Request) {
     omitToolChoiceForUnsupportedModels: true,
   });
 
-  const response = await fetch("https://api.navy/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  const response = await upstreamChatCompletion(apiKey, payload);
 
   if (!response.ok) {
-    const data = await jsonOrNull(response);
+    let data = await jsonOrNull(response);
+    if (isRecoverableChatStatus(response.status)) {
+      for (const recovery of buildChatCompletionRecoveryPayloads(payload)) {
+        const retryResponse = await upstreamChatCompletion(apiKey, recovery.payload);
+        if (retryResponse.ok) {
+          return streamingResponse(retryResponse, recovery.label);
+        }
+        data = await jsonOrNull(retryResponse);
+        if (!isRecoverableChatStatus(retryResponse.status)) {
+          return Response.json(
+            {
+              error: providerErrorMessage(data, "Chat completion failed.", [
+                apiKey,
+              ]),
+            },
+            { status: retryResponse.status }
+          );
+        }
+      }
+    }
     return Response.json(
       { error: providerErrorMessage(data, "Chat completion failed.", [apiKey]) },
       { status: response.status }
     );
   }
 
-  return new Response(response.body, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+  return streamingResponse(response);
 }
