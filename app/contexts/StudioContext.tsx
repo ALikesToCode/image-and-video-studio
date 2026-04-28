@@ -197,6 +197,11 @@ type StoredSettings = Partial<{
     chutesTtsMaxDuration: string;
 }>;
 
+type GenerateOptions = {
+    mode?: Mode;
+    prompt?: string;
+};
+
 const MAX_CACHED_MODELS = 200;
 const MAX_SAVED_MEDIA = 250;
 const MAX_JOB_HISTORY = 20;
@@ -710,7 +715,7 @@ interface StudioContextType {
 
     // Logic
     // Logic
-    handleGenerate: () => void;
+    handleGenerate: (options?: GenerateOptions) => void;
     generateImage: (job: GenerationJob) => Promise<void>;
     generateVideo: (job: GenerationJob) => Promise<void>;
     generateAudio: (job: GenerationJob) => Promise<void>;
@@ -1790,16 +1795,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [jobs, hydrated, queueTick]);
 
-    const handleGenerate = () => {
+    const handleGenerate = (options: GenerateOptions = {}) => {
+        const activeMode = options.mode ?? mode;
+        const activePrompt = options.prompt ?? prompt;
+
         if (!apiKey.trim()) { setErrorMessage("API Key required"); return; }
-        if (!prompt.trim()) { setErrorMessage("Prompt required"); return; }
-        if (mode === "video" && provider === "chutes" && !videoImage && selectedReferences.length === 0) {
+        if (!activePrompt.trim()) { setErrorMessage("Prompt required"); return; }
+        if (activeMode === "video" && provider === "chutes" && !videoImage && selectedReferences.length === 0) {
             setErrorMessage("Chutes video generation requires a source image or selected reference.");
             return;
         }
         const batchCreatedAt = new Date().toISOString();
         const effectiveVideoDuration =
-            mode === "video" && provider === "gemini"
+            activeMode === "video" && provider === "gemini"
                 ? normalizeVeoDuration(videoDuration, {
                     resolution: videoResolution,
                     hasReferenceImages: selectedReferenceIds.length > 0 || Boolean(videoImage),
@@ -1810,7 +1818,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             setStatusMessage("Veo reference, 1080p, and 4K workflows use 8-second renders.");
         }
         const modelsToRun =
-            mode === "image" && imagePipelineEnabled
+            activeMode === "image" && imagePipelineEnabled
                 ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
                 : [model];
 
@@ -1819,13 +1827,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             return {
                 id: createId(),
                 status: "queued" as const,
-                mode,
+                mode: activeMode,
                 provider,
                 model: jobModel,
-                prompt,
+                prompt: activePrompt,
                 apiKey,
                 createdAt: batchCreatedAt,
-                batchId: `${batchCreatedAt}:${provider}:${mode}`,
+                batchId: `${batchCreatedAt}:${provider}:${activeMode}`,
                 batchCreatedAt,
                 batchOrder: index,
                 outputModalities: selectedModel?.outputModalities ?? undefined,

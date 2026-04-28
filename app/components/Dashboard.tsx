@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
+import { useStudio } from "@/app/contexts/StudioContext";
 import { Button } from "@/app/components/ui/button";
+import {
+    consumeJanitorAiImageImport,
+    readJanitorAiImageImport,
+} from "@/lib/client/janitorai-import";
 import {
     MessageSquare,
     Image as ImageIcon,
@@ -46,10 +51,64 @@ const GalleryView = dynamic(
 );
 
 export function Dashboard() {
+    const studio = useStudio();
+    const {
+        handleGenerate,
+        hydrated,
+        mode,
+        model,
+        modelSuggestions,
+        setMode,
+        setPrompt,
+    } = studio;
     const [activeTab, setActiveTab] = useState<Tab>("chat");
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [pendingJanitorAutoGeneratePrompt, setPendingJanitorAutoGeneratePrompt] =
+        useState<string | null>(null);
+    const janitorImportConsumedRef = useRef(false);
+    const janitorAutoGenerateStartedRef = useRef(false);
     const activeTabMeta = TAB_META.find((tab) => tab.id === activeTab) ?? TAB_META[0];
     const ActiveTabIcon = activeTabMeta.icon;
+    const selectedModelIsReady = modelSuggestions.some(
+        (suggestion) => suggestion.id === model
+    );
+
+    useEffect(() => {
+        if (!hydrated || janitorImportConsumedRef.current) return;
+        if (typeof window === "undefined") return;
+
+        const request = readJanitorAiImageImport(window.location);
+        if (!request) return;
+
+        janitorImportConsumedRef.current = true;
+        consumeJanitorAiImageImport(request, {
+            selectImageTab: () => setActiveTab("image"),
+            setImageMode: () => setMode("image"),
+            setPrompt,
+            requestGeneration: setPendingJanitorAutoGeneratePrompt,
+            replaceUrl: (url) => {
+                window.history.replaceState(window.history.state, "", url);
+            },
+        });
+    }, [hydrated, setMode, setPrompt]);
+
+    useEffect(() => {
+        if (!pendingJanitorAutoGeneratePrompt) return;
+        if (!hydrated || mode !== "image" || !selectedModelIsReady) return;
+        if (janitorAutoGenerateStartedRef.current) return;
+
+        janitorAutoGenerateStartedRef.current = true;
+        handleGenerate({
+            mode: "image",
+            prompt: pendingJanitorAutoGeneratePrompt,
+        });
+    }, [
+        handleGenerate,
+        hydrated,
+        mode,
+        pendingJanitorAutoGeneratePrompt,
+        selectedModelIsReady,
+    ]);
 
     return (
         <div className="flex h-[100dvh] w-full overflow-hidden bg-background text-foreground">

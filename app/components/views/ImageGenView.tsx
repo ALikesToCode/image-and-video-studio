@@ -6,9 +6,11 @@ import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
 import { ReferenceStrip } from "../reference-strip";
+import { SettingsDialog } from "../SettingsDialog";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+    AlertTriangle,
     Sparkles,
     Download,
     Trash2,
@@ -240,6 +242,27 @@ export function ImageGenView() {
                             mode={context.mode}
                             showNegativePrompt={!context.model.toLowerCase().includes("flux")}
                         />
+
+                        {context.errorMessage ? (
+                            <div
+                                role="alert"
+                                className="mt-4 flex items-start justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+                            >
+                                <div className="flex min-w-0 items-start gap-2">
+                                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                                    <p className="min-w-0">
+                                        {context.errorMessage === "API Key required"
+                                            ? "Add a provider API key in Settings before generating."
+                                            : context.errorMessage}
+                                    </p>
+                                </div>
+                                {context.errorMessage === "API Key required" ? (
+                                    <div className="shrink-0 rounded-lg border border-destructive/20 bg-background/70">
+                                        <SettingsDialog />
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : null}
 
                         {context.activeJobCount > 0 && (
                             <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-2 text-[10px] sm:text-xs font-medium text-muted-foreground bg-background/50 px-2 py-1 rounded-full border">
