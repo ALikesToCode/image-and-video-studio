@@ -121,26 +121,28 @@ export function Dashboard() {
             {/* Content Shell */}
             <div className="flex min-w-0 flex-1 flex-col">
                 {/* Mobile Header */}
-                <header className="glass shrink-0 border-b px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] lg:hidden">
-                    <div className="flex items-center justify-between gap-3">
+                <header className="glass shrink-0 border-b px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.45rem)] shadow-sm shadow-black/5 lg:hidden">
+                    <div className="flex min-h-12 items-center justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-2">
-                            <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                            <div className="rounded-xl bg-primary text-primary-foreground p-2 shadow-sm">
                                 <ActiveTabIcon className="h-4 w-4" />
                             </div>
                             <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold leading-none">Studio</p>
-                                <p className="truncate text-xs text-muted-foreground">{activeTabMeta.label}</p>
+                                <p className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                    Studio
+                                </p>
+                                <p className="truncate text-sm font-semibold leading-tight">{activeTabMeta.label}</p>
                             </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
-                            <InstallAppButton />
+                            <InstallAppButton className="rounded-xl" />
                             <SettingsDialog />
                         </div>
                     </div>
                 </header>
 
                 {/* Main Content */}
-                <main className="relative min-h-0 flex-1 overflow-hidden bg-muted/10">
+                <main className="relative min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_top,hsla(var(--primary),0.08),transparent_34rem),hsl(var(--background))]">
                     <div className="absolute inset-0 overflow-y-auto no-scrollbar p-0">
                         <div className={cn("h-full", activeTab === "chat" ? "block" : "hidden")}>
                             <ChatView />
@@ -153,7 +155,7 @@ export function Dashboard() {
                 </main>
 
                 {/* Mobile Bottom Navigation */}
-                <nav className="glass shrink-0 border-t px-1.5 pb-[calc(env(safe-area-inset-bottom)+0.375rem)] pt-1.5 lg:hidden">
+                <nav className="glass shrink-0 border-t px-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)] pt-2 shadow-[0_-10px_30px_rgba(0,0,0,0.08)] lg:hidden">
                     <div className="grid grid-cols-5 gap-1">
                         {TAB_META.map((tab) => {
                             const Icon = tab.icon;
@@ -161,16 +163,18 @@ export function Dashboard() {
                             return (
                                 <Button
                                     key={tab.id}
-                                    variant={isActive ? "secondary" : "ghost"}
+                                    variant={isActive ? "default" : "ghost"}
                                     className={cn(
-                                        "h-12 flex-col gap-1 px-1 text-[10px]",
-                                        isActive && "bg-secondary/70"
+                                        "h-[3.35rem] flex-col gap-1 rounded-2xl px-1 text-[10px] transition-all",
+                                        isActive
+                                            ? "bg-primary text-primary-foreground shadow-sm"
+                                            : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
                                     )}
                                     onClick={() => setActiveTab(tab.id)}
                                     title={tab.label}
                                     aria-current={isActive ? "page" : undefined}
                                 >
-                                    <Icon className={cn("h-4 w-4", isActive && "text-primary")} />
+                                    <Icon className="h-4 w-4" />
                                     <span className="max-w-full truncate leading-none">{tab.label}</span>
                                 </Button>
                             );

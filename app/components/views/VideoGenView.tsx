@@ -10,6 +10,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Download, Video as VideoIcon, Upload, X, Settings2 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/app/components/ui/dialog";
 
 export function VideoGenView() {
     const context = useStudio();
@@ -84,39 +91,41 @@ export function VideoGenView() {
                         <div className="p-2 rounded-xl bg-primary/10 text-primary">
                             <VideoIcon className="h-5 w-5" />
                         </div>
-                        <h2 className="truncate text-base font-semibold sm:text-lg">Video Generation</h2>
+                        <div className="min-w-0">
+                            <h2 className="truncate text-base font-semibold sm:text-lg">Video Generation</h2>
+                            <p className="truncate text-xs text-muted-foreground lg:hidden">
+                                Source image, prompt, and render settings
+                            </p>
+                        </div>
                     </div>
                     <Button
                         variant="outline"
                         size="sm"
                         className="shrink-0 lg:hidden"
-                        onClick={() => setSettingsOpen((prev) => !prev)}
+                        onClick={() => setSettingsOpen(true)}
                     >
                         <Settings2 className="mr-2 h-4 w-4" />
-                        {settingsOpen ? "Hide Settings" : "Show Settings"}
+                        Settings
                     </Button>
                 </header>
+                <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                    <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-xl">
+                        <DialogHeader>
+                            <DialogTitle>Video settings</DialogTitle>
+                            <DialogDescription>
+                                Choose provider, video model, aspect ratio, duration, and storage options.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <ImgGenSettings
+                            {...context}
+                            onRefreshModels={context.refreshModels}
+                            modelsLoading={context.modelsLoading}
+                            modelsError={context.modelsError}
+                        />
+                    </DialogContent>
+                </Dialog>
 
                 <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-5 sm:space-y-8">
-                    <AnimatePresence initial={false}>
-                        {settingsOpen ? (
-                            <motion.div
-                                key="mobile-settings"
-                                initial={{ opacity: 0, y: -8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                className="mx-auto max-w-3xl lg:hidden"
-                            >
-                                <ImgGenSettings
-                                    {...context}
-                                    onRefreshModels={context.refreshModels}
-                                    modelsLoading={context.modelsLoading}
-                                    modelsError={context.modelsError}
-                                />
-                            </motion.div>
-                        ) : null}
-                    </AnimatePresence>
-
                     <div className="mx-auto max-w-3xl">
                         <ReferenceStrip
                             references={context.references}

@@ -9,6 +9,7 @@ const display = DM_Serif_Display({
   variable: "--font-display",
   weight: "400",
   display: "swap",
+  preload: false,
 });
 
 const text = IBM_Plex_Sans({
@@ -16,6 +17,7 @@ const text = IBM_Plex_Sans({
   variable: "--font-text",
   weight: ["400", "500", "600", "700"],
   display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {

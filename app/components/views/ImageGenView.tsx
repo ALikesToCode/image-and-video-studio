@@ -18,6 +18,13 @@ import {
     Settings2,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/app/components/ui/dialog";
 
 export function ImageGenView() {
     const context = useStudio();
@@ -45,7 +52,7 @@ export function ImageGenView() {
     return (
         <div className="h-full w-full overflow-y-auto bg-background/50">
             <div className="mx-auto grid min-h-full max-w-[1800px] grid-cols-1 items-start gap-3 p-3 sm:gap-6 sm:p-4 lg:grid-cols-12 lg:p-6">
-                <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/70 p-2 shadow-sm lg:hidden">
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/75 p-2 shadow-sm backdrop-blur lg:hidden">
                     <div className="flex min-w-0 items-center gap-2">
                         <div className="rounded-lg bg-primary/10 p-2 text-primary">
                             <ImageIcon className="h-4 w-4" />
@@ -59,17 +66,87 @@ export function ImageGenView() {
                         variant="outline"
                         size="sm"
                         className="shrink-0"
-                        onClick={() => setSettingsOpen((prev) => !prev)}
+                        onClick={() => setSettingsOpen(true)}
                     >
                         <Settings2 className="h-4 w-4" />
                         Settings
                     </Button>
                 </div>
+                <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                    <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-xl">
+                        <DialogHeader>
+                            <DialogTitle>Image settings</DialogTitle>
+                            <DialogDescription>
+                                Configure provider, model, size, references, and pipeline options.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <ImgGenSettings
+                            provider={context.provider}
+                            setProvider={context.setProvider}
+                            mode={context.mode}
+                            setMode={context.setMode}
+                            apiKey={context.apiKey}
+                            setApiKey={context.setApiKey}
+                            clearKey={context.clearKey}
+                            supportsVideo={context.supportsVideo}
+                            supportsTts={context.supportsTts}
+                            model={context.model}
+                            setModel={context.setModel}
+                            modelSuggestions={context.modelSuggestions}
+                            modelsLoading={context.modelsLoading}
+                            modelsError={context.modelsError}
+                            onRefreshModels={context.refreshModels}
+                            imageCount={context.imageCount}
+                            setImageCount={context.setImageCount}
+                            imagePipelineEnabled={context.imagePipelineEnabled}
+                            setImagePipelineEnabled={context.setImagePipelineEnabled}
+                            imageModelOrder={context.imageModelOrder}
+                            setImageModelOrder={context.setImageModelOrder}
+                            imageAspect={context.imageAspect}
+                            setImageAspect={context.setImageAspect}
+                            imageSize={context.imageSize}
+                            setImageSize={context.setImageSize}
+                            navyImageSize={context.navyImageSize}
+                            setNavyImageSize={context.setNavyImageSize}
+                            chutesGuidanceScale={context.chutesGuidanceScale}
+                            setChutesGuidanceScale={context.setChutesGuidanceScale}
+                            chutesWidth={context.chutesWidth}
+                            setChutesWidth={context.setChutesWidth}
+                            chutesHeight={context.chutesHeight}
+                            setChutesHeight={context.setChutesHeight}
+                            chutesSteps={context.chutesSteps}
+                            setChutesSteps={context.setChutesSteps}
+                            chutesResolution={context.chutesResolution}
+                            setChutesResolution={context.setChutesResolution}
+                            chutesSeed={context.chutesSeed}
+                            setChutesSeed={context.setChutesSeed}
+                            videoAspect={context.videoAspect}
+                            setVideoAspect={context.setVideoAspect}
+                            videoResolution={context.videoResolution}
+                            setVideoResolution={context.setVideoResolution}
+                            videoDuration={context.videoDuration}
+                            setVideoDuration={context.setVideoDuration}
+                            ttsVoice={context.ttsVoice}
+                            setTtsVoice={context.setTtsVoice}
+                            ttsFormat={context.ttsFormat}
+                            setTtsFormat={context.setTtsFormat}
+                            ttsSpeed={context.ttsSpeed}
+                            setTtsSpeed={context.setTtsSpeed}
+                            saveToGallery={context.saveToGallery}
+                            setSaveToGallery={context.setSaveToGallery}
+                            navyUsage={context.navyUsage}
+                            navyUsageError={context.navyUsageError}
+                            navyUsageLoading={context.navyUsageLoading}
+                            navyUsageUpdatedAt={context.navyUsageUpdatedAt}
+                            onRefreshUsage={context.refreshNavyUsage}
+                        />
+                    </DialogContent>
+                </Dialog>
                 {/* Settings Column - Collapsible/Sticky */}
                 <motion.div
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
-                    className={`space-y-4 lg:sticky lg:top-6 lg:col-span-3 xl:col-span-3 ${settingsOpen ? "block" : "hidden lg:block"}`}
+                    className="hidden space-y-4 lg:sticky lg:top-6 lg:col-span-3 lg:block xl:col-span-3"
                 >
                     <ImgGenSettings
                             provider={context.provider}

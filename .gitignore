@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.open-next/
 /out/
 
 # production
@@ -40,6 +41,10 @@ yarn-error.log*
 .wrangler
 .dev.vars
 .dev.vars.*
+
+# local automation artifacts
+.codex
+.playwright-mcp/
 
 # typescript
 *.tsbuildinfo

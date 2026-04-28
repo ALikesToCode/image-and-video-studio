@@ -70,7 +70,7 @@ export function PromptInput({
                 size="lg"
                 className="w-full bg-gradient-to-r from-primary to-primary/80 px-4 transition-all hover:scale-[1.01] hover:shadow-lg"
                 onClick={onGenerate}
-                disabled={!prompt.trim()}
+                disabled={!prompt.trim() || busy}
             >
                 {busy ? (
                     <>

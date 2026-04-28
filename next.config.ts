@@ -29,7 +29,7 @@ const securityHeaders = [
   {
     key: "Permissions-Policy",
     value:
-      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()",
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=()",
   },
   ...(process.env.NODE_ENV === "production"
     ? [

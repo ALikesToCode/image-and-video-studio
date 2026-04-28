@@ -32,6 +32,9 @@
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
 
+  --font-sans: var(--font-text), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-display), Georgia, Cambria, "Times New Roman", Times, serif;
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -200,7 +203,18 @@
 html,
 body {
   min-height: 100%;
+  width: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
+  font-family: var(--font-text), ui-sans-serif, system-ui, sans-serif;
+}
+
+.font-sans {
+  font-family: var(--font-text), ui-sans-serif, system-ui, sans-serif;
+}
+
+.font-serif {
+  font-family: var(--font-display), Georgia, Cambria, "Times New Roman", Times, serif;
 }
 
 button,
@@ -209,4 +223,13 @@ input,
 textarea,
 select {
   touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (width < 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }

@@ -8,7 +8,13 @@ import { Button } from "@/app/components/ui/button";
 import { Loader2, Music, Download, AudioLines, Settings2 } from "lucide-react";
 import { Card } from "@/app/components/ui/card";
 import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/app/components/ui/dialog";
 
 export function AudioGenView() {
     const context = useStudio();
@@ -52,39 +58,41 @@ export function AudioGenView() {
                         <div className="p-2 rounded-xl bg-primary/10 text-primary">
                             <AudioLines className="h-5 w-5" />
                         </div>
-                        <h2 className="truncate text-base font-semibold sm:text-lg">Audio / TTS</h2>
+                        <div className="min-w-0">
+                            <h2 className="truncate text-base font-semibold sm:text-lg">Audio / TTS</h2>
+                            <p className="truncate text-xs text-muted-foreground lg:hidden">
+                                Voice, format, speed, and prompt
+                            </p>
+                        </div>
                     </div>
                     <Button
                         variant="outline"
                         size="sm"
                         className="shrink-0 lg:hidden"
-                        onClick={() => setSettingsOpen((prev) => !prev)}
+                        onClick={() => setSettingsOpen(true)}
                     >
                         <Settings2 className="mr-2 h-4 w-4" />
-                        {settingsOpen ? "Hide Settings" : "Show Settings"}
+                        Settings
                     </Button>
                 </header>
+                <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                    <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-xl">
+                        <DialogHeader>
+                            <DialogTitle>Audio settings</DialogTitle>
+                            <DialogDescription>
+                                Configure provider, voice, output format, speed, and storage.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <ImgGenSettings
+                            {...context}
+                            onRefreshModels={context.refreshModels}
+                            modelsLoading={context.modelsLoading}
+                            modelsError={context.modelsError}
+                        />
+                    </DialogContent>
+                </Dialog>
 
                 <div className="flex flex-1 flex-col items-center justify-start space-y-5 overflow-y-auto p-3 sm:p-6 md:justify-center md:space-y-8 md:p-8">
-                    <AnimatePresence initial={false}>
-                        {settingsOpen ? (
-                            <motion.div
-                                key="mobile-settings"
-                                initial={{ opacity: 0, y: -8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                className="w-full max-w-3xl lg:hidden"
-                            >
-                                <ImgGenSettings
-                                    {...context}
-                                    onRefreshModels={context.refreshModels}
-                                    modelsLoading={context.modelsLoading}
-                                    modelsError={context.modelsError}
-                                />
-                            </motion.div>
-                        ) : null}
-                    </AnimatePresence>
-
                     {hasActiveJobs ? (
                         <div className="flex flex-col items-center justify-center space-y-4 animate-pulse">
                             <div className="rounded-full bg-primary/10 p-8">
