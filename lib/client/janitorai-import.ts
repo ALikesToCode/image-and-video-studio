@@ -5,6 +5,7 @@ type JanitorAiImportLocation = {
 };
 
 export type JanitorAiImageImportRequest = {
+  target: "image-generation" | "image-agent-chat";
   prompt: string;
   shouldAutoGenerate: boolean;
   replacementUrl: string;
@@ -15,6 +16,8 @@ export type JanitorAiImageImportEffects = {
   setImageMode: () => void;
   setPrompt: (prompt: string) => void;
   requestGeneration: (prompt: string) => void;
+  selectImageAgentChat?: () => void;
+  setImageAgentChatPrompt?: (prompt: string) => void;
   replaceUrl: (url: string) => void;
 };
 
@@ -45,17 +48,26 @@ export const readJanitorAiImageImport = (
   );
 
   if (normalizedParam(searchParams.get("source")) !== "janitorai") return null;
-  if (normalizedParam(searchParams.get("mode")) !== "image") return null;
-  if (normalizedParam(searchParams.get("view")) !== "image") return null;
+  const mode = normalizedParam(searchParams.get("mode"));
+  const view = normalizedParam(searchParams.get("view"));
+  const action = normalizedParam(searchParams.get("action"));
+  const target =
+    mode === "image" && view === "image"
+      ? "image-generation"
+      : mode === "image-agent" && view === "image-agent" && action === "chat"
+        ? "image-agent-chat"
+        : null;
+  if (!target) return null;
 
   const prompt = hashParams.get("prompt");
   if (prompt === null) return null;
 
   return {
+    target,
     prompt,
     shouldAutoGenerate:
-      normalizedParam(searchParams.get("action")) === "generate" ||
-      searchParams.get("autoGenerate") === "1",
+      target === "image-generation" &&
+      (action === "generate" || searchParams.get("autoGenerate") === "1"),
     replacementUrl: buildReplacementUrl(location),
   };
 };
@@ -64,6 +76,13 @@ export const consumeJanitorAiImageImport = (
   request: JanitorAiImageImportRequest,
   effects: JanitorAiImageImportEffects
 ) => {
+  if (request.target === "image-agent-chat") {
+    effects.selectImageAgentChat?.();
+    effects.setImageAgentChatPrompt?.(request.prompt);
+    effects.replaceUrl(request.replacementUrl);
+    return;
+  }
+
   effects.selectImageTab();
   effects.setImageMode();
   effects.setPrompt(request.prompt);

@@ -3,7 +3,11 @@ import { useStudio } from "@/app/contexts/StudioContext";
 import { ChutesChat } from "../chutes-chat";
 import { CHUTES_IMAGE_MODELS, CHUTES_TTS_MODELS, CHUTES_VIDEO_MODELS } from "@/lib/constants";
 
-export function ChatView() {
+type ChatViewProps = {
+    initialInput?: string | null;
+};
+
+export function ChatView({ initialInput }: ChatViewProps) {
     const {
         apiKeys,
         chatProvider,
@@ -111,6 +115,7 @@ export function ChatView() {
                 ttsVoice={ttsVoice}
                 ttsFormat={ttsFormat}
                 ttsSpeed={ttsSpeed}
+                initialInput={initialInput}
                 onSaveImages={handleSaveImages}
             />
         </div>

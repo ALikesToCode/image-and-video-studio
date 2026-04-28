@@ -133,3 +133,31 @@ test("JanitorAI import URL cleanup prevents generation on refresh", () => {
   assert.equal(replaceUrl, "/?mode=image&view=image");
   assert.equal(refreshedRequest, null);
 });
+
+test("JanitorAI image-agent chat handoff pre-fills the chat prompt", () => {
+  const request = readJanitorAiImageImport(
+    janitorLocation(
+      "?view=image-agent&source=janitorai&mode=image-agent&action=chat",
+      "#prompt=agent%20chat%20prompt"
+    )
+  );
+  assert.ok(request);
+
+  const calls: string[] = [];
+  consumeJanitorAiImageImport(request, {
+    selectImageTab: () => calls.push("selectImageTab"),
+    setImageMode: () => calls.push("setImageMode"),
+    setPrompt: (prompt) => calls.push(`setPrompt:${prompt}`),
+    requestGeneration: (prompt) => calls.push(`requestGeneration:${prompt}`),
+    selectImageAgentChat: () => calls.push("selectImageAgentChat"),
+    setImageAgentChatPrompt: (prompt) =>
+      calls.push(`setImageAgentChatPrompt:${prompt}`),
+    replaceUrl: (url) => calls.push(`replaceUrl:${url}`),
+  });
+
+  assert.deepEqual(calls, [
+    "selectImageAgentChat",
+    "setImageAgentChatPrompt:agent chat prompt",
+    "replaceUrl:/?view=image-agent&mode=image-agent",
+  ]);
+});

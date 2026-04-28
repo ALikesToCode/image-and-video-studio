@@ -65,6 +65,8 @@ export function Dashboard() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [pendingJanitorAutoGeneratePrompt, setPendingJanitorAutoGeneratePrompt] =
         useState<string | null>(null);
+    const [pendingJanitorImageAgentChatPrompt, setPendingJanitorImageAgentChatPrompt] =
+        useState<string | null>(null);
     const janitorImportConsumedRef = useRef(false);
     const janitorAutoGenerateStartedRef = useRef(false);
     const activeTabMeta = TAB_META.find((tab) => tab.id === activeTab) ?? TAB_META[0];
@@ -86,6 +88,8 @@ export function Dashboard() {
             setImageMode: () => setMode("image"),
             setPrompt,
             requestGeneration: setPendingJanitorAutoGeneratePrompt,
+            selectImageAgentChat: () => setActiveTab("chat"),
+            setImageAgentChatPrompt: setPendingJanitorImageAgentChatPrompt,
             replaceUrl: (url) => {
                 window.history.replaceState(window.history.state, "", url);
             },
@@ -204,7 +208,7 @@ export function Dashboard() {
                 <main className="relative min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_top,hsla(var(--primary),0.08),transparent_34rem),hsl(var(--background))]">
                     <div className="absolute inset-0 overflow-y-auto no-scrollbar p-0">
                         <div className={cn("h-full", activeTab === "chat" ? "block" : "hidden")}>
-                            <ChatView />
+                            <ChatView initialInput={pendingJanitorImageAgentChatPrompt} />
                         </div>
                         {activeTab === "image" && <ImageGenView />}
                         {activeTab === "video" && <VideoGenView />}

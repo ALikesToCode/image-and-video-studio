@@ -127,6 +127,7 @@ type ChutesChatProps = {
   ttsVoice?: string;
   ttsFormat?: string;
   ttsSpeed?: string;
+  initialInput?: string | null;
   onSaveImages?: (payload: {
     images: ChatImageAsset[];
     prompt: string;
@@ -440,6 +441,7 @@ export function ChutesChat({
   ttsVoice,
   ttsFormat,
   ttsSpeed,
+  initialInput,
   onSaveImages,
 }: ChutesChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -451,6 +453,7 @@ export function ChutesChat({
   const [copiedPromptMessageId, setCopiedPromptMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const consumedInitialInputRef = useRef<string | null>(null);
   const storageKey = useMemo(() => getChatStorageKey(provider), [provider]);
   const systemPromptStorageKey = useMemo(
     () => getSystemPromptStorageKey(provider),
@@ -503,6 +506,14 @@ export function ChutesChat({
       }),
     [imageModels, imageModelOrder, imagePipelineEnabled, toolImageModel]
   );
+
+  useEffect(() => {
+    const nextInput = initialInput?.trim() ?? "";
+    if (!nextInput || consumedInitialInputRef.current === initialInput) return;
+    consumedInitialInputRef.current = initialInput ?? null;
+    setInput(initialInput ?? "");
+    setChatError(null);
+  }, [initialInput]);
   const reorderPipelineModel = (id: string, direction: "up" | "down") => {
     setImageModelOrder((prev) => {
       const next = prev.filter((entry) => availableImageModelIds.has(entry));
