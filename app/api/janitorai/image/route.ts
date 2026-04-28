@@ -4,7 +4,12 @@ import { POST as chutesImagePost } from "@/app/api/chutes/image/route";
 import { POST as geminiImagePost } from "@/app/api/gemini/image/route";
 import { GET as navyImageGet, POST as navyImagePost } from "@/app/api/navy/image/route";
 import { POST as openRouterImagePost } from "@/app/api/openrouter/image/route";
-import { getUserApiKey, providerErrorMessage } from "@/lib/api-safety";
+import {
+  getProviderApiKey,
+  janitorAiJsonResponse,
+  janitorAiOptionsResponse,
+  providerErrorMessage,
+} from "@/lib/api-safety";
 import {
   CHUTES_IMAGE_MODELS,
   DEFAULT_MODELS,
@@ -61,8 +66,6 @@ const PROVIDER_HANDLERS: Record<Provider, ProviderHandler> = {
   openrouter: openRouterImagePost,
 };
 
-const CORS_ALLOWED_SUFFIXES = ["janitorai.com"];
-
 const normalizedString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
@@ -80,32 +83,8 @@ const integer = (value: unknown) =>
     ? Math.round(value)
     : undefined;
 
-const isAllowedCorsOrigin = (origin: string) => {
-  try {
-    const hostname = new URL(origin).hostname.toLowerCase();
-    return CORS_ALLOWED_SUFFIXES.some(
-      (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`)
-    );
-  } catch {
-    return false;
-  }
-};
-
-const corsHeaders = (req: Request) => {
-  const headers = new Headers({
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "content-type, x-user-api-key",
-    Vary: "Origin",
-  });
-  const origin = req.headers.get("origin");
-  if (origin && isAllowedCorsOrigin(origin)) {
-    headers.set("Access-Control-Allow-Origin", origin);
-  }
-  return headers;
-};
-
 const jsonResponse = (req: Request, payload: unknown, status = 200) =>
-  Response.json(payload, { status, headers: corsHeaders(req) });
+  janitorAiJsonResponse(req, payload, { status });
 
 const providerForModel = (model: string): Provider => {
   if (PROVIDER_MODELS.gemini.includes(model)) return "gemini";
@@ -196,6 +175,19 @@ const passthroughSingleImageResult = (
   return null;
 };
 
+const imageResultPayload = (images: ImagePayload[]) => {
+  const firstImage = images[0];
+  return {
+    ...(firstImage
+      ? {
+          imageUrl: `data:${firstImage.mimeType};base64,${firstImage.data}`,
+          model: firstImage.model,
+        }
+      : {}),
+    images,
+  };
+};
+
 const providerRequest = (
   path: string,
   apiKey: string,
@@ -264,7 +256,7 @@ const invokeProvider = async ({
 };
 
 export async function OPTIONS(req: Request) {
-  return new Response(null, { status: 204, headers: corsHeaders(req) });
+  return janitorAiOptionsResponse(req);
 }
 
 export async function POST(req: Request) {
@@ -293,13 +285,17 @@ export async function POST(req: Request) {
     return jsonResponse(req, { error: "Prompt required." }, 400);
   }
 
-  const apiKey = getUserApiKey(req, body as Record<string, unknown>);
+  const requestedModel = normalizedString(body.model);
+  const provider = requestedModel ? providerForModel(requestedModel) : "chutes";
+  const apiKey = getProviderApiKey(
+    provider,
+    req,
+    body as Record<string, unknown>
+  );
   if (!apiKey) {
     return jsonResponse(req, { error: "Missing API key." }, 400);
   }
 
-  const requestedModel = normalizedString(body.model);
-  const provider = requestedModel ? providerForModel(requestedModel) : "chutes";
   const fallbackModel = requestedModel || DEFAULT_MODELS[provider].image;
   const availableModels = availableModelsForProvider(provider, fallbackModel);
   const models = resolveActiveImageToolModels({
@@ -343,7 +339,7 @@ export async function POST(req: Request) {
   }
 
   if (images.length) {
-    return jsonResponse(req, { images });
+    return jsonResponse(req, imageResultPayload(images));
   }
   if (passthroughResult) {
     return jsonResponse(req, passthroughResult);

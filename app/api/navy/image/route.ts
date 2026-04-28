@@ -1,6 +1,13 @@
 export const runtime = "edge";
 
-import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import {
+  getProviderApiKey,
+  isJanitorAiUserscriptRequest,
+  janitorAiJsonResponse,
+  janitorAiOptionsResponse,
+  jsonOrNull,
+  providerErrorMessage,
+} from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import { IMAGE_MIME_TYPES, parseDataUrl } from "@/lib/studio-validation";
 import {
@@ -34,6 +41,7 @@ type ImageRequest = {
 type NavyImagePayload = {
   data: string;
   mimeType: string;
+  model?: string;
 };
 
 const NAVY_IMAGE_MEDIA_HOSTS = [
@@ -230,14 +238,61 @@ const navyImageCandidates = (record: Record<string, unknown>) => {
   return items;
 };
 
-const imageDownloadError = () =>
-  Response.json(
+const modelFromNavyRecord = (
+  record: Record<string, unknown>,
+  fallback?: string
+) => {
+  const result =
+    record.result && typeof record.result === "object"
+      ? (record.result as Record<string, unknown>)
+      : null;
+  const model = typeof record.model === "string" ? record.model : result?.model;
+  return typeof model === "string" && model.trim() ? model.trim() : fallback;
+};
+
+const imageResponsePayload = (
+  images: NavyImagePayload[],
+  model?: string,
+  extra: Record<string, unknown> = {},
+  includeUserscriptShape = false
+) => {
+  const payloadImages = images.map((image) => ({
+    ...image,
+    ...(includeUserscriptShape && (image.model || model)
+      ? { model: image.model ?? model }
+      : {}),
+  }));
+  const firstImage = payloadImages[0];
+  if (!includeUserscriptShape) {
+    return {
+      ...extra,
+      images: payloadImages,
+    };
+  }
+  return {
+    ...extra,
+    ...(firstImage
+      ? {
+          imageUrl: `data:${firstImage.mimeType};base64,${firstImage.data}`,
+          ...(firstImage.model ? { model: firstImage.model } : {}),
+        }
+      : model
+        ? { model }
+        : {}),
+    images: payloadImages,
+  };
+};
+
+const imageDownloadError = (req: Request) =>
+  janitorAiJsonResponse(
+    req,
     { error: "Unable to download generated image." },
     { status: 502 }
   );
 
-const imageJobFailure = (data: unknown) =>
-  Response.json(
+const imageJobFailure = (req: Request, data: unknown) =>
+  janitorAiJsonResponse(
+    req,
     { error: providerErrorMessage(data, "Image generation job failed.") },
     { status: 502 }
   );
@@ -246,12 +301,20 @@ const isFailedNavyGenerationStatus = (status: unknown) =>
   typeof status === "string" &&
   /^(failed|failure|error|errored|cancelled|canceled)$/i.test(status.trim());
 
+export async function OPTIONS(req: Request) {
+  return janitorAiOptionsResponse(req);
+}
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
     body = (await req.json()) as ImageRequest;
   } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Invalid JSON payload." },
+      { status: 400 }
+    );
   }
 
   const {
@@ -269,9 +332,14 @@ export async function POST(req: Request) {
     promptAgentModel,
   } = body;
   const imageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
-  const userApiKey = getUserApiKey(req, body);
+  const userApiKey = getProviderApiKey("navy", req, body);
+  const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!userApiKey || !model || !prompt) {
-    return Response.json({ error: "Missing required fields." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Missing required fields." },
+      { status: 400 }
+    );
   }
 
   const postGeneration = (requestPrompt: string) => fetch("https://api.navy/v1/images/generations", {
@@ -322,7 +390,8 @@ export async function POST(req: Request) {
   }
 
   if (!response.ok) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       {
         error: providerErrorMessage(data, "Image generation failed.", [
           userApiKey,
@@ -335,36 +404,48 @@ export async function POST(req: Request) {
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   if (isFailedNavyGenerationStatus(dataRecord.status)) {
-    return imageJobFailure(data);
+    return imageJobFailure(req, data);
   }
   if (typeof dataRecord.id === "string" && !Array.isArray(dataRecord.data)) {
-    return Response.json({ id: dataRecord.id, status: dataRecord.status ?? null });
+    return janitorAiJsonResponse(req, {
+      id: dataRecord.id,
+      status: dataRecord.status ?? null,
+    });
   }
 
   let images: NavyImagePayload[];
   try {
     images = await normalizeNavyImages(navyImageCandidates(dataRecord));
   } catch {
-    return imageDownloadError();
+    return imageDownloadError(req);
   }
 
   if (!images?.length) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { error: "No images were returned by the model." },
       { status: 502 }
     );
   }
 
-  return Response.json({ images });
+  return janitorAiJsonResponse(
+    req,
+    imageResponsePayload(images, model, {}, includeUserscriptShape)
+  );
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
-  const apiKey = req.headers.get("x-user-api-key");
+  const apiKey = getProviderApiKey("navy", req);
+  const includeUserscriptShape = isJanitorAiUserscriptRequest(req);
 
   if (!id || !apiKey) {
-    return Response.json({ error: "Missing job id or API key." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Missing job id or API key." },
+      { status: 400 }
+    );
   }
 
   const response = await fetch(`https://api.navy/v1/images/generations/${id}`, {
@@ -376,7 +457,8 @@ export async function GET(req: Request) {
   const data = await jsonOrNull(response);
   if (response.status === 429) {
     const delayMs = retryAfterMs(response);
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { done: false, status: "rate_limited", retryAfterMs: delayMs },
       {
         status: 200,
@@ -386,7 +468,8 @@ export async function GET(req: Request) {
   }
 
   if (!response.ok) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { error: providerErrorMessage(data, "Unable to fetch job.", [apiKey]) },
       { status: response.status }
     );
@@ -395,25 +478,34 @@ export async function GET(req: Request) {
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   if (isFailedNavyGenerationStatus(dataRecord.status)) {
-    return imageJobFailure(data);
+    return imageJobFailure(req, data);
   }
   if (isNavyGenerationPending(typeof dataRecord.status === "string" ? dataRecord.status : null)) {
-    return Response.json({ done: false, status: dataRecord.status });
+    return janitorAiJsonResponse(req, { done: false, status: dataRecord.status });
   }
 
   let images: NavyImagePayload[];
   try {
     images = await normalizeNavyImages(navyImageCandidates(dataRecord));
   } catch {
-    return imageDownloadError();
+    return imageDownloadError(req);
   }
 
   if (!images.length) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { done: true, error: "Image result not found in response." },
       { status: 502 }
     );
   }
 
-  return Response.json({ done: true, images });
+  return janitorAiJsonResponse(
+    req,
+    imageResponsePayload(
+      images,
+      modelFromNavyRecord(dataRecord),
+      { done: true },
+      includeUserscriptShape
+    )
+  );
 }

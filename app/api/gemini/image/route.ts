@@ -1,6 +1,13 @@
 export const runtime = "edge";
 
-import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import {
+  getProviderApiKey,
+  isJanitorAiUserscriptRequest,
+  janitorAiJsonResponse,
+  janitorAiOptionsResponse,
+  jsonOrNull,
+  providerErrorMessage,
+} from "@/lib/api-safety";
 import {
   buildGeminiImagePayload,
   buildSaferImagePromptForModel,
@@ -81,18 +88,52 @@ const pickImagesFromImagen = (data: unknown) => {
 const payloadLooksPolicyBlocked = (data: unknown) =>
   isLikelyImagePolicyError(JSON.stringify(data ?? ""));
 
+const imageResponsePayload = (
+  images: Array<{ data: string; mimeType: string }>,
+  model: string,
+  includeUserscriptShape: boolean
+) => {
+  const payloadImages = images.map((image) =>
+    includeUserscriptShape ? { ...image, model } : image
+  );
+  const firstImage = payloadImages[0];
+  if (!includeUserscriptShape) return { images: payloadImages };
+  return {
+    ...(firstImage
+      ? {
+          imageUrl: `data:${firstImage.mimeType};base64,${firstImage.data}`,
+          model,
+        }
+      : { model }),
+    images: payloadImages,
+  };
+};
+
+export async function OPTIONS(req: Request) {
+  return janitorAiOptionsResponse(req);
+}
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
     body = (await req.json()) as ImageRequest;
   } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Invalid JSON payload." },
+      { status: 400 }
+    );
   }
 
   const { prompt, model, aspectRatio, imageSize, numberOfImages } = body;
-  const userApiKey = getUserApiKey(req, body);
+  const userApiKey = getProviderApiKey("gemini", req, body);
+  const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!userApiKey || !prompt || !model) {
-    return Response.json({ error: "Missing required fields." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Missing required fields." },
+      { status: 400 }
+    );
   }
   const requestImages = async (requestPrompt: string) => {
     const { endpoint, payload } = buildGeminiImagePayload({
@@ -133,7 +174,10 @@ export async function POST(req: Request) {
         buildSaferImagePromptForModel(model, prompt)
       ));
       if (response.ok && images.length) {
-        return Response.json({ images });
+        return janitorAiJsonResponse(
+          req,
+          imageResponsePayload(images, model, includeUserscriptShape)
+        );
       }
       errorMessage = providerErrorMessage(
         data,
@@ -141,7 +185,11 @@ export async function POST(req: Request) {
         [userApiKey]
       );
     }
-    return Response.json({ error: errorMessage }, { status: response.status });
+    return janitorAiJsonResponse(
+      req,
+      { error: errorMessage },
+      { status: response.status }
+    );
   }
 
   if (
@@ -158,16 +206,24 @@ export async function POST(req: Request) {
         "Image generation failed.",
         [userApiKey]
       );
-      return Response.json({ error: errorMessage }, { status: response.status });
+      return janitorAiJsonResponse(
+        req,
+        { error: errorMessage },
+        { status: response.status }
+      );
     }
   }
 
   if (!images.length) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { error: "No images were returned by the model." },
       { status: 502 }
     );
   }
 
-  return Response.json({ images });
+  return janitorAiJsonResponse(
+    req,
+    imageResponsePayload(images, model, includeUserscriptShape)
+  );
 }

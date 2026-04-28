@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { providerErrorMessage, redactSecrets } from "./api-safety.ts";
+import {
+  getProviderApiKey,
+  getUserApiKey,
+  providerErrorMessage,
+  redactSecrets,
+} from "./api-safety.ts";
 
 test("redactSecrets removes explicit keys and bearer tokens", () => {
   const secret = "sk-test-secret";
@@ -24,4 +29,33 @@ test("providerErrorMessage extracts nested provider errors safely", () => {
     "Invalid key [redacted]"
   );
   assert.equal(providerErrorMessage(null, "fallback"), "fallback");
+});
+
+test("getUserApiKey accepts Authorization bearer keys for userscripts", () => {
+  const request = new Request("https://studio.test/api/chutes/image", {
+    headers: { authorization: "Bearer user-secret" },
+  });
+
+  assert.equal(getUserApiKey(request), "user-secret");
+});
+
+test("getProviderApiKey prefers server env keys over BYOK request keys", () => {
+  const original = process.env.CHUTES_API_KEY;
+  process.env.CHUTES_API_KEY = "server-secret";
+  const request = new Request("https://studio.test/api/chutes/image", {
+    headers: {
+      authorization: "Bearer user-secret",
+      "x-user-api-key": "header-secret",
+    },
+  });
+
+  try {
+    assert.equal(getProviderApiKey("chutes", request), "server-secret");
+  } finally {
+    if (original === undefined) {
+      delete process.env.CHUTES_API_KEY;
+    } else {
+      process.env.CHUTES_API_KEY = original;
+    }
+  }
 });

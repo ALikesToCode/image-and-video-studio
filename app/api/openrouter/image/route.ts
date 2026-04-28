@@ -1,6 +1,13 @@
 export const runtime = "edge";
 
-import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import {
+  getProviderApiKey,
+  isJanitorAiUserscriptRequest,
+  janitorAiJsonResponse,
+  janitorAiOptionsResponse,
+  jsonOrNull,
+  providerErrorMessage,
+} from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import {
   buildOpenRouterImagePayload,
@@ -22,6 +29,7 @@ type ImageRequest = {
 type ImagePayload = {
   data: string;
   mimeType: string;
+  model?: string;
 };
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
@@ -91,18 +99,52 @@ const getMessageImages = (data: unknown) => {
   };
 };
 
+const imageResponsePayload = (
+  images: ImagePayload[],
+  model: string,
+  includeUserscriptShape: boolean
+) => {
+  const payloadImages = images.map((image) =>
+    includeUserscriptShape ? { ...image, model: image.model ?? model } : image
+  );
+  const firstImage = payloadImages[0];
+  if (!includeUserscriptShape) return { images: payloadImages };
+  return {
+    ...(firstImage
+      ? {
+          imageUrl: `data:${firstImage.mimeType};base64,${firstImage.data}`,
+          model: firstImage.model,
+        }
+      : { model }),
+    images: payloadImages,
+  };
+};
+
+export async function OPTIONS(req: Request) {
+  return janitorAiOptionsResponse(req);
+}
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
     body = (await req.json()) as ImageRequest;
   } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Invalid JSON payload." },
+      { status: 400 }
+    );
   }
 
   const { model, prompt, aspectRatio, imageSize, outputModalities } = body;
-  const userApiKey = getUserApiKey(req, body);
+  const userApiKey = getProviderApiKey("openrouter", req, body);
+  const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!userApiKey || !model || !prompt) {
-    return Response.json({ error: "Missing required fields." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Missing required fields." },
+      { status: 400 }
+    );
   }
 
   const postImageRequest = async (requestPrompt: string) => {
@@ -155,7 +197,8 @@ export async function POST(req: Request) {
   }
 
   if (!response.ok) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       {
         error: providerErrorMessage(data, "Image generation failed.", [userApiKey]),
       },
@@ -172,7 +215,8 @@ export async function POST(req: Request) {
       buildSaferImagePromptForModel(model, prompt)
     ));
     if (!response.ok) {
-      return Response.json(
+      return janitorAiJsonResponse(
+        req,
         {
           error: providerErrorMessage(data, "Image generation failed.", [
             userApiKey,
@@ -184,7 +228,8 @@ export async function POST(req: Request) {
   }
 
   if (images.length === 0) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { error: "No images were returned by the model." },
       { status: 502 }
     );
@@ -205,11 +250,15 @@ export async function POST(req: Request) {
   }
 
   if (!payloadImages.length) {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { error: "No valid images were returned by the model." },
       { status: 502 }
     );
   }
 
-  return Response.json({ images: payloadImages });
+  return janitorAiJsonResponse(
+    req,
+    imageResponsePayload(payloadImages, model, includeUserscriptShape)
+  );
 }

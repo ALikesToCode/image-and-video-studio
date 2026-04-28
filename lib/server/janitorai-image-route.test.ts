@@ -6,8 +6,23 @@ import {
   POST as janitorImagePost,
 } from "../../app/api/janitorai/image/route.ts";
 
+const temporarilyUnsetEnv = (keys: string[]) => {
+  const original = new Map(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  return () => {
+    for (const [key, value] of original) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
+};
+
 test("JanitorAI image route forwards Chutes settings through the image pipeline", async () => {
   const originalFetch = globalThis.fetch;
+  const restoreEnv = temporarilyUnsetEnv(["CHUTES_API_KEY"]);
   let chutesBody: Record<string, unknown> | null = null;
   let chutesAuthorization: string | null = null;
 
@@ -65,22 +80,24 @@ test("JanitorAI image route forwards Chutes settings through the image pipeline"
     assert.equal(capturedChutesBody.resolution, "768x512");
     assert.equal(capturedChutesBody.num_inference_steps, 9);
     assert.equal(capturedChutesBody.seed, 123);
-    assert.deepEqual(payload, {
-      images: [
-        {
-          data: "aW1hZ2U=",
-          mimeType: "image/png",
-          model: "chutes-hidream",
-        },
-      ],
-    });
+    assert.equal(payload.imageUrl, "data:image/png;base64,aW1hZ2U=");
+    assert.equal(payload.model, "chutes-hidream");
+    assert.deepEqual(payload.images, [
+      {
+        data: "aW1hZ2U=",
+        mimeType: "image/png",
+        model: "chutes-hidream",
+      },
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
+    restoreEnv();
   }
 });
 
 test("JanitorAI image route polls Navy image jobs until images are returned", async () => {
   const originalFetch = globalThis.fetch;
+  const restoreEnv = temporarilyUnsetEnv(["NAVY_API_KEY", "NAVYAI_API_KEY"]);
   const calls: string[] = [];
 
   globalThis.fetch = async (input, init) => {
@@ -135,22 +152,24 @@ test("JanitorAI image route polls Navy image jobs until images are returned", as
       "https://api.navy/v1/images/generations",
       "https://api.navy/v1/images/generations/job_123",
     ]);
-    assert.deepEqual(payload, {
-      images: [
-        {
-          data: "bmF2eQ==",
-          mimeType: "image/png",
-          model: "flux",
-        },
-      ],
-    });
+    assert.equal(payload.imageUrl, "data:image/png;base64,bmF2eQ==");
+    assert.equal(payload.model, "flux");
+    assert.deepEqual(payload.images, [
+      {
+        data: "bmF2eQ==",
+        mimeType: "image/png",
+        model: "flux",
+      },
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
+    restoreEnv();
   }
 });
 
 test("JanitorAI image route rejects missing API keys before provider calls", async () => {
   const originalFetch = globalThis.fetch;
+  const restoreEnv = temporarilyUnsetEnv(["CHUTES_API_KEY"]);
   let called = false;
   globalThis.fetch = async () => {
     called = true;
@@ -178,6 +197,7 @@ test("JanitorAI image route rejects missing API keys before provider calls", asy
     assert.equal(called, false);
   } finally {
     globalThis.fetch = originalFetch;
+    restoreEnv();
   }
 });
 
@@ -197,5 +217,13 @@ test("JanitorAI image route handles browser preflight from JanitorAI", async () 
   assert.match(
     response.headers.get("access-control-allow-headers") ?? "",
     /x-user-api-key/i
+  );
+  assert.match(
+    response.headers.get("access-control-allow-headers") ?? "",
+    /authorization/i
+  );
+  assert.match(
+    response.headers.get("access-control-allow-headers") ?? "",
+    /x-janitorai-source/i
   );
 });

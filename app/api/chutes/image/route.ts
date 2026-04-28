@@ -1,6 +1,13 @@
 export const runtime = "edge";
 
-import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import {
+  getProviderApiKey,
+  isJanitorAiUserscriptRequest,
+  janitorAiJsonResponse,
+  janitorAiOptionsResponse,
+  jsonOrNull,
+  providerErrorMessage,
+} from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 
 type ImageRequest = {
@@ -19,6 +26,7 @@ type ImageRequest = {
 type ImagePayload = {
   data: string;
   mimeType: string;
+  model?: string;
 };
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
@@ -142,18 +150,52 @@ const resolveHiDreamResolution = (body: ImageRequest) => {
   return `${width}x${height}`;
 };
 
+const imageResponsePayload = (
+  images: ImagePayload[],
+  model: string,
+  includeUserscriptShape: boolean
+) => {
+  const payloadImages = images.map((image) =>
+    includeUserscriptShape ? { ...image, model: image.model ?? model } : image
+  );
+  const firstImage = payloadImages[0];
+  if (!includeUserscriptShape) return { images: payloadImages };
+  return {
+    ...(firstImage
+      ? {
+          imageUrl: `data:${firstImage.mimeType};base64,${firstImage.data}`,
+          model: firstImage.model,
+        }
+      : { model }),
+    images: payloadImages,
+  };
+};
+
+export async function OPTIONS(req: Request) {
+  return janitorAiOptionsResponse(req);
+}
+
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
     body = (await req.json()) as ImageRequest;
   } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Invalid JSON payload." },
+      { status: 400 }
+    );
   }
 
   const { prompt } = body;
-  const apiKey = getUserApiKey(req, body);
+  const apiKey = getProviderApiKey("chutes", req, body);
+  const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!apiKey || !prompt) {
-    return Response.json({ error: "Missing required fields." }, { status: 400 });
+    return janitorAiJsonResponse(
+      req,
+      { error: "Missing required fields." },
+      { status: 400 }
+    );
   }
 
   const model = body.model ?? "z-image-turbo";
@@ -201,12 +243,14 @@ export async function POST(req: Request) {
   if (!response.ok) {
     if (contentType.includes("application/json")) {
       const data = await jsonOrNull(response);
-      return Response.json(
+      return janitorAiJsonResponse(
+        req,
         { error: providerErrorMessage(data, "Image generation failed.", [apiKey]) },
         { status: response.status }
       );
     }
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { error: "Image generation failed." },
       { status: response.status }
     );
@@ -214,21 +258,27 @@ export async function POST(req: Request) {
 
   if (contentType.startsWith("image/")) {
     const buffer = await response.arrayBuffer();
-    return Response.json({
-      images: [
-        {
-          data: arrayBufferToBase64(buffer),
-          mimeType: contentType.split(";")[0] ?? "image/png",
-        },
-      ],
-    });
+    return janitorAiJsonResponse(
+      req,
+      imageResponsePayload(
+        [
+          {
+            data: arrayBufferToBase64(buffer),
+            mimeType: contentType.split(";")[0] ?? "image/png",
+          },
+        ],
+        model,
+        includeUserscriptShape
+      )
+    );
   }
 
   let data: unknown;
   try {
     data = await response.json();
   } catch {
-    return Response.json(
+    return janitorAiJsonResponse(
+      req,
       { error: "Unexpected response from Chutes." },
       { status: 502 }
     );
@@ -236,7 +286,10 @@ export async function POST(req: Request) {
   const { images, urls } = extractFromJson(data);
 
   if (images.length) {
-    return Response.json({ images });
+    return janitorAiJsonResponse(
+      req,
+      imageResponsePayload(images, model, includeUserscriptShape)
+    );
   }
 
   if (urls.length) {
@@ -244,10 +297,14 @@ export async function POST(req: Request) {
     for (const url of urls) {
       downloaded.push(await downloadImage(url));
     }
-    return Response.json({ images: downloaded });
+    return janitorAiJsonResponse(
+      req,
+      imageResponsePayload(downloaded, model, includeUserscriptShape)
+    );
   }
 
-  return Response.json(
+  return janitorAiJsonResponse(
+    req,
     { error: "No images were returned by the model." },
     { status: 502 }
   );
