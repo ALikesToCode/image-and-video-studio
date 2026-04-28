@@ -19,7 +19,7 @@ const PROVIDER_ENV_KEYS: Record<ImageProvider, string[]> = {
 
 const CORS_ALLOWED_SUFFIXES = ["janitorai.com"];
 const CORS_ALLOW_HEADERS =
-  "content-type, x-user-api-key, authorization, x-janitorai-source";
+  "content-type, x-user-api-key, authorization, x-janitorai-source, x-janitorai-agent";
 
 const authorizationBearer = (req: Request) => {
   const authorization = req.headers.get("authorization")?.trim();
