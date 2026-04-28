@@ -14,6 +14,7 @@ import {
   getActiveJobCount,
   getQueuedJobsToStart,
   mergeGeneratedImagesInDisplayOrder,
+  normalizeNavyImageUrlPayload,
   normalizeImageModelOrder,
   prepareImageModelRequests,
   prepareImagePromptForModel,
@@ -225,6 +226,44 @@ test("Navy image payload maps OpenAI-compatible fields to Navy API fields", () =
   assert.match(payload.prompt, /^Artwork direction: A naval command room at dusk\./);
   assert.match(payload.prompt, /artifact-free rendering/i);
   assert.match(payload.prompt, /clean surfaces without embedded typography or branding/i);
+});
+
+test("Navy image payload accepts up to five reference image URLs", () => {
+  assert.equal(
+    normalizeNavyImageUrlPayload(" https://example.com/ref.png "),
+    "https://example.com/ref.png"
+  );
+  assert.deepEqual(
+    normalizeNavyImageUrlPayload([
+      "data:image/png;base64,one",
+      "data:image/png;base64,two",
+      "data:image/png;base64,three",
+      "data:image/png;base64,four",
+      "data:image/png;base64,five",
+      "data:image/png;base64,six",
+    ]),
+    [
+      "data:image/png;base64,one",
+      "data:image/png;base64,two",
+      "data:image/png;base64,three",
+      "data:image/png;base64,four",
+      "data:image/png;base64,five",
+    ]
+  );
+
+  const payload = buildNavyImageGenerationPayload({
+    model: "nano-banana-2",
+    prompt: "Combine these references.",
+    imageUrl: [
+      "data:image/png;base64,one",
+      "data:image/png;base64,two",
+    ],
+  });
+
+  assert.deepEqual(payload.image_url, [
+    "data:image/png;base64,one",
+    "data:image/png;base64,two",
+  ]);
 });
 
 test("Navy image payload folds negative prompts into prompt text for non-Flux models", () => {
@@ -496,6 +535,36 @@ test("Selected image models receive separate family-specific prompt rewrites", (
   assert.match(fluxPrompt, /Desired qualities/i);
 });
 
+test("GPT image prompts rewrite borderline student and consent-risk wording before first request", () => {
+  const requests = prepareImageModelRequests({
+    models: ["gpt-image-2", "grok-imagine"],
+    baseBody: {},
+    prompt: `"Create a high-detail modern anime illustration.
+
+Background/setting: A spacious student council room in late afternoon.
+Main character (focus): Alya, apparent age 18, slim yet curvy build, porcelain-fair skin, icy blue eyes rendered glassy and vacant with dilated pupils."`,
+  });
+  const byModel = new Map(requests.map((request) => [request.model, request.body.prompt]));
+  const gptPrompt = String(byModel.get("gpt-image-2") ?? "");
+  const grokPrompt = String(byModel.get("grok-imagine") ?? "");
+
+  assert.doesNotMatch(gptPrompt, /^"/);
+  assert.doesNotMatch(
+    gptPrompt,
+    /apparent age 18|student council|slim yet curvy|curvy build|dilated pupils|vacant|glassy/i
+  );
+  assert.match(gptPrompt, /university council room/i);
+  assert.match(gptPrompt, /clearly adult university-age appearance/i);
+  assert.match(gptPrompt, /slim, balanced/i);
+  assert.match(gptPrompt, /reflective gaze|bright eyes|soft blue eyes/i);
+  assert.match(gptPrompt, /OpenAI GPT Image rewrite/i);
+  assert.match(gptPrompt, /non-explicit/i);
+
+  assert.match(grokPrompt, /student council room/i);
+  assert.match(grokPrompt, /apparent age 18/i);
+  assert.match(grokPrompt, /slim yet curvy/i);
+});
+
 test("Threat-framed OpenAI and Gemini prompts are softened before the first request", () => {
   const prompt =
     "Create an anime scene with a nervous adult woman looking up with pleading eyes at a masked man in a dark doorway.";
@@ -668,6 +737,21 @@ test("Navy model catalog is normalized into image, video, and TTS groups", () =>
         id: "flux",
         name: "Flux",
         endpoint: "/v1/images/generations",
+        context_window: null,
+        max_output_tokens: null,
+        input_modalities: null,
+        output_modalities: ["image"],
+        supports_vision: null,
+        supports_image_output: true,
+        description: null,
+        pricing: {
+          prompt: null,
+          completion: null,
+          image: null,
+          request: null,
+        },
+        metadata_source: null,
+        metadata_status: "unknown",
       },
       {
         id: "veo-3.1",
@@ -695,6 +779,27 @@ test("Navy model catalog is normalized into image, video, and TTS groups", () =>
     grouped.image.map((model) => model.id),
     ["flux"]
   );
+  assert.deepEqual(
+    grouped.data.map((model) => model.id),
+    ["gpt-5", "flux", "veo-3.1", "gpt-4o-mini-tts", "whisper-1"]
+  );
+  assert.equal(grouped.image[0]?.contextWindow, null);
+  assert.equal(grouped.image[0]?.maxOutputTokens, null);
+  assert.equal(grouped.image[0]?.inputModalities, null);
+  assert.deepEqual(grouped.image[0]?.outputModalities, ["image"]);
+  assert.equal(grouped.image[0]?.supportsVision, null);
+  assert.equal(grouped.image[0]?.supportsImageOutput, true);
+  assert.equal(grouped.image[0]?.description, null);
+  assert.deepEqual(grouped.image[0]?.pricing, {
+    prompt: null,
+    completion: null,
+    image: null,
+    request: null,
+  });
+  assert.equal(grouped.image[0]?.metadataSource, null);
+  assert.equal(grouped.image[0]?.metadataStatus, "unknown");
+  assert.equal(grouped.image[0]?.maxReferenceImages, 5);
+  assert.equal(grouped.image[0]?.supports?.referenceImages, true);
   assert.deepEqual(
     grouped.video.map((model) => model.id),
     ["veo-3.1"]

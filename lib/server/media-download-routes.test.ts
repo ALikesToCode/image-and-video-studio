@@ -244,6 +244,56 @@ test("Navy image route returns async job ids without waiting for media", async (
   }
 });
 
+test("Navy image route forwards multi-reference image URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | null = null;
+  globalThis.fetch = async (_input, init) => {
+    requestBody =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : null;
+    return Response.json({ id: "job_refs", status: "queued" });
+  };
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "nano-banana-2",
+          prompt: "Combine references.",
+          imageUrl: [
+            "data:image/png;base64,one",
+            "data:image/png;base64,two",
+            "data:image/png;base64,three",
+            "data:image/png;base64,four",
+            "data:image/png;base64,five",
+            "data:image/png;base64,six",
+          ],
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, { id: "job_refs", status: "queued" });
+    const capturedBody = requestBody as Record<string, unknown> | null;
+    assert.deepEqual(capturedBody?.image_url, [
+      "data:image/png;base64,one",
+      "data:image/png;base64,two",
+      "data:image/png;base64,three",
+      "data:image/png;base64,four",
+      "data:image/png;base64,five",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route retries flagged OpenAI image prompts with safer wording", async () => {
   const originalFetch = globalThis.fetch;
   const prompts: string[] = [];

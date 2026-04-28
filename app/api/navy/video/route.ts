@@ -10,7 +10,9 @@ type VideoRequest = {
   apiKey?: string;
   model: string;
   prompt: string;
-  imageUrl?: string;
+  imageUrl?: string | string[];
+  imageUrls?: string[];
+  image_url?: string | string[];
   negativePrompt?: string;
   seconds?: number;
   aspectRatio?: string;
@@ -24,8 +26,9 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { model, prompt, imageUrl, negativePrompt, seconds, aspectRatio } =
+  const { model, prompt, negativePrompt, seconds, aspectRatio } =
     body;
+  const imageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
   const userApiKey = getUserApiKey(req, body);
   if (!userApiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });

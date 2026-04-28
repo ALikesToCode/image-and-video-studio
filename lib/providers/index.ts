@@ -60,6 +60,21 @@ const fromModelOption = (
     modes,
     inputModalities,
     outputModalities: outputModalities.length ? outputModalities : ["text"],
+    contextWindow: model.contextWindow,
+    maxOutputTokens: model.maxOutputTokens,
+    tokenizer: model.tokenizer,
+    description: model.description,
+    metadataSource: model.metadataSource,
+    metadataStatus: model.metadataStatus,
+    pricing: model.pricing,
+    supportsVision: model.supportsVision,
+    supportsTools: model.supportsTools,
+    supportsFunctionCalling: model.supportsFunctionCalling,
+    supportsReasoning: model.supportsReasoning,
+    supportsJsonMode: model.supportsJsonMode,
+    supportsAudioInput: model.supportsAudioInput,
+    supportsImageOutput: model.supportsImageOutput,
+    supportsStreaming: model.supportsStreaming,
     supportsNegativePrompt: model.supports?.negativePrompt,
     supportsAspectRatio: model.supports?.aspectRatio,
     supportsImageSize: model.supports?.imageSize || model.supports?.size,
@@ -70,8 +85,10 @@ const fromModelOption = (
       model.supports?.imageEdit ||
       model.supports?.referenceImages ||
       model.supports?.sourceImage ||
+      model.supportsVision === true ||
       inputModalities.includes("image"),
-    maxReferenceImages: model.supports?.referenceImages ? 3 : undefined,
+    maxReferenceImages:
+      model.maxReferenceImages ?? (model.supports?.referenceImages ? 3 : undefined),
     supportsFirstLastFrame:
       model.supports?.firstFrame || model.supports?.lastFrame,
     asyncJob: model.supports?.asyncJobs,

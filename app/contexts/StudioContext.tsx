@@ -201,6 +201,7 @@ const MAX_CACHED_MODELS = 200;
 const MAX_SAVED_MEDIA = 250;
 const MAX_JOB_HISTORY = 20;
 const MAX_REFERENCES = 24;
+const MAX_NAVY_REFERENCE_IMAGES = 5;
 
 // --- Utils ---
 
@@ -212,6 +213,36 @@ const yieldToPaint = () =>
         }
         setTimeout(resolve, 0);
     });
+
+const buildNavyImageUrlPayload = (
+    referenceImages: Array<{ dataUrl: string; role?: string }>,
+    primaryImage?: string | null
+) => {
+    const ordered = [
+        ...(primaryImage ? [{ dataUrl: primaryImage, role: "source_image" }] : []),
+        ...referenceImages.filter(
+            (reference) =>
+                reference.role === "source_image" ||
+                reference.role === "first_frame" ||
+                reference.role === "last_frame"
+        ),
+        ...referenceImages.filter(
+            (reference) =>
+                reference.role !== "source_image" &&
+                reference.role !== "first_frame" &&
+                reference.role !== "last_frame"
+        ),
+    ];
+    const urls: string[] = [];
+    for (const reference of ordered) {
+        const url = reference.dataUrl.trim();
+        if (!url || urls.includes(url)) continue;
+        urls.push(url);
+        if (urls.length >= MAX_NAVY_REFERENCE_IMAGES) break;
+    }
+    if (!urls.length) return undefined;
+    return urls.length === 1 ? urls[0] : urls;
+};
 
 const readLocalStorage = <T,>(key: string, fallback: T): T => {
     if (typeof window === "undefined") return fallback;
@@ -229,6 +260,47 @@ const writeLocalStorage = (key: string, value: string) => {
     window.localStorage.setItem(key, value);
 };
 
+const readNullableStringArray = (record: Record<string, unknown>, ...keys: string[]) => {
+    for (const key of keys) {
+        const value = record[key];
+        if (value === null) return null;
+        if (Array.isArray(value)) {
+            const values = value.filter(
+                (entry): entry is string => typeof entry === "string"
+            );
+            if (values.length) return values;
+        }
+    }
+    return undefined;
+};
+
+const readNullableNumber = (record: Record<string, unknown>, ...keys: string[]) => {
+    for (const key of keys) {
+        const value = record[key];
+        if (value === null) return null;
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+    }
+    return undefined;
+};
+
+const readNullableBoolean = (record: Record<string, unknown>, ...keys: string[]) => {
+    for (const key of keys) {
+        const value = record[key];
+        if (value === null) return null;
+        if (typeof value === "boolean") return value;
+    }
+    return undefined;
+};
+
+const readNullableString = (record: Record<string, unknown>, ...keys: string[]) => {
+    for (const key of keys) {
+        const value = record[key];
+        if (value === null) return null;
+        if (typeof value === "string") return value;
+    }
+    return undefined;
+};
+
 const sanitizeModelOptions = (models: unknown): ModelOption[] => {
     if (!Array.isArray(models)) return [];
     return models
@@ -238,24 +310,8 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
             const id = typeof record.id === "string" ? record.id : "";
             const label = typeof record.label === "string" ? record.label : id;
             if (!id) return null;
-            const outputModalities = Array.isArray(record.outputModalities)
-                ? record.outputModalities.filter(
-                    (value): value is string => typeof value === "string"
-                )
-                : Array.isArray(record.output_modalities)
-                    ? record.output_modalities.filter(
-                        (value): value is string => typeof value === "string"
-                    )
-                    : [];
-            const inputModalities = Array.isArray(record.inputModalities)
-                ? record.inputModalities.filter(
-                    (value): value is string => typeof value === "string"
-                )
-                : Array.isArray(record.input_modalities)
-                    ? record.input_modalities.filter(
-                        (value): value is string => typeof value === "string"
-                    )
-                    : [];
+            const outputModalities = readNullableStringArray(record, "outputModalities", "output_modalities");
+            const inputModalities = readNullableStringArray(record, "inputModalities", "input_modalities");
             const endpoint = typeof record.endpoint === "string" ? record.endpoint : undefined;
             const provider = typeof record.provider === "string" ? record.provider : undefined;
             const premium = typeof record.premium === "boolean" ? record.premium : undefined;
@@ -273,17 +329,60 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                     : typeof record.token_multiplier === "number"
                         ? record.token_multiplier
                         : undefined;
+            const contextWindow = readNullableNumber(record, "contextWindow", "context_window");
+            const maxOutputTokens = readNullableNumber(record, "maxOutputTokens", "max_output_tokens");
+            const modality = readNullableString(record, "modality");
+            const tokenizer = readNullableString(record, "tokenizer");
+            const description = readNullableString(record, "description");
+            const metadataSource = readNullableString(record, "metadataSource", "metadata_source");
+            const metadataStatus =
+                typeof record.metadataStatus === "string"
+                    ? record.metadataStatus
+                    : typeof record.metadata_status === "string"
+                        ? record.metadata_status
+                        : undefined;
+            const supportsVision = readNullableBoolean(record, "supportsVision", "supports_vision");
+            const supportsTools = readNullableBoolean(record, "supportsTools", "supports_tools");
+            const supportsFunctionCalling = readNullableBoolean(record, "supportsFunctionCalling", "supports_function_calling");
+            const supportsReasoning = readNullableBoolean(record, "supportsReasoning", "supports_reasoning");
+            const supportsJsonMode = readNullableBoolean(record, "supportsJsonMode", "supports_json_mode");
+            const supportsAudioInput = readNullableBoolean(record, "supportsAudioInput", "supports_audio_input");
+            const supportsImageOutput = readNullableBoolean(record, "supportsImageOutput", "supports_image_output");
+            const supportsStreaming = readNullableBoolean(record, "supportsStreaming", "supports_streaming");
+            const maxReferenceImages =
+                typeof record.maxReferenceImages === "number" && Number.isFinite(record.maxReferenceImages)
+                    ? record.maxReferenceImages
+                    : typeof record.max_reference_images === "number" && Number.isFinite(record.max_reference_images)
+                        ? record.max_reference_images
+                        : undefined;
             return {
                 id,
                 label,
                 ...(provider ? { provider } : {}),
                 ...(endpoint ? { endpoint } : {}),
-                ...(inputModalities.length ? { inputModalities } : {}),
-                ...(outputModalities.length ? { outputModalities } : {}),
+                ...(inputModalities !== undefined ? { inputModalities } : {}),
+                ...(outputModalities !== undefined ? { outputModalities } : {}),
                 ...(typeof premium === "boolean" ? { premium } : {}),
                 ...(requiredPlan !== undefined ? { requiredPlan } : {}),
                 ...(typeof tokenMultiplier === "number" ? { tokenMultiplier } : {}),
+                ...(contextWindow !== undefined ? { contextWindow } : {}),
+                ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+                ...(modality !== undefined ? { modality } : {}),
+                ...(tokenizer !== undefined ? { tokenizer } : {}),
+                ...(description !== undefined ? { description } : {}),
+                ...(metadataSource !== undefined ? { metadataSource } : {}),
+                ...(metadataStatus !== undefined ? { metadataStatus } : {}),
+                ...(supportsVision !== undefined ? { supportsVision } : {}),
+                ...(supportsTools !== undefined ? { supportsTools } : {}),
+                ...(supportsFunctionCalling !== undefined ? { supportsFunctionCalling } : {}),
+                ...(supportsReasoning !== undefined ? { supportsReasoning } : {}),
+                ...(supportsJsonMode !== undefined ? { supportsJsonMode } : {}),
+                ...(supportsAudioInput !== undefined ? { supportsAudioInput } : {}),
+                ...(supportsImageOutput !== undefined ? { supportsImageOutput } : {}),
+                ...(supportsStreaming !== undefined ? { supportsStreaming } : {}),
+                ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
                 ...(record.pricing !== undefined ? { pricing: record.pricing } : {}),
+                ...(record.supports && typeof record.supports === "object" ? { supports: record.supports as ModelOption["supports"] } : {}),
             };
         })
         .filter((item): item is ModelOption => !!item)
@@ -1079,16 +1178,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     referenceImages,
                 };
             } else if (job.provider === "navy") {
-                const sourceReference = referenceImages.find(
-                    (reference) => reference.role === "source_image"
-                ) ?? referenceImages[0];
+                const imageUrl = buildNavyImageUrlPayload(referenceImages);
                 body = {
                     ...body,
                     ...imageSizing,
                     numberOfImages: job.imageCount,
                     negativePrompt: job.negativePrompt,
                     promptAgentModel: job.promptAgentModel,
-                    imageUrl: sourceReference?.dataUrl,
+                    imageUrl,
                     sync: false,
                 };
             } else {
@@ -1374,13 +1471,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 if (job.remoteJobId) {
                     submitPayload = { id: job.remoteJobId };
                 } else {
+                    const imageUrl = buildNavyImageUrlPayload(referenceImages, sourceImage);
                     const submitResponse = await fetch("/api/navy/video", {
                         method: "POST",
                         headers: requestHeaders,
                         body: JSON.stringify({
                             prompt: job.prompt,
                             model: job.model,
-                            imageUrl: sourceImage,
+                            imageUrl,
                             negativePrompt: job.negativePrompt,
                             seconds: Number(job.videoDuration),
                             aspectRatio: job.videoAspect,
@@ -1730,7 +1828,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 batchId: `${batchCreatedAt}:${provider}:${mode}`,
                 batchCreatedAt,
                 batchOrder: index,
-                outputModalities: selectedModel?.outputModalities,
+                outputModalities: selectedModel?.outputModalities ?? undefined,
                 imageCount,
                 imageAspect,
                 imageSize,
@@ -1884,7 +1982,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     const refreshModels = useCallback(async () => {
         if (provider !== "openrouter" && provider !== "navy") return;
-        if (!apiKey.trim()) {
+        if (provider === "openrouter" && !apiKey.trim()) {
             setModelsError("Add the provider API key before refreshing models.");
             return;
         }
@@ -2242,7 +2340,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
-        if (!apiKeys.navy.trim()) return;
         void refreshNavyCatalog();
     }, [apiKeys.navy, hydrated, refreshNavyCatalog]);
 

@@ -203,8 +203,34 @@ export function ImgGenSettings({
     const orderedImageModels = imageModelOrder.filter((entry) => availableModelIds.has(entry));
     const selectedModel = modelSuggestions.find((suggestion) => suggestion.id === model);
 
-    const formatCount = (value?: number) =>
-        typeof value === "number" ? value.toLocaleString() : "-";
+    const formatCount = (value?: number | null) =>
+        typeof value === "number" ? value.toLocaleString() : value === null ? "unknown" : "-";
+    const formatFlag = (value?: boolean | null) =>
+        typeof value === "boolean" ? (value ? "yes" : "no") : value === null ? "unknown" : "-";
+    const selectedInputModalities = selectedModel?.inputModalities;
+    const selectedOutputModalities = selectedModel?.outputModalities;
+    const hasSelectedModelMetadata = Boolean(
+        selectedModel?.endpoint ||
+        selectedModel?.requiredPlan ||
+        typeof selectedModel?.tokenMultiplier === "number" ||
+        selectedModel?.contextWindow !== undefined ||
+        selectedModel?.maxOutputTokens !== undefined ||
+        selectedModel?.metadataStatus ||
+        selectedModel?.metadataSource !== undefined ||
+        selectedModel?.modality !== undefined ||
+        selectedModel?.tokenizer !== undefined ||
+        selectedModel?.supportsVision !== undefined ||
+        selectedModel?.supportsTools !== undefined ||
+        selectedModel?.supportsFunctionCalling !== undefined ||
+        selectedModel?.supportsReasoning !== undefined ||
+        selectedModel?.supportsJsonMode !== undefined ||
+        selectedModel?.supportsAudioInput !== undefined ||
+        selectedModel?.supportsImageOutput !== undefined ||
+        selectedModel?.supportsStreaming !== undefined ||
+        selectedModel?.maxReferenceImages !== undefined ||
+        selectedInputModalities !== undefined ||
+        selectedOutputModalities !== undefined
+    );
     const formatDuration = (ms?: number) => {
         if (!ms || !Number.isFinite(ms)) return "-";
         const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -304,12 +330,37 @@ export function ImgGenSettings({
                     {modelsError ? (
                         <p className="text-xs text-destructive">{modelsError}</p>
                     ) : null}
-                    {selectedModel?.endpoint || selectedModel?.requiredPlan || selectedModel?.tokenMultiplier ? (
-                        <div className="rounded-lg border border-border/50 bg-secondary/20 p-2 text-[11px] text-muted-foreground">
-                            {selectedModel.endpoint ? <div>Endpoint: {selectedModel.endpoint}</div> : null}
-                            {selectedModel.requiredPlan ? <div>Plan: {selectedModel.requiredPlan}</div> : null}
-                            {typeof selectedModel.tokenMultiplier === "number" ? <div>Token multiplier: {selectedModel.tokenMultiplier}</div> : null}
+                    {hasSelectedModelMetadata ? (
+                        <div className="space-y-1 rounded-lg border border-border/50 bg-secondary/20 p-2 text-[11px] text-muted-foreground">
+                            {selectedModel?.endpoint ? <div>Endpoint: {selectedModel.endpoint}</div> : null}
+                            {selectedModel?.requiredPlan ? <div>Plan: {selectedModel.requiredPlan}</div> : null}
+                            {typeof selectedModel?.tokenMultiplier === "number" ? <div>Token multiplier: {selectedModel.tokenMultiplier}</div> : null}
+                            {selectedModel?.contextWindow !== undefined ? <div>Context: {formatCount(selectedModel.contextWindow)}</div> : null}
+                            {selectedModel?.maxOutputTokens !== undefined ? <div>Max output: {formatCount(selectedModel.maxOutputTokens)}</div> : null}
+                            {selectedInputModalities !== undefined ? (
+                                <div>Input: {selectedInputModalities?.length ? selectedInputModalities.join(", ") : "unknown"}</div>
+                            ) : null}
+                            {selectedOutputModalities !== undefined ? (
+                                <div>Output: {selectedOutputModalities?.length ? selectedOutputModalities.join(", ") : "unknown"}</div>
+                            ) : null}
+                            {selectedModel?.modality !== undefined ? <div>Modality: {selectedModel.modality ?? "unknown"}</div> : null}
+                            {selectedModel?.tokenizer !== undefined ? <div>Tokenizer: {selectedModel.tokenizer ?? "unknown"}</div> : null}
+                            {selectedModel?.metadataStatus ? <div>Metadata: {selectedModel.metadataStatus}{selectedModel.metadataSource ? ` via ${selectedModel.metadataSource}` : ""}</div> : null}
+                            {selectedModel?.maxReferenceImages !== undefined ? <div>Reference images: up to {selectedModel.maxReferenceImages}</div> : null}
+                            {selectedModel?.supportsVision !== undefined ? <div>Vision: {formatFlag(selectedModel.supportsVision)}</div> : null}
+                            {selectedModel?.supportsTools !== undefined ? <div>Tools: {formatFlag(selectedModel.supportsTools)}</div> : null}
+                            {selectedModel?.supportsFunctionCalling !== undefined ? <div>Function calling: {formatFlag(selectedModel.supportsFunctionCalling)}</div> : null}
+                            {selectedModel?.supportsReasoning !== undefined ? <div>Reasoning: {formatFlag(selectedModel.supportsReasoning)}</div> : null}
+                            {selectedModel?.supportsJsonMode !== undefined ? <div>JSON mode: {formatFlag(selectedModel.supportsJsonMode)}</div> : null}
+                            {selectedModel?.supportsAudioInput !== undefined ? <div>Audio input: {formatFlag(selectedModel.supportsAudioInput)}</div> : null}
+                            {selectedModel?.supportsImageOutput !== undefined ? <div>Image output: {formatFlag(selectedModel.supportsImageOutput)}</div> : null}
+                            {selectedModel?.supportsStreaming !== undefined ? <div>Streaming: {formatFlag(selectedModel.supportsStreaming)}</div> : null}
                         </div>
+                    ) : null}
+                    {selectedModel?.description ? (
+                        <p className="line-clamp-3 text-xs text-muted-foreground">
+                            {selectedModel.description}
+                        </p>
                     ) : null}
                     {selectedModel?.premium ? (
                         <p className="text-xs text-amber-600">This model may be premium or plan-gated.</p>

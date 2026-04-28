@@ -38,6 +38,10 @@ test("dynamic capability merge overrides static capability metadata", () => {
     modes: ["image"],
     inputModalities: ["text", "image"],
     outputModalities: ["image", "text"],
+    contextWindow: null,
+    maxOutputTokens: 4096,
+    supportsImageOutput: true,
+    metadataStatus: "known",
     planGated: true,
   };
 
@@ -50,5 +54,9 @@ test("dynamic capability merge overrides static capability metadata", () => {
 
   assert.equal(model?.label, "Dynamic Gemini");
   assert.equal(model?.planGated, true);
+  assert.equal(model?.contextWindow, null);
+  assert.equal(model?.maxOutputTokens, 4096);
+  assert.equal(model?.supportsImageOutput, true);
+  assert.equal(model?.metadataStatus, "known");
   assert.deepEqual(model?.inputModalities, ["text", "image"]);
 });

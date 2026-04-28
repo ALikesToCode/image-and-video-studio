@@ -19,7 +19,9 @@ type ImageRequest = {
   numberOfImages?: number;
   quality?: string;
   style?: string;
-  imageUrl?: string;
+  imageUrl?: string | string[];
+  imageUrls?: string[];
+  image_url?: string | string[];
   negativePrompt?: string;
   seed?: number | null;
   seconds?: number;
@@ -259,7 +261,6 @@ export async function POST(req: Request) {
     numberOfImages,
     quality,
     style,
-    imageUrl,
     negativePrompt,
     seed,
     seconds,
@@ -267,6 +268,7 @@ export async function POST(req: Request) {
     aspectRatio,
     promptAgentModel,
   } = body;
+  const imageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
   const userApiKey = getUserApiKey(req, body);
   if (!userApiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });

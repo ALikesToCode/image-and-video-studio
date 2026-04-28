@@ -137,7 +137,8 @@ type ChutesChatProps = {
 const NAVY_IMAGE_GUIDE_PROMPT = `# Prompt Guide for NavyAI Image Generation
 
 Use concise, vivid descriptions with clear subjects, styles, and lighting. Ask for missing details.
-Summarize the final prompt before generating, and prefer sizes like 1024x1024 unless specified.`;
+Summarize the final prompt before generating, and prefer sizes like 1024x1024 unless specified.
+When the user provides reference images, pass them through image_url as one URL/data URI or an array of up to 5 references.`;
 
 const FLUX_CROSS_MODAL_GUIDE = `# Flux Cross-Modal Prompt Protocol
 
@@ -798,6 +799,18 @@ export function ChutesChat({
                       type: "string",
                       description: "DALL-E 3 style: vivid or natural.",
                     },
+                    image_url: {
+                      oneOf: [
+                        { type: "string" },
+                        {
+                          type: "array",
+                          items: { type: "string" },
+                          maxItems: 5,
+                        },
+                      ],
+                      description:
+                        "Optional reference image URL or data URI, or up to 5 reference images for multi-reference editing.",
+                    },
                     n: {
                       type: "integer",
                       description: "Number of images to generate.",
@@ -1230,6 +1243,27 @@ ${defaultPrompt}`;
     return "";
   };
 
+  const getStringOrStringArrayArg = (
+    args: Record<string, unknown>,
+    keys: string[],
+    maxItems = 5
+  ) => {
+    for (const key of keys) {
+      const value = args[key];
+      if (typeof value === "string" && value.trim().length) {
+        return value.trim();
+      }
+      if (Array.isArray(value)) {
+        const values = value
+          .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+          .filter(Boolean)
+          .slice(0, maxItems);
+        if (values.length) return values;
+      }
+    }
+    return undefined;
+  };
+
   const getNumberArg = (args: Record<string, unknown>, keys: string[]) => {
     for (const key of keys) {
       const value = args[key];
@@ -1301,9 +1335,11 @@ ${defaultPrompt}`;
       const size = getStringArg(finalArgs, ["size"]);
       const quality = getStringArg(finalArgs, ["quality"]);
       const style = getStringArg(finalArgs, ["style"]);
+      const imageUrl = getStringOrStringArrayArg(finalArgs, ["image_url", "image"]);
       if (size) Object.assign(baseBody, resolveNavyChatImageSizing(size));
       if (quality) baseBody.quality = quality;
       if (style) baseBody.style = style;
+      if (imageUrl) baseBody.imageUrl = imageUrl;
       if (numberOfImages && numberOfImages > 0) {
         baseBody.numberOfImages = Math.max(1, Math.round(numberOfImages));
       }

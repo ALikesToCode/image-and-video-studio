@@ -19,11 +19,26 @@ export type ModelOption = {
     label: string;
     provider?: Provider | string;
     endpoint?: ModelEndpoint;
-    inputModalities?: string[];
-    outputModalities?: string[];
+    inputModalities?: string[] | null;
+    outputModalities?: string[] | null;
     premium?: boolean;
     requiredPlan?: string | null;
     tokenMultiplier?: number;
+    contextWindow?: number | null;
+    maxOutputTokens?: number | null;
+    modality?: string | null;
+    tokenizer?: string | null;
+    description?: string | null;
+    metadataSource?: string | null;
+    metadataStatus?: string;
+    supportsVision?: boolean | null;
+    supportsTools?: boolean | null;
+    supportsFunctionCalling?: boolean | null;
+    supportsReasoning?: boolean | null;
+    supportsJsonMode?: boolean | null;
+    supportsAudioInput?: boolean | null;
+    supportsImageOutput?: boolean | null;
+    supportsStreaming?: boolean | null;
     pricing?: unknown;
     supports?: Partial<{
         imageGeneration: boolean;
@@ -41,6 +56,7 @@ export type ModelOption = {
         firstFrame: boolean;
         lastFrame: boolean;
     }>;
+    maxReferenceImages?: number;
 };
 
 export const GEMINI_IMAGE_MODELS: ModelOption[] = [

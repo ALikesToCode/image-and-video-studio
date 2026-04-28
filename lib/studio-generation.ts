@@ -23,7 +23,7 @@ type NavyImageGenerationInput = {
   numberOfImages?: number;
   quality?: string;
   style?: string;
-  imageUrl?: string;
+  imageUrl?: string | string[];
   negativePrompt?: string;
   seed?: number | null;
   seconds?: number;
@@ -33,6 +33,7 @@ type NavyImageGenerationInput = {
 };
 
 type NavyModelGroups = {
+  data: ModelOption[];
   chat: ModelOption[];
   image: ModelOption[];
   video: ModelOption[];
@@ -76,7 +77,7 @@ type NavyChatImageSizing = {
   size?: string;
 };
 
-const normalizeModalities = (modalities?: string[]) =>
+const normalizeModalities = (modalities?: string[] | null) =>
   (modalities ?? []).map((value) => value.toLowerCase());
 
 const normalizeEndpoint = (value: unknown) =>
@@ -89,6 +90,9 @@ const normalizeWhitespace = (value: string) =>
     .map((line) => line.trim())
     .filter(Boolean)
     .join("\n");
+
+const stripPromptEnvelope = (value: string) =>
+  value.trim().replace(/^["']+|["']+$/g, "");
 
 const ensureSentence = (value: string) => {
   const trimmed = value.trim().replace(/\s+/g, " ");
@@ -190,7 +194,7 @@ const isLikelyAdultImagePrompt = (prompt: string) =>
   ADULT_IMAGE_PROMPT_PATTERN.test(prompt);
 
 const POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN =
-  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust)\b/i;
+  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust|apparent\s+age\s+18|18[-\s]?year[-\s]?old|student\s+council|school\s+uniform|slim\s+yet\s+curvy|curvy\s+build|dilated\s+pupils?|vacant\s+(?:eyes|gaze)|glassy\s+eyes?)\b/i;
 
 const isPolicySensitiveImagePrompt = (prompt: string) =>
   isLikelyAdultImagePrompt(prompt) ||
@@ -223,7 +227,22 @@ export const supportsSaferImagePromptRetry = (model: string) =>
   isOpenAiImageModel(model) || isGeminiImagePolicyModel(model);
 
 const softenPolicySensitiveImagePrompt = (prompt: string) => {
-  const softened = normalizeWhitespace(prompt)
+  const softened = normalizeWhitespace(stripPromptEnvelope(prompt))
+    .replace(/\bapparent\s+age\s+18\b/gi, "clearly adult university-age appearance")
+    .replace(/\b(?:apparently|about|around)\s+18(?:\s*years?\s*old)?\b/gi, "clearly adult")
+    .replace(/\b18[-\s]?year[-\s]?old\b/gi, "clearly adult")
+    .replace(/\bstudent council room\b/gi, "university council room")
+    .replace(/\bstudent council\b/gi, "university council")
+    .replace(/\bhigh school\b/gi, "university")
+    .replace(/\bschool uniform\b/gi, "formal academy-inspired blazer outfit")
+    .replace(/\bslim\s+yet\s+curvy\b/gi, "slim, balanced")
+    .replace(/\bcurvy\s+build\b/gi, "balanced build")
+    .replace(/\bcurvy\b/gi, "balanced")
+    .replace(/\bdilated\s+pupils?\b/gi, "soft blue eyes")
+    .replace(/\bvacant\s+(?:eyes|gaze)\b/gi, "reflective gaze")
+    .replace(/\bvacant\b/gi, "reflective")
+    .replace(/\bglassy\s+eyes?\b/gi, "bright eyes")
+    .replace(/\bglassy\b/gi, "bright")
     .replace(
       /\bmassive\s+heavy\s+J-cup\s+breasts\s+straining\s+against\s+(?:her|their)\s+top\b/gi,
       "an athletic curvy figure in fitted activewear"
@@ -262,7 +281,7 @@ export const isLikelyImagePolicyError = (message: string) =>
   );
 
 export const buildSaferImagePromptForModel = (model: string, prompt: string) => {
-  const normalizedPrompt = normalizeWhitespace(prompt);
+  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
   if (!supportsSaferImagePromptRetry(model)) return normalizedPrompt;
 
   const saferPrompt = isPolicySensitiveImagePrompt(normalizedPrompt)
@@ -334,7 +353,7 @@ export const prepareImagePromptForModel = (
   negativePrompt?: string
 ) => {
   const rawPrompt = prompt.trim().replace(/\r\n/g, "\n");
-  const normalizedPrompt = normalizeWhitespace(prompt);
+  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
   const trimmedNegativePrompt = negativePrompt?.trim() || undefined;
   const adultPolicyNote = buildAdultImagePolicyNoteForModel(
     model,
@@ -679,6 +698,40 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 
 const asArray = (value: unknown) => (Array.isArray(value) ? value : []);
 
+const firstPresent = (...values: unknown[]) =>
+  values.find((value) => value !== undefined);
+
+const nullableNumber = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? value
+    : value === null
+      ? null
+      : undefined;
+
+const nullableBoolean = (value: unknown) =>
+  typeof value === "boolean" ? value : value === null ? null : undefined;
+
+const nullableString = (value: unknown) =>
+  typeof value === "string" ? value : value === null ? null : undefined;
+
+const nullableStringArray = (value: unknown) => {
+  if (value === null) return null;
+  const values = asArray(value).filter(
+    (entry): entry is string => typeof entry === "string"
+  );
+  return values.length ? values : undefined;
+};
+
+const setNullable = (
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown
+) => {
+  if (value !== undefined) {
+    target[key] = value;
+  }
+};
+
 const pushUniqueModel = (list: ModelOption[], model: ModelOption) => {
   if (!list.some((entry) => entry.id === model.id)) {
     list.push(model);
@@ -704,16 +757,21 @@ const toModelOption = (value: unknown): ModelOption | null => {
       : typeof record.label === "string"
         ? record.label
         : id;
-  const outputModalities = asArray(
-    record.output_modalities ??
-      record.outputModalities ??
-      asRecord(record.architecture)?.output_modalities
-  ).filter((entry): entry is string => typeof entry === "string");
-  const inputModalities = asArray(
-    record.input_modalities ??
-      record.inputModalities ??
-      asRecord(record.architecture)?.input_modalities
-  ).filter((entry): entry is string => typeof entry === "string");
+  const architecture = asRecord(record.architecture);
+  const outputModalities = nullableStringArray(
+    firstPresent(
+      record.output_modalities,
+      record.outputModalities,
+      architecture?.output_modalities
+    )
+  );
+  const inputModalities = nullableStringArray(
+    firstPresent(
+      record.input_modalities,
+      record.inputModalities,
+      architecture?.input_modalities
+    )
+  );
   const endpoint =
     typeof record.endpoint === "string" ? record.endpoint : undefined;
   const provider =
@@ -738,19 +796,79 @@ const toModelOption = (value: unknown): ModelOption | null => {
         ? record.tokenMultiplier
         : undefined;
   const pricing = record.pricing;
+  const contextWindow = nullableNumber(
+    firstPresent(record.context_window, record.contextWindow)
+  );
+  const maxOutputTokens = nullableNumber(
+    firstPresent(record.max_output_tokens, record.maxOutputTokens)
+  );
+  const modality = nullableString(record.modality);
+  const tokenizer = nullableString(record.tokenizer);
+  const description = nullableString(record.description);
+  const metadataSource = nullableString(
+    firstPresent(record.metadata_source, record.metadataSource)
+  );
+  const metadataStatus =
+    typeof record.metadata_status === "string"
+      ? record.metadata_status
+      : typeof record.metadataStatus === "string"
+        ? record.metadataStatus
+        : undefined;
+  const supportsVision = nullableBoolean(
+    firstPresent(record.supports_vision, record.supportsVision)
+  );
+  const supportsTools = nullableBoolean(
+    firstPresent(record.supports_tools, record.supportsTools)
+  );
+  const supportsFunctionCalling = nullableBoolean(
+    firstPresent(record.supports_function_calling, record.supportsFunctionCalling)
+  );
+  const supportsReasoning = nullableBoolean(
+    firstPresent(record.supports_reasoning, record.supportsReasoning)
+  );
+  const supportsJsonMode = nullableBoolean(
+    firstPresent(record.supports_json_mode, record.supportsJsonMode)
+  );
+  const supportsAudioInput = nullableBoolean(
+    firstPresent(record.supports_audio_input, record.supportsAudioInput)
+  );
+  const supportsImageOutput = nullableBoolean(
+    firstPresent(record.supports_image_output, record.supportsImageOutput)
+  );
+  const supportsStreaming = nullableBoolean(
+    firstPresent(record.supports_streaming, record.supportsStreaming)
+  );
 
-  return {
+  const model: ModelOption & Record<string, unknown> = {
     id,
     label,
     ...(provider ? { provider } : {}),
     ...(endpoint ? { endpoint } : {}),
-    ...(inputModalities.length ? { inputModalities } : {}),
-    ...(outputModalities.length ? { outputModalities } : {}),
+    ...(inputModalities !== undefined ? { inputModalities } : {}),
+    ...(outputModalities !== undefined ? { outputModalities } : {}),
     ...(typeof premium === "boolean" ? { premium } : {}),
     ...(requiredPlan !== undefined ? { requiredPlan } : {}),
     ...(typeof tokenMultiplier === "number" ? { tokenMultiplier } : {}),
     ...(pricing !== undefined ? { pricing } : {}),
   };
+
+  setNullable(model, "contextWindow", contextWindow);
+  setNullable(model, "maxOutputTokens", maxOutputTokens);
+  setNullable(model, "modality", modality);
+  setNullable(model, "tokenizer", tokenizer);
+  setNullable(model, "description", description);
+  setNullable(model, "metadataSource", metadataSource);
+  setNullable(model, "metadataStatus", metadataStatus);
+  setNullable(model, "supportsVision", supportsVision);
+  setNullable(model, "supportsTools", supportsTools);
+  setNullable(model, "supportsFunctionCalling", supportsFunctionCalling);
+  setNullable(model, "supportsReasoning", supportsReasoning);
+  setNullable(model, "supportsJsonMode", supportsJsonMode);
+  setNullable(model, "supportsAudioInput", supportsAudioInput);
+  setNullable(model, "supportsImageOutput", supportsImageOutput);
+  setNullable(model, "supportsStreaming", supportsStreaming);
+
+  return model;
 };
 
 export const extractOpenRouterImageModels = (payload: unknown): ModelOption[] => {
@@ -778,6 +896,7 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
       const record = asRecord(entry);
       const model = toModelOption(entry);
       if (!record || !model) return groups;
+      pushUniqueModel(groups.data, model);
 
       const endpoint =
         normalizeEndpoint(record.endpoint);
@@ -819,9 +938,11 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
             video: true,
             asyncJobs: true,
             sourceImage: true,
+            referenceImages: true,
             aspectRatio: true,
             negativePrompt: true,
           },
+          maxReferenceImages: 5,
         });
         return groups;
       }
@@ -839,9 +960,11 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
               video: true,
               asyncJobs: true,
               sourceImage: true,
+              referenceImages: true,
               aspectRatio: true,
               negativePrompt: true,
             },
+            maxReferenceImages: 5,
           });
         } else if (!NAVY_TRANSCRIPTION_MODEL_PATTERN.test(id)) {
           pushUniqueModel(groups.image, {
@@ -850,17 +973,19 @@ export const groupNavyModelsByCapability = (payload: unknown): NavyModelGroups =
               ...(model.supports ?? {}),
               imageGeneration: true,
               sourceImage: true,
+              referenceImages: true,
               aspectRatio: true,
               size: true,
               seed: true,
             },
+            maxReferenceImages: 5,
           });
         }
       }
 
       return groups;
     },
-    { chat: [], image: [], video: [], audio: [] }
+    { data: [], chat: [], image: [], video: [], audio: [] }
   );
 };
 
@@ -994,6 +1119,23 @@ export const mergeGeneratedImagesInDisplayOrder = (
     return left.id.localeCompare(right.id);
   });
 
+export const normalizeNavyImageUrlPayload = (
+  imageUrl?: string | string[] | null,
+  maxItems = 5
+) => {
+  if (Array.isArray(imageUrl)) {
+    const urls = imageUrl
+      .map((url) => (typeof url === "string" ? url.trim() : ""))
+      .filter(Boolean)
+      .slice(0, maxItems);
+    return urls.length ? urls : undefined;
+  }
+
+  if (typeof imageUrl !== "string") return undefined;
+  const trimmed = imageUrl.trim();
+  return trimmed || undefined;
+};
+
 export const buildNavyImageGenerationPayload = ({
   model,
   prompt,
@@ -1019,6 +1161,7 @@ export const buildNavyImageGenerationPayload = ({
   const shouldPreferAspectRatio =
     typeof aspectRatio === "string" && aspectRatio.trim() !== "" && aspectRatio !== "1:1";
   const isLikelyVideoModel = NAVY_VIDEO_MODEL_PATTERN.test(model);
+  const normalizedImageUrl = normalizeNavyImageUrlPayload(imageUrl);
 
   return {
   model,
@@ -1029,7 +1172,7 @@ export const buildNavyImageGenerationPayload = ({
     : {}),
   ...(quality || !isLikelyVideoModel ? { quality: quality ?? "medium" } : {}),
   ...(style ? { style } : {}),
-  ...(imageUrl ? { image_url: imageUrl } : {}),
+  ...(normalizedImageUrl ? { image_url: normalizedImageUrl } : {}),
   ...(typeof seed === "number" ? { seed } : {}),
   ...(typeof seconds === "number" ? { seconds } : {}),
   ...(typeof sync === "boolean" ? { sync } : {}),
