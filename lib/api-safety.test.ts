@@ -59,3 +59,29 @@ test("getProviderApiKey prefers server env keys over BYOK request keys", () => {
     }
   }
 });
+
+test("getProviderApiKey accepts the local NAVY_API server env alias", () => {
+  const originals = {
+    NAVY_API_KEY: process.env.NAVY_API_KEY,
+    NAVYAI_API_KEY: process.env.NAVYAI_API_KEY,
+    NAVY_API: process.env.NAVY_API,
+  };
+  delete process.env.NAVY_API_KEY;
+  delete process.env.NAVYAI_API_KEY;
+  process.env.NAVY_API = "server-navy-secret";
+  const request = new Request("https://studio.test/api/navy/image", {
+    headers: { "x-user-api-key": "user-secret" },
+  });
+
+  try {
+    assert.equal(getProviderApiKey("navy", request), "server-navy-secret");
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});

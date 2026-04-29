@@ -12,7 +12,7 @@ type ImageProvider = "gemini" | "navy" | "chutes" | "openrouter";
 
 const PROVIDER_ENV_KEYS: Record<ImageProvider, string[]> = {
   gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-  navy: ["NAVY_API_KEY", "NAVYAI_API_KEY"],
+  navy: ["NAVY_API_KEY", "NAVYAI_API_KEY", "NAVY_API"],
   chutes: ["CHUTES_API_KEY"],
   openrouter: ["OPENROUTER_API_KEY"],
 };
