@@ -22,6 +22,7 @@ import {
     IMAGE_SIZES,
     IMAGEN_SIZES,
     Mode,
+    NAVY_IMAGE_QUALITIES,
     NAVY_IMAGE_SIZES,
     Provider,
     ModelOption,
@@ -93,6 +94,8 @@ interface ImgGenSettingsProps {
     navyUsageUpdatedAt?: string | null;
     navyImageSize?: string;
     setNavyImageSize?: (s: string) => void;
+    navyImageQuality?: string;
+    setNavyImageQuality?: (s: string) => void;
     chutesVideoFps?: string;
     setChutesVideoFps?: (v: string) => void;
     chutesVideoGuidanceScale?: string;
@@ -122,8 +125,10 @@ export function ImgGenSettings({
     setImagePipelineEnabled,
     imageModelOrder,
     setImageModelOrder,
-    navyImageSize,
+    navyImageSize = AUTO_IMAGE_OPTION,
     setNavyImageSize,
+    navyImageQuality = "medium",
+    setNavyImageQuality,
     chutesVideoFps,
     setChutesVideoFps,
     chutesVideoGuidanceScale,
@@ -472,17 +477,31 @@ export function ImgGenSettings({
                             <>
                                 <div className="space-y-2">
                                     <Label>Size</Label>
-                                    <Select value={navyImageSize} onValueChange={setNavyImageSize}>
+                                    <Input
+                                        list="navy-image-size-options"
+                                        value={navyImageSize}
+                                        onChange={(event) =>
+                                            setNavyImageSize?.(event.target.value.trim().toLowerCase())
+                                        }
+                                        placeholder="auto or 3200x2240"
+                                    />
+                                    <datalist id="navy-image-size-options">
+                                        <option value={AUTO_IMAGE_OPTION} />
+                                        {NAVY_IMAGE_SIZES.map((size) => (
+                                            <option key={size} value={size} />
+                                        ))}
+                                    </datalist>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Quality</Label>
+                                    <Select value={navyImageQuality} onValueChange={setNavyImageQuality}>
                                         <SelectTrigger>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value={AUTO_IMAGE_OPTION}>
-                                                Auto (model decides)
-                                            </SelectItem>
-                                            {NAVY_IMAGE_SIZES.map((size) => (
-                                                <SelectItem key={size} value={size}>
-                                                    {size}
+                                            {NAVY_IMAGE_QUALITIES.map((quality) => (
+                                                <SelectItem key={quality} value={quality}>
+                                                    {quality === AUTO_IMAGE_OPTION ? "Auto" : quality}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

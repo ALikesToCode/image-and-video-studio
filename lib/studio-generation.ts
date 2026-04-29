@@ -166,6 +166,40 @@ const NAVY_IMAGE_ASPECT_RATIOS = new Set([
   "custom",
 ]);
 const NAVY_IMAGE_PIXEL_SIZES = new Set(["1024x1024", "512x512", "768x768"]);
+const NAVY_IMAGE_PIXEL_SIZE_PATTERN = /^([1-9]\d{1,4})x([1-9]\d{1,4})$/i;
+
+const parseNavyImagePixelSize = (value: string) => {
+  const match = NAVY_IMAGE_PIXEL_SIZE_PATTERN.exec(value.trim());
+  if (!match) return null;
+  return {
+    width: Number(match[1]),
+    height: Number(match[2]),
+  };
+};
+
+export const isGptImage2Model = (model: string) =>
+  model.trim().toLowerCase() === "gpt-image-2";
+
+export const isValidNavyImagePixelSize = (value: string) =>
+  Boolean(parseNavyImagePixelSize(value));
+
+export const isValidGptImage2Size = (value: string) => {
+  if (isAutoImageOption(value)) return true;
+  const parsed = parseNavyImagePixelSize(value);
+  if (!parsed) return false;
+  const { width, height } = parsed;
+  const longEdge = Math.max(width, height);
+  const shortEdge = Math.min(width, height);
+  const totalPixels = width * height;
+  return (
+    longEdge <= 3840 &&
+    width % 16 === 0 &&
+    height % 16 === 0 &&
+    longEdge / shortEdge <= 3 &&
+    totalPixels >= 655_360 &&
+    totalPixels <= 8_294_400
+  );
+};
 
 export const isImagenModel = (model: string) => model.startsWith("imagen-");
 
@@ -470,7 +504,7 @@ export const resolveNavyChatImageSizing = (value: string): NavyChatImageSizing =
   if (NAVY_IMAGE_ASPECT_RATIOS.has(normalized)) {
     return { aspectRatio: normalized };
   }
-  if (NAVY_IMAGE_PIXEL_SIZES.has(normalized)) {
+  if (NAVY_IMAGE_PIXEL_SIZES.has(normalized) || isValidNavyImagePixelSize(normalized)) {
     return { size: normalized };
   }
   return {};
@@ -1162,11 +1196,13 @@ export const buildNavyImageGenerationPayload = ({
     typeof aspectRatio === "string" && aspectRatio.trim() !== "" && aspectRatio !== "1:1";
   const isLikelyVideoModel = NAVY_VIDEO_MODEL_PATTERN.test(model);
   const normalizedImageUrl = normalizeNavyImageUrlPayload(imageUrl);
+  const normalizedSize =
+    typeof size === "string" ? size.trim().toLowerCase() : "";
 
   return {
   model,
   prompt: promptWithNegativeGuidance,
-  ...(!shouldPreferAspectRatio && size ? { size } : {}),
+  ...(normalizedSize ? { size: normalizedSize } : {}),
   ...(typeof numberOfImages === "number" && numberOfImages > 0
     ? { n: numberOfImages }
     : {}),
@@ -1177,7 +1213,7 @@ export const buildNavyImageGenerationPayload = ({
   ...(typeof seconds === "number" ? { seconds } : {}),
   ...(typeof sync === "boolean" ? { sync } : {}),
   ...(responseFormat ? { response_format: responseFormat } : {}),
-  ...(shouldPreferAspectRatio ? { aspect_ratio: aspectRatio } : {}),
+  ...(!normalizedSize && shouldPreferAspectRatio ? { aspect_ratio: aspectRatio } : {}),
 };
 };
 

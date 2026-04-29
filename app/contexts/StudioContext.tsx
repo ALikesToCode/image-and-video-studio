@@ -12,6 +12,7 @@ import {
     CHUTES_TTS_MODELS,
     OPENROUTER_IMAGE_MODELS,
     NAVY_IMAGE_MODELS,
+    NAVY_IMAGE_QUALITIES,
     NAVY_IMAGE_SIZES,
     NAVY_CHAT_MODELS,
     NAVY_VIDEO_MODELS,
@@ -45,6 +46,9 @@ import {
     normalizeImageModelOrder,
     resolveImageSizingOptions,
     resolveImageGenerationModelPipeline,
+    isGptImage2Model,
+    isValidGptImage2Size,
+    isValidNavyImagePixelSize,
 } from "@/lib/studio-generation";
 import { normalizeVeoDuration } from "@/lib/studio-validation";
 import {
@@ -107,6 +111,7 @@ export type GenerationJob = {
     imageAspect?: string;
     imageSize?: string;
     navyImageSize?: string;
+    navyImageQuality?: string;
     chutesGuidanceScale?: string;
     chutesWidth?: string;
     chutesHeight?: string;
@@ -177,6 +182,7 @@ type StoredSettings = Partial<{
     imageAspect: string;
     imageSize: string;
     navyImageSize: string;
+    navyImageQuality: string;
     chutesGuidanceScale: string;
     chutesWidth: string;
     chutesHeight: string;
@@ -575,6 +581,8 @@ interface StudioContextType {
     setImageSize: (s: string) => void;
     navyImageSize: string;
     setNavyImageSize: (s: string) => void;
+    navyImageQuality: string;
+    setNavyImageQuality: (s: string) => void;
     chutesVideoFps: string;
     setChutesVideoFps: (v: string) => void;
     chutesVideoGuidanceScale: string;
@@ -756,6 +764,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [imageAspect, setImageAspect] = useState(AUTO_IMAGE_OPTION);
     const [imageSize, setImageSize] = useState(AUTO_IMAGE_OPTION);
     const [navyImageSize, setNavyImageSize] = useState(AUTO_IMAGE_OPTION);
+    const [navyImageQuality, setNavyImageQuality] = useState("medium");
     const [chutesGuidanceScale, setChutesGuidanceScale] = useState("7.5");
     // Chutes video
     const [chutesVideoFps, setChutesVideoFps] = useState("16");
@@ -1188,6 +1197,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     ...body,
                     ...imageSizing,
                     numberOfImages: job.imageCount,
+                    quality: job.navyImageQuality,
                     negativePrompt: job.negativePrompt,
                     promptAgentModel: job.promptAgentModel,
                     imageUrl,
@@ -1821,6 +1831,25 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             activeMode === "image" && imagePipelineEnabled
                 ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
                 : [model];
+        const normalizedNavyImageSize = navyImageSize.trim().toLowerCase();
+        if (
+            activeMode === "image" &&
+            provider === "navy" &&
+            normalizedNavyImageSize &&
+            normalizedNavyImageSize !== AUTO_IMAGE_OPTION
+        ) {
+            if (!isValidNavyImagePixelSize(normalizedNavyImageSize)) {
+                setErrorMessage("Navy image size must be auto or WIDTHxHEIGHT.");
+                return;
+            }
+            const gptImage2Model = modelsToRun.find(isGptImage2Model);
+            if (gptImage2Model && !isValidGptImage2Size(normalizedNavyImageSize)) {
+                setErrorMessage(
+                    "GPT Image 2 size must use 16px multiples, stay within 3840px per edge, keep a 3:1 max ratio, and fit 655,360-8,294,400 total pixels."
+                );
+                return;
+            }
+        }
 
         const jobsToQueue = modelsToRun.map((jobModel, index) => {
             const selectedModel = modelSuggestions.find((entry) => entry.id === jobModel);
@@ -1840,7 +1869,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 imageCount,
                 imageAspect,
                 imageSize,
-                navyImageSize,
+                navyImageSize: normalizedNavyImageSize || AUTO_IMAGE_OPTION,
+                navyImageQuality,
                 chutesGuidanceScale,
                 chutesWidth,
                 chutesHeight,
@@ -2146,9 +2176,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             const storedNavyImageSize = getString(storedSettings.navyImageSize);
             if (
                 storedNavyImageSize === AUTO_IMAGE_OPTION ||
-                NAVY_IMAGE_SIZES.includes(storedNavyImageSize)
+                NAVY_IMAGE_SIZES.includes(storedNavyImageSize) ||
+                isValidNavyImagePixelSize(storedNavyImageSize)
             ) {
-                setNavyImageSize(storedNavyImageSize);
+                setNavyImageSize(storedNavyImageSize.toLowerCase());
+            }
+            const storedNavyImageQuality = getString(storedSettings.navyImageQuality);
+            if (NAVY_IMAGE_QUALITIES.includes(storedNavyImageQuality)) {
+                setNavyImageQuality(storedNavyImageQuality);
             }
             const storedGuidanceScale = getString(storedSettings.chutesGuidanceScale);
             if (storedGuidanceScale) setChutesGuidanceScale(storedGuidanceScale);
@@ -2396,6 +2431,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             imageAspect,
             imageSize,
             navyImageSize,
+            navyImageQuality,
             chutesGuidanceScale,
             chutesWidth,
             chutesHeight,
@@ -2430,6 +2466,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         imageAspect,
         imageSize,
         navyImageSize,
+        navyImageQuality,
         chutesGuidanceScale,
         chutesWidth,
         chutesHeight,
@@ -2643,6 +2680,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         imageAspect, setImageAspect,
         imageSize, setImageSize,
         navyImageSize, setNavyImageSize,
+        navyImageQuality, setNavyImageQuality,
         chutesVideoFps, setChutesVideoFps,
         chutesVideoGuidanceScale, setChutesVideoGuidanceScale,
         videoImage, setVideoImage,

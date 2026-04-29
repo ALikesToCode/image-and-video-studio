@@ -23,6 +23,7 @@ import {
   resolveActiveImageToolModels,
   resolveNavyChatImageSizing,
   groupNavyModelsByCapability,
+  isValidGptImage2Size,
   isLikelyImagePolicyError,
   isNavyGenerationPending,
   resolveOpenRouterModalities,
@@ -220,12 +221,23 @@ test("Navy image payload maps OpenAI-compatible fields to Navy API fields", () =
   assert.equal(payload.seconds, 6);
   assert.equal(payload.sync, false);
   assert.equal(payload.response_format, "url");
-  assert.equal(payload.aspect_ratio, "16:9");
-  assert.equal("size" in payload, false);
+  assert.equal(payload.size, "1024x1024");
+  assert.equal("aspect_ratio" in payload, false);
   assert.equal("negative_prompt" in payload, false);
   assert.match(payload.prompt, /^Artwork direction: A naval command room at dusk\./);
   assert.match(payload.prompt, /artifact-free rendering/i);
   assert.match(payload.prompt, /clean surfaces without embedded typography or branding/i);
+});
+
+test("Navy image payload uses aspect ratio when no explicit size is set", () => {
+  const payload = buildNavyImageGenerationPayload({
+    model: "flux",
+    prompt: "A naval command room at dusk",
+    aspectRatio: "16:9",
+  });
+
+  assert.equal(payload.aspect_ratio, "16:9");
+  assert.equal("size" in payload, false);
 });
 
 test("Navy image payload accepts up to five reference image URLs", () => {
@@ -721,8 +733,20 @@ test("Navy chat image sizing ignores composition text and keeps valid dimensions
   assert.deepEqual(resolveNavyChatImageSizing("1024x1024"), {
     size: "1024x1024",
   });
+  assert.deepEqual(resolveNavyChatImageSizing("3200x2240"), {
+    size: "3200x2240",
+  });
   assert.deepEqual(resolveNavyChatImageSizing("medium-wide shot"), {});
   assert.deepEqual(resolveNavyChatImageSizing("slightly low angle"), {});
+});
+
+test("GPT Image 2 size validation follows documented pixel constraints", () => {
+  assert.equal(isValidGptImage2Size("3200x2240"), true);
+  assert.equal(isValidGptImage2Size("3840x2160"), true);
+  assert.equal(isValidGptImage2Size("512x512"), false);
+  assert.equal(isValidGptImage2Size("4096x2048"), false);
+  assert.equal(isValidGptImage2Size("4000x400"), false);
+  assert.equal(isValidGptImage2Size("1025x1024"), false);
 });
 
 test("Navy model catalog is normalized into image, video, and TTS groups", () => {

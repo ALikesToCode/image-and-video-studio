@@ -181,6 +181,11 @@ export const NAVY_IMAGE_MODELS: ModelOption[] = [
         label: "DALL-E 3",
     },
     {
+        id: "gpt-image-2",
+        label: "GPT Image 2",
+        premium: true,
+    },
+    {
         id: "gpt-image-1.5",
         label: "GPT Image 1.5",
     },
@@ -562,7 +567,18 @@ export const EXTENDED_IMAGE_ASPECTS = [
 ];
 export const IMAGE_SIZES = ["1K", "2K", "4K"];
 export const IMAGEN_SIZES = ["1K", "2K"];
-export const NAVY_IMAGE_SIZES = ["1024x1024", "512x512", "768x768"];
+export const NAVY_IMAGE_SIZES = [
+    "1024x1024",
+    "1536x1024",
+    "1024x1536",
+    "2048x2048",
+    "2048x1152",
+    "3840x2160",
+    "2160x3840",
+    "512x512",
+    "768x768",
+];
+export const NAVY_IMAGE_QUALITIES = ["auto", "low", "medium", "high"];
 export const VIDEO_ASPECTS = ["16:9", "9:16"];
 export const VIDEO_RESOLUTIONS = ["720p", "1080p", "4k"];
 export const VIDEO_DURATIONS = ["4", "6", "8"];

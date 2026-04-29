@@ -110,6 +110,8 @@ export function ImageGenView() {
                             setImageSize={context.setImageSize}
                             navyImageSize={context.navyImageSize}
                             setNavyImageSize={context.setNavyImageSize}
+                            navyImageQuality={context.navyImageQuality}
+                            setNavyImageQuality={context.setNavyImageQuality}
                             chutesGuidanceScale={context.chutesGuidanceScale}
                             setChutesGuidanceScale={context.setChutesGuidanceScale}
                             chutesWidth={context.chutesWidth}
@@ -178,6 +180,8 @@ export function ImageGenView() {
                             setImageSize={context.setImageSize}
                             navyImageSize={context.navyImageSize}
                             setNavyImageSize={context.setNavyImageSize}
+                            navyImageQuality={context.navyImageQuality}
+                            setNavyImageQuality={context.setNavyImageQuality}
                             chutesGuidanceScale={context.chutesGuidanceScale}
                             setChutesGuidanceScale={context.setChutesGuidanceScale}
                             chutesWidth={context.chutesWidth}
