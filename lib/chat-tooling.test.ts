@@ -12,6 +12,7 @@ import {
   repairImageToolArguments,
   resolveToolArguments,
   resolveRequestedImageModels,
+  runImageModelFallbackSequence,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   shouldOmitToolChoiceForModel,
@@ -477,10 +478,23 @@ test("Chat messages omit assistant thinking unless reasoning content is requeste
   );
 });
 
-test("Requested image models use the pipeline when the request targets the default model", () => {
+test("Requested image models stay pinned when the request targets the default model", () => {
   assert.deepEqual(
     resolveRequestedImageModels({
       requestedModel: "flux",
+      defaultModel: "flux",
+      imagePipelineEnabled: true,
+      imageModelOrder: ["gpt-image-1.5", "flux"],
+      availableModels: ["flux", "gpt-image-1.5"],
+    }),
+    ["flux"]
+  );
+});
+
+test("Missing image model requests use the ordered fallback pipeline", () => {
+  assert.deepEqual(
+    resolveRequestedImageModels({
+      requestedModel: "",
       defaultModel: "flux",
       imagePipelineEnabled: true,
       imageModelOrder: ["gpt-image-1.5", "flux"],
@@ -503,31 +517,69 @@ test("Requested image models stay pinned when a non-default model is explicitly 
   );
 });
 
-test("Chat image model requests ignore model drift unless the user asked for that model", () => {
+test("Chat image model requests preserve the assistant-selected model", () => {
   assert.equal(
     normalizeImageToolModelRequest({
       requestedModel: "grok-imagine",
-      defaultModel: "flux",
-      userPrompt: "Create a high-detail modern anime illustration.",
-    }),
-    ""
-  );
-  assert.equal(
-    normalizeImageToolModelRequest({
-      requestedModel: "grok-imagine",
-      defaultModel: "flux",
-      userPrompt: "Use grok imagine for this image.",
     }),
     "grok-imagine"
   );
   assert.equal(
     normalizeImageToolModelRequest({
-      requestedModel: "flux",
-      defaultModel: "flux",
-      userPrompt: "Create a high-detail modern anime illustration.",
+      requestedModel: " flux ",
     }),
     "flux"
   );
+  assert.equal(
+    normalizeImageToolModelRequest({
+      requestedModel: "",
+    }),
+    ""
+  );
+});
+
+test("Image model fallback sequence stops after the first successful model", async () => {
+  const calls: string[] = [];
+  const updates: string[] = [];
+
+  const result = await runImageModelFallbackSequence({
+    models: ["gpt-image-2", "flux", "nano-banana-2"],
+    runModel: async (model) => {
+      calls.push(model);
+      if (model === "gpt-image-2") {
+        throw new Error("blocked by image safety policy");
+      }
+      return [`image:${model}`];
+    },
+    onUpdate: (update) => updates.push(`${update.model}:${update.status}`),
+  });
+
+  assert.equal(result.status, "fulfilled");
+  assert.equal(result.model, "flux");
+  assert.deepEqual(result.value, ["image:flux"]);
+  assert.deepEqual(result.errors.map((entry) => entry.model), ["gpt-image-2"]);
+  assert.deepEqual(calls, ["gpt-image-2", "flux"]);
+  assert.deepEqual(updates, [
+    "gpt-image-2:running",
+    "gpt-image-2:error",
+    "flux:running",
+    "flux:success",
+  ]);
+});
+
+test("Image model fallback sequence returns all errors when every model fails", async () => {
+  const result = await runImageModelFallbackSequence({
+    models: ["gpt-image-2", "flux"],
+    runModel: async (model) => {
+      throw new Error(`${model} failed`);
+    },
+  });
+
+  assert.equal(result.status, "rejected");
+  assert.deepEqual(result.errors.map((entry) => entry.model), [
+    "gpt-image-2",
+    "flux",
+  ]);
 });
 
 test("Chat image assets preserve per-image model labels", () => {

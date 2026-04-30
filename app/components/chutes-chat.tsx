@@ -63,6 +63,7 @@ import {
   repairImageToolArguments,
   resolveToolArguments,
   resolveRequestedImageModels,
+  runImageModelFallbackSequence,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   stripHeavyMediaFromMessagesForStorage,
@@ -792,7 +793,7 @@ export function ChutesChat({
               function: {
                 name: "generate_image",
                 description:
-                  "Generate an image. Use the default model unless the user asks for a specific one.",
+                  "Generate an image. Choose the best available model when one clearly fits; omit model to use the ordered fallback/default.",
                 parameters: {
                   type: "object",
                   properties: {
@@ -836,7 +837,7 @@ export function ChutesChat({
               function: {
                 name: "generate_image",
                 description:
-                  "Generate an image. Use the default model unless the user asks for a specific one.",
+                  "Generate an image. Choose the best available model when one clearly fits; omit model to use the ordered fallback/default.",
                 parameters: {
                   type: "object",
                   properties: {
@@ -1034,7 +1035,7 @@ export function ChutesChat({
 Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
       : "";
     const imagePromptInstruction =
-      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Do not include a model in generate_image arguments unless the user explicitly asks for that exact model. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
+      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Include a model when one available image model clearly fits the request; omit model when uncertain so the ordered fallback/default can try models in order until one succeeds. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
 
     const defaultPrompt = `${promptGuide}
 ${FLUX_CROSS_MODAL_GUIDE}
@@ -1316,13 +1317,10 @@ ${defaultPrompt}`;
     const rawRequestedModel = getStringArg(args, ["model"]);
     const requestedModel = normalizeImageToolModelRequest({
       requestedModel: rawRequestedModel,
-      defaultModel: toolImageModel,
-      userPrompt: context?.userPrompt ?? "",
     });
-    const modelOverride = requestedModel || toolImageModel;
     const modelsToRun = resolveRequestedImageModels({
       requestedModel,
-      defaultModel: modelOverride,
+      defaultModel: toolImageModel,
       imagePipelineEnabled,
       imageModelOrder,
       availableModels: imageModels.map((item) => item.id),
@@ -1510,59 +1508,73 @@ ${defaultPrompt}`;
       }
     };
 
-    const results = await Promise.all(
-      modelsToRun.map(async (targetModel) => {
+    const attemptedModels: string[] = [];
+    const result = await runImageModelFallbackSequence({
+      models: modelsToRun,
+      runModel: async (targetModel) => {
+        attemptedModels.push(targetModel);
+        return await invokeImageModel(targetModel);
+      },
+      onUpdate: (update) => {
+        const targetModel = update.model;
         const request = imageRequestByModel.get(targetModel);
         const promptForModel =
           typeof request?.body.prompt === "string" ? request.body.prompt : prompt;
-        onModelProgress?.({
-          model: targetModel,
-          status: "running",
-          prompt: promptForModel,
-        });
-
-        try {
-          const value = await invokeImageModel(targetModel);
+        if (update.status === "running") {
+          onModelProgress?.({
+            model: targetModel,
+            status: "running",
+            prompt: promptForModel,
+          });
+          return;
+        }
+        if (update.status === "success") {
           onModelProgress?.({
             model: targetModel,
             status: "success",
             prompt: promptForModel,
-            images: value,
+            images: update.value,
           });
-          return { status: "fulfilled" as const, value };
-        } catch (error) {
+          return;
+        }
+
+        if (update.status === "error") {
           const message =
-            error instanceof Error ? error.message : "Image generation failed.";
+            update.error instanceof Error
+              ? update.error.message
+              : "Image generation failed.";
           onModelProgress?.({
             model: targetModel,
             status: "error",
             prompt: promptForModel,
             error: message,
           });
-          return { status: "rejected" as const, reason: error };
         }
-      })
-    );
-    const parsedImages = results.flatMap((result) =>
-      result.status === "fulfilled" ? result.value : []
-    );
-    const errors = results.flatMap((result, index) => {
-      if (result.status === "fulfilled") return [];
+      },
+    });
+    const parsedImages = result.status === "fulfilled" ? result.value : [];
+    const errors = result.errors.map(({ model, reason }) => {
       const message =
-        result.reason instanceof Error
-          ? result.reason.message
+        reason instanceof Error
+          ? reason.message
           : "Image generation failed.";
-      return [`${modelsToRun[index]}: ${message}`];
+      return `${model}: ${message}`;
     });
 
     if (!parsedImages.length) {
       throw new Error(errors.join(" | ") || "No usable images returned by tool.");
     }
 
+    const attemptedRequests = imageRequests.filter((request) =>
+      attemptedModels.includes(request.model)
+    );
+
     return {
       images: parsedImages,
-      model: modelsToRun.join(", "),
-      prompt: summarizeImageModelPrompts(imageRequests),
+      model: result.status === "fulfilled" ? result.model : modelsToRun.join(", "),
+      prompt: summarizeImageModelPrompts(
+        attemptedRequests.length ? attemptedRequests : imageRequests
+      ),
       errors,
     };
   };
@@ -2368,7 +2380,7 @@ ${defaultPrompt}`;
                     <div>
                       <div className="text-sm font-medium">Enable ordered pipeline</div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        When enabled, chat image generation runs the selected models in this order unless the user explicitly asks for one specific model.
+                        When enabled, chat image generation tries selected models in this order until one succeeds, unless the tool chooses one specific model.
                       </p>
                     </div>
                     <input
@@ -2441,7 +2453,7 @@ ${defaultPrompt}`;
                   <p className="text-xs text-muted-foreground">
                     {imagePipelineEnabled
                       ? orderedToolImageModels.length
-                        ? `Chat will run ${orderedToolImageModels.length} image model${orderedToolImageModels.length === 1 ? "" : "s"} in order.`
+                        ? `Chat will try up to ${orderedToolImageModels.length} image model${orderedToolImageModels.length === 1 ? "" : "s"} in order.`
                         : "No extra models selected yet. Chat falls back to the default image model."
                       : "Pipeline is disabled. Chat uses the single selected image model only."}
                   </p>

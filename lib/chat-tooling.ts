@@ -81,11 +81,6 @@ const stripOuterQuotes = (value: string) =>
   normalizeValue(value).replace(/^["']|["']$/g, "");
 const normalizeComparable = (value: string) =>
   stripOuterQuotes(value).replace(/\s+/g, " ").toLowerCase();
-const normalizeModelMention = (value: string) =>
-  normalizeComparable(value)
-    .replace(/[/:._+-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 
 const NEGATIVE_PROMPT_PATTERN =
   /\b(blurry|blur|bad anatomy|bad hands|extra limbs?|extra fingers?|deformed|malformed|mutated|disfigured|watermark|logo|text|caption|signature|low detail|low quality|flat shading|artifact|noise|grainy|duplicate|poorly drawn)\b/i;
@@ -453,41 +448,10 @@ export const resolveToolArguments = ({
 
 export const normalizeImageToolModelRequest = ({
   requestedModel,
-  defaultModel,
-  userPrompt,
 }: {
   requestedModel: string;
-  defaultModel: string;
-  userPrompt: string;
 }) => {
-  const normalizedRequestedModel = requestedModel.trim();
-  const normalizedDefaultModel = defaultModel.trim();
-  if (!normalizedRequestedModel) return "";
-  if (normalizedRequestedModel === normalizedDefaultModel) {
-    return normalizedRequestedModel;
-  }
-
-  const normalizedUserPrompt = normalizeModelMention(userPrompt);
-  if (!normalizedUserPrompt) return "";
-
-  const requestedMentions = [
-    normalizedRequestedModel,
-    normalizedRequestedModel.split(/[/:]/).at(-1) ?? "",
-  ]
-    .flatMap((value) => {
-      const normalized = normalizeModelMention(value);
-      return normalized ? [normalized, normalized.replace(/\s+/g, "")] : [];
-    })
-    .filter(Boolean);
-
-  const compactUserPrompt = normalizedUserPrompt.replace(/\s+/g, "");
-  return requestedMentions.some(
-    (mention) =>
-      normalizedUserPrompt.includes(mention) ||
-      compactUserPrompt.includes(mention)
-  )
-    ? normalizedRequestedModel
-    : "";
+  return requestedModel.trim();
 };
 
 const coercePositiveNumber = (value?: string | number | null) => {
@@ -633,10 +597,7 @@ export const resolveRequestedImageModels = ({
   const normalizedRequestedModel = requestedModel.trim();
   const normalizedDefaultModel = defaultModel.trim();
 
-  if (
-    normalizedRequestedModel &&
-    normalizedRequestedModel !== normalizedDefaultModel
-  ) {
+  if (normalizedRequestedModel) {
     return availableModels.includes(normalizedRequestedModel)
       ? [normalizedRequestedModel]
       : [];
@@ -648,6 +609,50 @@ export const resolveRequestedImageModels = ({
     fallbackModel: normalizedDefaultModel,
     availableModels,
   });
+};
+
+type ImageModelFallbackError = {
+  model: string;
+  reason: unknown;
+};
+
+type ImageModelFallbackUpdate<T> =
+  | { model: string; status: "running" }
+  | { model: string; status: "success"; value: T }
+  | { model: string; status: "error"; error: unknown };
+
+export const runImageModelFallbackSequence = async <T>({
+  models,
+  runModel,
+  onUpdate,
+}: {
+  models: string[];
+  runModel: (model: string) => Promise<T>;
+  onUpdate?: (update: ImageModelFallbackUpdate<T>) => void;
+}): Promise<
+  | {
+      status: "fulfilled";
+      model: string;
+      value: T;
+      errors: ImageModelFallbackError[];
+    }
+  | { status: "rejected"; errors: ImageModelFallbackError[] }
+> => {
+  const errors: ImageModelFallbackError[] = [];
+
+  for (const model of models) {
+    onUpdate?.({ model, status: "running" });
+    try {
+      const value = await runModel(model);
+      onUpdate?.({ model, status: "success", value });
+      return { status: "fulfilled", model, value, errors };
+    } catch (error) {
+      errors.push({ model, reason: error });
+      onUpdate?.({ model, status: "error", error });
+    }
+  }
+
+  return { status: "rejected", errors };
 };
 
 export const createSyntheticFallbackToolCall = ({
