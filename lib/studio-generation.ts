@@ -234,29 +234,6 @@ const isPolicySensitiveImagePrompt = (prompt: string) =>
   isLikelyAdultImagePrompt(prompt) ||
   POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN.test(prompt);
 
-const buildOpenAiAdultImagePolicyNote = () =>
-  "Policy guardrails: Keep any adult sexual content limited to clearly consenting adults. Do not include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse. Respect OpenAI safety policies and moderation instead of trying to bypass them.";
-
-const buildGeminiAdultImagePolicyNote = () =>
-  "Policy guardrails: Respect Gemini safety settings for sexually explicit content and the built-in child safety protections. Keep any adult sexual content limited to adults, and do not try to bypass Gemini filtering.";
-
-const buildArtisticPolicyNoteForModel = (model: string) => {
-  if (isOpenAiImageModel(model)) {
-    return "OpenAI GPT Image rewrite: Create a policy-compliant artistic image prompt for a tasteful editorial anime illustration. Preserve all concrete subject, setting, composition, style, mood, and story details while removing explicit sexual focus and rendering the image with rich composition, refined lighting, and high visual clarity.";
-  }
-  if (isGeminiNativeImageModel(model)) {
-    return "Gemini Nano Banana rewrite: Create a policy-compliant Gemini Nano Banana image prompt for a painterly anime illustration. Preserve all concrete subject, setting, composition, style, mood, and story details while avoiding explicit sexual focus and adding painterly visual detail, strong lighting, and high visual clarity.";
-  }
-  return "";
-};
-
-const buildAdultImagePolicyNoteForModel = (model: string, prompt: string) => {
-  if (!isLikelyAdultImagePrompt(prompt)) return "";
-  if (isOpenAiImageModel(model)) return buildOpenAiAdultImagePolicyNote();
-  if (isGeminiImagePolicyModel(model)) return buildGeminiAdultImagePolicyNote();
-  return "";
-};
-
 export const supportsSaferImagePromptRetry = (model: string) =>
   isOpenAiImageModel(model) || isGeminiImagePolicyModel(model);
 
@@ -389,24 +366,10 @@ export const prepareImagePromptForModel = (
   const rawPrompt = prompt.trim().replace(/\r\n/g, "\n");
   const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
   const trimmedNegativePrompt = negativePrompt?.trim() || undefined;
-  const adultPolicyNote = buildAdultImagePolicyNoteForModel(
-    model,
-    normalizedPrompt
-  );
-  const artisticPolicyNote = buildArtisticPolicyNoteForModel(model);
 
   if (!isFluxModel(model)) {
-    const policyReadyPrompt =
-      supportsSaferImagePromptRetry(model)
-        ? softenPolicySensitiveImagePrompt(normalizedPrompt)
-        : normalizedPrompt;
-    const promptWithArtDirection = artisticPolicyNote
-      ? appendPromptNote(policyReadyPrompt, artisticPolicyNote)
-      : policyReadyPrompt;
     return {
-      prompt: adultPolicyNote
-        ? appendPromptNote(promptWithArtDirection, adultPolicyNote)
-        : promptWithArtDirection,
+      prompt: normalizedPrompt,
       negativePrompt: trimmedNegativePrompt,
     };
   }
@@ -415,9 +378,7 @@ export const prepareImagePromptForModel = (
     ? rawPrompt
     : buildFluxImagePrompt(normalizedPrompt, trimmedNegativePrompt);
   return {
-    prompt: adultPolicyNote
-      ? appendPromptNote(fluxPrompt, adultPolicyNote)
-      : fluxPrompt,
+    prompt: fluxPrompt,
     negativePrompt: undefined,
   };
 };

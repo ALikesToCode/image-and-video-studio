@@ -90,7 +90,7 @@ test("OpenRouter model extraction preserves pricing and modality metadata", () =
   assert.deepEqual(models[0]?.pricing, { prompt: "0.000001" });
 });
 
-test("Gemini image payload keeps Imagen separate from Gemini edit payloads", () => {
+test("Gemini image payload keeps Imagen separate from Gemini edit payloads without hidden prompt notes", () => {
   const imagen = buildGeminiImagePayload({
     model: "imagen-4.0-generate-001",
     prompt: "A product photo",
@@ -106,7 +106,10 @@ test("Gemini image payload keeps Imagen separate from Gemini edit payloads", () 
     parameters: Record<string, unknown>;
   };
   assert.match(imagenPayload.instances[0]?.prompt ?? "", /A product photo/);
-  assert.match(imagenPayload.instances[0]?.prompt ?? "", /Safety preflight/i);
+  assert.doesNotMatch(
+    imagenPayload.instances[0]?.prompt ?? "",
+    /Safety preflight|rewrite|Policy guardrails/i
+  );
   assert.deepEqual(imagenPayload.parameters, {
     sampleCount: 2,
     aspectRatio: "1:1",
@@ -124,7 +127,10 @@ test("Gemini image payload keeps Imagen separate from Gemini edit payloads", () 
 
   assert.match(gemini.endpoint, /:generateContent$/);
   assert.match(String(parts?.[0]?.text), /Edit this into a product hero image/);
-  assert.match(String(parts?.[0]?.text), /policy-compliant Gemini Nano Banana image prompt/i);
+  assert.doesNotMatch(
+    String(parts?.[0]?.text),
+    /Safety preflight|rewrite|Policy guardrails|policy-compliant Gemini Nano Banana/i
+  );
   assert.deepEqual(parts?.[1], {
     inline_data: {
       mime_type: "image/png",
@@ -152,8 +158,11 @@ test("OpenRouter image payload puts text first before image references", () => {
     content: Array<Record<string, unknown>>;
   }).content;
   assert.equal(content[0]?.type, "text");
-  assert.match(String(content[0]?.text), /Use this product as reference/);
-  assert.match(String(content[0]?.text), /policy-compliant Gemini Nano Banana image prompt/i);
+  assert.equal(String(content[0]?.text), "Use this product as reference");
+  assert.doesNotMatch(
+    String(content[0]?.text),
+    /Safety preflight|rewrite|Policy guardrails|policy-compliant Gemini Nano Banana/i
+  );
   assert.deepEqual(content[1], {
     type: "image_url",
     image_url: { url: "data:image/jpeg;base64,ZA==" },
@@ -427,51 +436,23 @@ test("Active chat image tool models honor the shared pipeline order when enabled
   );
 });
 
-test("OpenAI image prompts add adult-content policy guidance only for likely NSFW requests", () => {
-  const prepared = prepareImagePromptForModel(
-    "gpt-image-1.5",
-    "Create an NSFW boudoir portrait of two consenting adults in soft golden light."
+test("Non-Flux image prompts are sent without hidden policy or rewrite notes", () => {
+  const prompt =
+    "modern anime illustration, high detail, cinematic wide-to-medium shot. Tense erotic standoff atmosphere, shattered pride, desperate longing masked as rage, looming confrontation. Sharp focus, clean anatomy, clear silhouette, no text, no watermark.";
+
+  const openAi = prepareImagePromptForModel("gpt-image-2", prompt);
+  const gemini = prepareImagePromptForModel("nano-banana-2", prompt);
+
+  assert.equal(openAi.prompt, prompt);
+  assert.equal(gemini.prompt, prompt);
+  assert.doesNotMatch(
+    openAi.prompt,
+    /Safety preflight|OpenAI GPT Image rewrite|Policy guardrails/i
   );
-
-  assert.match(prepared.prompt, /consenting adults/i);
-  assert.match(prepared.prompt, /non-consensual/i);
-  assert.match(prepared.prompt, /deceptive likeness/i);
-});
-
-test("OpenAI image prompts add artistic policy guidance without losing details", () => {
-  const prepared = prepareImagePromptForModel(
-    "gpt-image-2",
-    "Create a cinematic portrait of a ceramic robot painter in a rainlit neon studio."
+  assert.doesNotMatch(
+    gemini.prompt,
+    /Safety preflight|Gemini Nano Banana rewrite|Policy guardrails/i
   );
-
-  assert.match(prepared.prompt, /ceramic robot painter/i);
-  assert.match(prepared.prompt, /policy-compliant artistic image prompt/i);
-  assert.match(prepared.prompt, /Safety preflight/i);
-  assert.match(prepared.prompt, /preserve all concrete subject/i);
-  assert.match(prepared.prompt, /rich composition/i);
-});
-
-test("Nano Banana image prompts add artistic policy guidance", () => {
-  const prepared = prepareImagePromptForModel(
-    "nano-banana-2",
-    "Make an ornate fantasy greenhouse with glass butterflies and mossy statues."
-  );
-
-  assert.match(prepared.prompt, /fantasy greenhouse/i);
-  assert.match(prepared.prompt, /policy-compliant Gemini Nano Banana image prompt/i);
-  assert.match(prepared.prompt, /Safety preflight/i);
-  assert.match(prepared.prompt, /painterly visual detail/i);
-});
-
-test("Gemini image prompts add safety guidance only for likely NSFW requests", () => {
-  const prepared = prepareImagePromptForModel(
-    "gemini-3-pro-image-preview",
-    "Generate a tasteful NSFW editorial photo of an adult model in a luxury suite."
-  );
-
-  assert.match(prepared.prompt, /respect gemini safety settings/i);
-  assert.match(prepared.prompt, /sexually explicit/i);
-  assert.match(prepared.prompt, /child safety/i);
 });
 
 test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompts", () => {
@@ -496,7 +477,7 @@ test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompt
   assert.equal(isLikelyImagePolicyError("blocked by image safety policy"), true);
 });
 
-test("Policy-sensitive OpenAI and Gemini prompts are softened before the first request", () => {
+test("Policy-sensitive OpenAI and Gemini prompts remain unchanged before the first request", () => {
   const prompt = `Create a high-detail modern anime illustration.
 Main character: a 29-year-old adult woman with massive heavy J-cup breasts straining against her top and impossibly wide hips.
 Outfit: skin-tight pink sports crop top with a darkened patch at the crotch.
@@ -507,47 +488,36 @@ Lighting: shadows emphasize hard nipples faintly outlined through her top.`;
   const gemini = prepareImagePromptForModel("nano-banana-2", prompt).prompt;
   const flux = prepareImagePromptForModel("flux.2-pro", prompt).prompt;
 
-  assert.doesNotMatch(openAi, /J-cup|hard nipples|crotch|heaving chest|pleading eyes|masked man/i);
-  assert.doesNotMatch(gemini, /J-cup|hard nipples|crotch|heaving chest|pleading eyes|masked man/i);
-  assert.doesNotMatch(openAi, /massive heavy curvy upper body|leggings fabric of the leggings/i);
-  assert.doesNotMatch(gemini, /massive heavy curvy upper body|leggings fabric of the leggings/i);
-  assert.match(openAi, /athletic curvy figure/i);
-  assert.match(openAi, /natural fabric shading/i);
-  assert.match(openAi, /clearly adult/i);
-  assert.match(openAi, /tasteful editorial/i);
-  assert.match(gemini, /clearly adult/i);
-  assert.match(gemini, /tasteful editorial/i);
+  assert.equal(openAi, prompt);
+  assert.equal(gemini, prompt);
+  assert.doesNotMatch(openAi, /Safety preflight|rewrite|Policy guardrails/i);
+  assert.doesNotMatch(gemini, /Safety preflight|rewrite|Policy guardrails/i);
   assert.match(flux, /J-cup|hard nipples|crotch/i);
 });
 
-test("Selected image models receive separate family-specific prompt rewrites", () => {
+test("Selected image models preserve non-Flux prompts and only prepare Flux prompts", () => {
+  const prompt =
+    "Create a high-detail anime portrait of an adult woman with a very large bust, hard nipples faintly outlined through her top, and nervous tension in a tidy bedroom.";
   const requests = prepareImageModelRequests({
     models: ["gpt-image-2", "nano-banana-2", "flux.2-pro"],
     baseBody: { size: "1024x1024" },
-    prompt:
-      "Create a high-detail anime portrait of an adult woman with a very large bust, hard nipples faintly outlined through her top, and nervous tension in a tidy bedroom.",
+    prompt,
   });
   const byModel = new Map(requests.map((request) => [request.model, request.prompt]));
   const gptPrompt = byModel.get("gpt-image-2") ?? "";
   const nanoPrompt = byModel.get("nano-banana-2") ?? "";
   const fluxPrompt = byModel.get("flux.2-pro") ?? "";
 
-  assert.match(gptPrompt, /OpenAI GPT Image rewrite/i);
-  assert.match(gptPrompt, /tasteful editorial anime illustration/i);
-  assert.match(gptPrompt, /rich composition/i);
-  assert.doesNotMatch(gptPrompt, /very large bust|hard nipples/i);
+  assert.equal(gptPrompt, prompt);
+  assert.equal(nanoPrompt, prompt);
+  assert.doesNotMatch(gptPrompt, /OpenAI GPT Image rewrite|Safety preflight|Policy guardrails/i);
+  assert.doesNotMatch(nanoPrompt, /Gemini Nano Banana rewrite|Safety preflight|Policy guardrails/i);
 
-  assert.match(nanoPrompt, /Gemini Nano Banana rewrite/i);
-  assert.match(nanoPrompt, /painterly anime illustration/i);
-  assert.match(nanoPrompt, /strong lighting/i);
-  assert.doesNotMatch(nanoPrompt, /very large bust|hard nipples/i);
-
-  assert.notEqual(gptPrompt, nanoPrompt);
   assert.match(fluxPrompt, /very large bust|hard nipples/i);
   assert.match(fluxPrompt, /Desired qualities/i);
 });
 
-test("GPT image prompts rewrite borderline student and consent-risk wording before first request", () => {
+test("GPT image prompts preserve borderline wording before first request", () => {
   const requests = prepareImageModelRequests({
     models: ["gpt-image-2", "grok-imagine"],
     baseBody: {},
@@ -559,35 +529,26 @@ Main character (focus): Alya, apparent age 18, slim yet curvy build, porcelain-f
   const byModel = new Map(requests.map((request) => [request.model, request.body.prompt]));
   const gptPrompt = String(byModel.get("gpt-image-2") ?? "");
   const grokPrompt = String(byModel.get("grok-imagine") ?? "");
+  const expected = `Create a high-detail modern anime illustration.
+Background/setting: A spacious student council room in late afternoon.
+Main character (focus): Alya, apparent age 18, slim yet curvy build, porcelain-fair skin, icy blue eyes rendered glassy and vacant with dilated pupils.`;
 
-  assert.doesNotMatch(gptPrompt, /^"/);
-  assert.doesNotMatch(
-    gptPrompt,
-    /apparent age 18|student council|slim yet curvy|curvy build|dilated pupils|vacant|glassy/i
-  );
-  assert.match(gptPrompt, /university council room/i);
-  assert.match(gptPrompt, /clearly adult university-age appearance/i);
-  assert.match(gptPrompt, /slim, balanced/i);
-  assert.match(gptPrompt, /reflective gaze|bright eyes|soft blue eyes/i);
-  assert.match(gptPrompt, /OpenAI GPT Image rewrite/i);
-  assert.match(gptPrompt, /non-explicit/i);
-
-  assert.match(grokPrompt, /student council room/i);
-  assert.match(grokPrompt, /apparent age 18/i);
-  assert.match(grokPrompt, /slim yet curvy/i);
+  assert.equal(gptPrompt, expected);
+  assert.equal(grokPrompt, expected);
+  assert.doesNotMatch(gptPrompt, /OpenAI GPT Image rewrite|Safety preflight|Policy guardrails/i);
 });
 
-test("Threat-framed OpenAI and Gemini prompts are softened before the first request", () => {
+test("Threat-framed OpenAI and Gemini prompts remain unchanged before the first request", () => {
   const prompt =
     "Create an anime scene with a nervous adult woman looking up with pleading eyes at a masked man in a dark doorway.";
 
   const openAi = prepareImagePromptForModel("gpt-image-2", prompt).prompt;
   const gemini = prepareImagePromptForModel("nano-banana-2", prompt).prompt;
 
-  assert.doesNotMatch(openAi, /pleading eyes|masked man/i);
-  assert.doesNotMatch(gemini, /pleading eyes|masked man/i);
-  assert.match(openAi, /non-threatening/i);
-  assert.match(gemini, /non-threatening/i);
+  assert.equal(openAi, prompt);
+  assert.equal(gemini, prompt);
+  assert.doesNotMatch(openAi, /Safety preflight|rewrite|Policy guardrails/i);
+  assert.doesNotMatch(gemini, /Safety preflight|rewrite|Policy guardrails/i);
 });
 
 test("Non-NSFW prompts remain unchanged for non-policy non-Flux models", () => {
