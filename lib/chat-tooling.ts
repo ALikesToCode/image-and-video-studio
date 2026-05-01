@@ -596,19 +596,30 @@ export const resolveRequestedImageModels = ({
 }) => {
   const normalizedRequestedModel = requestedModel.trim();
   const normalizedDefaultModel = defaultModel.trim();
-
-  if (normalizedRequestedModel) {
-    return availableModels.includes(normalizedRequestedModel)
-      ? [normalizedRequestedModel]
-      : [];
-  }
-
-  return resolveActiveImageToolModels({
+  const activeModels = resolveActiveImageToolModels({
     pipelineEnabled: imagePipelineEnabled,
     preferredModels: imageModelOrder,
     fallbackModel: normalizedDefaultModel,
     availableModels,
   });
+
+  if (!normalizedRequestedModel) return activeModels;
+
+  const requestedIsAvailable = availableModels.includes(normalizedRequestedModel);
+  if (!requestedIsAvailable) {
+    return imagePipelineEnabled ? activeModels : [];
+  }
+
+  if (!imagePipelineEnabled) return [normalizedRequestedModel];
+
+  if (normalizedRequestedModel === normalizedDefaultModel) {
+    return activeModels;
+  }
+
+  return [
+    normalizedRequestedModel,
+    ...activeModels.filter((model) => model !== normalizedRequestedModel),
+  ];
 };
 
 type ImageModelFallbackError = {

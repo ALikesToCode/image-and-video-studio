@@ -793,7 +793,7 @@ export function ChutesChat({
               function: {
                 name: "generate_image",
                 description:
-                  "Generate an image. Choose the best available model when one clearly fits; omit model to use the ordered fallback/default.",
+                  "Generate an image. Prefer the active ordered pipeline; include a model only when one clearly fits so it can be tried first before ordered fallback.",
                 parameters: {
                   type: "object",
                   properties: {
@@ -837,7 +837,7 @@ export function ChutesChat({
               function: {
                 name: "generate_image",
                 description:
-                  "Generate an image. Choose the best available model when one clearly fits; omit model to use the ordered fallback/default.",
+                  "Generate an image. Prefer the active ordered pipeline; include a model only when one clearly fits so it can be tried first before ordered fallback.",
                 parameters: {
                   type: "object",
                   properties: {
@@ -1002,7 +1002,7 @@ export function ChutesChat({
     const enabledToolLines: string[] = [];
     if (toolSettings.image) {
       enabledToolLines.push(
-        `- generate_image (default model: ${toolImageModel}; active image models: ${activeImageModelSummary || toolImageModel}; available image models: ${modelList})`
+        `- generate_image (default model: ${toolImageModel}; preferred active image order: ${activeImageModelSummary || toolImageModel}; available image models: ${modelList})`
       );
     }
     if (toolSettings.video) {
@@ -1035,7 +1035,7 @@ export function ChutesChat({
 Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
       : "";
     const imagePromptInstruction =
-      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Include a model when one available image model clearly fits the request; omit model when uncertain so the ordered fallback/default can try models in order until one succeeds. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
+      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Prefer the active image model order from left to right. Include a model only when one available model clearly fits the request; that model will be tried first and the tool will continue through the ordered pipeline if it fails. Do not include the default model just to restate the default; omit model when uncertain so the preferred order starts from the top. Try the ordered pipeline rather than giving up after one model. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
 
     const defaultPrompt = `${promptGuide}
 ${FLUX_CROSS_MODAL_GUIDE}
@@ -2380,7 +2380,7 @@ ${defaultPrompt}`;
                     <div>
                       <div className="text-sm font-medium">Enable ordered pipeline</div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        When enabled, chat image generation tries selected models in this order until one succeeds, unless the tool chooses one specific model.
+                        When enabled, chat image generation tries this order until one succeeds. If the tool chooses a model, that model is tried first, then this order continues.
                       </p>
                     </div>
                     <input
@@ -2453,7 +2453,7 @@ ${defaultPrompt}`;
                   <p className="text-xs text-muted-foreground">
                     {imagePipelineEnabled
                       ? orderedToolImageModels.length
-                        ? `Chat will try up to ${orderedToolImageModels.length} image model${orderedToolImageModels.length === 1 ? "" : "s"} in order.`
+                        ? `Chat will prefer ${orderedToolImageModels.length} image model${orderedToolImageModels.length === 1 ? "" : "s"} in order and keep trying until one succeeds.`
                         : "No extra models selected yet. Chat falls back to the default image model."
                       : "Pipeline is disabled. Chat uses the single selected image model only."}
                   </p>

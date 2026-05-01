@@ -478,7 +478,7 @@ test("Chat messages omit assistant thinking unless reasoning content is requeste
   );
 });
 
-test("Requested image models stay pinned when the request targets the default model", () => {
+test("Requested default image model uses the ordered fallback pipeline", () => {
   assert.deepEqual(
     resolveRequestedImageModels({
       requestedModel: "flux",
@@ -487,7 +487,7 @@ test("Requested image models stay pinned when the request targets the default mo
       imageModelOrder: ["gpt-image-1.5", "flux"],
       availableModels: ["flux", "gpt-image-1.5"],
     }),
-    ["flux"]
+    ["gpt-image-1.5", "flux"]
   );
 });
 
@@ -504,7 +504,7 @@ test("Missing image model requests use the ordered fallback pipeline", () => {
   );
 });
 
-test("Requested image models stay pinned when a non-default model is explicitly requested", () => {
+test("Requested image models try the selected model before ordered fallback", () => {
   assert.deepEqual(
     resolveRequestedImageModels({
       requestedModel: "gpt-image-1.5",
@@ -513,7 +513,20 @@ test("Requested image models stay pinned when a non-default model is explicitly 
       imageModelOrder: ["flux", "gpt-image-1.5"],
       availableModels: ["flux", "gpt-image-1.5"],
     }),
-    ["gpt-image-1.5"]
+    ["gpt-image-1.5", "flux"]
+  );
+});
+
+test("Unavailable requested image models fall back to the ordered pipeline", () => {
+  assert.deepEqual(
+    resolveRequestedImageModels({
+      requestedModel: "missing-model",
+      defaultModel: "flux",
+      imagePipelineEnabled: true,
+      imageModelOrder: ["gpt-image-1.5", "flux"],
+      availableModels: ["flux", "gpt-image-1.5"],
+    }),
+    ["gpt-image-1.5", "flux"]
   );
 });
 
