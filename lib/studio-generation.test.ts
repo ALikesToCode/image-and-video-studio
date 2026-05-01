@@ -572,6 +572,10 @@ test("Chat provider policy hint only appears when selected image models need it"
 
   assert.match(hint, /OpenAI GPT Image/i);
   assert.match(hint, /Gemini Nano Banana/i);
+  assert.match(hint, /always rephrase the image prompt before calling generate_image/i);
+  assert.match(hint, /Keep only details that can be shown visually/i);
+  assert.match(hint, /Do not render long paragraphs of text inside the image/i);
+  assert.match(hint, /translate it into a strong visual metaphor/i);
   assert.equal(buildProviderPolicyHintForImageModels(["flux"]), "");
 });
 

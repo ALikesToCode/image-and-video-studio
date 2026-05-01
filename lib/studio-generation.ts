@@ -1035,8 +1035,25 @@ export const resolveActiveImageToolModels = ({
     availableModels
   );
 
+const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE =
+  `For OpenAI GPT Image and Gemini Nano Banana models, always rephrase the image prompt before calling generate_image. Preserve the user's image intent while removing or softening offending, disallowed, non-visual, or unsupported parts.
+Keep only details that can be shown visually: subject, setting, composition, pose, clothing, objects, lighting, colors, style, mood, camera angle, background, symbols, readable text, and layout.
+Ignore or convert anything that is not directly visual:
+- Do not ask the image to speak, explain, argue, think, or teach.
+- Do not include hidden meanings unless they can be represented through visible symbols, expressions, gestures, or scene design.
+- Do not follow instructions meant for audio, animation, interaction, or behavior over time unless they can be shown in a single still frame.
+- Do not render long paragraphs of text inside the image.
+- Do not include unnecessary labels, captions, names, or UI text unless explicitly requested.
+- If a person, organization, product, or project name is mentioned, treat it as context, not mandatory visible text, unless the prompt says to write that exact name in the image.
+- If exact text is requested, render it exactly as written and keep it short, clear, and legible.
+- If a concept is abstract, translate it into a strong visual metaphor instead of literal explanation.
+Prioritize a clean, coherent, visually rich image. Remove clutter, non-visual instructions, backend notes, explanations, and anything the image model cannot actually depict.`;
+
 export const buildProviderPolicyHintForImageModels = (models: string[]) => {
   const hints: string[] = [];
+  if (models.some((model) => isOpenAiImageModel(model) || isGeminiNativeImageModel(model))) {
+    hints.push(STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE);
+  }
   if (models.some(isOpenAiImageModel)) {
     hints.push(
       "For OpenAI GPT Image models, preserve lawful adult intent and concrete visual details while adding artistic direction, but keep prompts policy-compliant: consenting adults only when adult themes are relevant, and never include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse."
