@@ -406,16 +406,20 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
 };
 
 const mergeModelOptions = (...modelLists: ModelOption[][]): ModelOption[] => {
-    const merged: ModelOption[] = [];
-    const seen = new Set<string>();
+    const merged = new Map<string, ModelOption>();
+    const order: string[] = [];
     for (const models of modelLists) {
         for (const model of models) {
-            if (seen.has(model.id)) continue;
-            seen.add(model.id);
-            merged.push(model);
+            if (!merged.has(model.id)) {
+                order.push(model.id);
+            }
+            merged.set(model.id, { ...merged.get(model.id), ...model });
         }
     }
-    return merged.slice(0, MAX_CACHED_MODELS);
+    return order
+        .map((id) => merged.get(id))
+        .filter((model): model is ModelOption => !!model)
+        .slice(0, MAX_CACHED_MODELS);
 };
 
 
@@ -914,9 +918,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             chatModels.length > 0;
 
         if (hasBucketedPayload) {
-            setNavyImageModels(imageModels.length ? imageModels : NAVY_IMAGE_MODELS);
-            setNavyVideoModels(videoModels.length ? videoModels : NAVY_VIDEO_MODELS);
-            setNavyTtsModels(audioModels.length ? audioModels : NAVY_TTS_MODELS);
+            setNavyImageModels(
+                imageModels.length
+                    ? mergeModelOptions(NAVY_IMAGE_MODELS, imageModels)
+                    : NAVY_IMAGE_MODELS
+            );
+            setNavyVideoModels(
+                videoModels.length
+                    ? mergeModelOptions(NAVY_VIDEO_MODELS, videoModels)
+                    : NAVY_VIDEO_MODELS
+            );
+            setNavyTtsModels(
+                audioModels.length
+                    ? mergeModelOptions(NAVY_TTS_MODELS, audioModels)
+                    : NAVY_TTS_MODELS
+            );
             setNavyChatModels(
                 chatModels.length
                     ? mergeModelOptions(NAVY_CHAT_MODELS, chatModels)
@@ -2035,8 +2051,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [refreshStorageEstimate]);
 
     const refreshNavyUsage = useCallback(async () => {
-        if (provider !== "navy") return;
-        const trimmedKey = apiKey.trim();
+        const trimmedKey = apiKeys.navy.trim();
         if (!trimmedKey) {
             setNavyUsage(null);
             setNavyUsageError(null);
@@ -2061,7 +2076,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             navyUsageLoadingRef.current = false;
             setNavyUsageLoading(false);
         }
-    }, [apiKey, provider]);
+    }, [apiKeys.navy]);
 
     const refreshModels = useCallback(async () => {
         if (provider !== "openrouter" && provider !== "navy") return;
@@ -2112,7 +2127,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             const payload = await response.json();
             if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch Chutes models");
             const models = sanitizeModelOptions(payload?.data ?? payload);
-            if (models.length) setChutesChatModels(models);
+            if (models.length) setChutesChatModels(mergeModelOptions(CHUTES_LLM_MODELS, models));
         } catch (error) {
             setChutesChatModelsError(error instanceof Error ? error.message : "Error");
         } finally {
@@ -2168,14 +2183,22 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storedOpenRouterModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.openRouterModels, []);
         if (storedOpenRouterModels.length) setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
         const storedNavyImageModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyImageModels, []);
-        if (storedNavyImageModels.length) setNavyImageModels(sanitizeModelOptions(storedNavyImageModels));
+        if (storedNavyImageModels.length) {
+            setNavyImageModels(mergeModelOptions(NAVY_IMAGE_MODELS, sanitizeModelOptions(storedNavyImageModels)));
+        }
         const storedNavyVideoModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyVideoModels, []);
-        if (storedNavyVideoModels.length) setNavyVideoModels(sanitizeModelOptions(storedNavyVideoModels));
+        if (storedNavyVideoModels.length) {
+            setNavyVideoModels(mergeModelOptions(NAVY_VIDEO_MODELS, sanitizeModelOptions(storedNavyVideoModels)));
+        }
         const storedNavyTtsModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyTtsModels, []);
-        if (storedNavyTtsModels.length) setNavyTtsModels(sanitizeModelOptions(storedNavyTtsModels));
+        if (storedNavyTtsModels.length) {
+            setNavyTtsModels(mergeModelOptions(NAVY_TTS_MODELS, sanitizeModelOptions(storedNavyTtsModels)));
+        }
 
         const storedChutesChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.chutesChatModels, []);
-        if (storedChutesChatModels.length) setChutesChatModels(sanitizeModelOptions(storedChutesChatModels));
+        if (storedChutesChatModels.length) {
+            setChutesChatModels(mergeModelOptions(CHUTES_LLM_MODELS, sanitizeModelOptions(storedChutesChatModels)));
+        }
         const storedChutesChatModel = readLocalStorage<string>(STORAGE_KEYS.chutesChatModel, "");
         if (storedChutesChatModel) setChutesChatModel(storedChutesChatModel);
         const storedToolImageModel = readLocalStorage<string>(STORAGE_KEYS.chutesToolImageModel, "");
@@ -2634,14 +2657,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
-        if (provider === "navy" && apiKey.trim()) {
+        if (provider === "navy" && apiKeys.navy.trim()) {
             void refreshNavyUsage();
             const interval = window.setInterval(() => void refreshNavyUsage(), 60000);
             return () => window.clearInterval(interval);
-        } else {
+        }
+        if (!apiKeys.navy.trim()) {
             setNavyUsage(null);
         }
-    }, [provider, apiKey, hydrated, refreshNavyUsage]);
+    }, [provider, apiKeys.navy, hydrated, refreshNavyUsage]);
 
     useEffect(() => {
         if (!hydrated) return;

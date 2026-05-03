@@ -1,7 +1,8 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   Loader2,
   Send,
@@ -21,8 +22,12 @@ import {
   Copy,
   Check,
   Layers3,
+  Search,
+  RefreshCw,
+  Gauge,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
+import { Input } from "@/app/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -39,8 +44,26 @@ import {
   SelectValue,
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
-import { type ModelOption, type ChatProvider } from "@/lib/constants";
+import {
+  CHUTES_IMAGE_MODELS as STATIC_CHUTES_IMAGE_MODELS,
+  CHUTES_LLM_MODELS as STATIC_CHUTES_LLM_MODELS,
+  CHUTES_TTS_MODELS as STATIC_CHUTES_TTS_MODELS,
+  CHUTES_VIDEO_MODELS as STATIC_CHUTES_VIDEO_MODELS,
+  NAVY_CHAT_MODELS as STATIC_NAVY_CHAT_MODELS,
+  NAVY_IMAGE_MODELS as STATIC_NAVY_IMAGE_MODELS,
+  NAVY_TTS_MODELS as STATIC_NAVY_TTS_MODELS,
+  NAVY_VIDEO_MODELS as STATIC_NAVY_VIDEO_MODELS,
+  type ModelOption,
+  type ChatProvider,
+} from "@/lib/constants";
+import type { NavyUsageResponse } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl, cn } from "@/lib/utils";
+import {
+  ensureSelectedModelOption,
+  filterModelOptions,
+  hasModelMetadata,
+  isFetchedOnlyModel,
+} from "@/lib/model-options";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "@/lib/chutes-prompts";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "./ui/avatar";
@@ -127,6 +150,11 @@ type ChutesChatProps = {
   onRefreshModels?: () => void;
   modelsLoading?: boolean;
   modelsError?: string | null;
+  navyUsage?: NavyUsageResponse | null;
+  navyUsageError?: string | null;
+  navyUsageLoading?: boolean;
+  navyUsageUpdatedAt?: string | null;
+  onRefreshUsage?: () => Promise<void> | void;
   saveToGallery?: boolean;
   videoImage?: string | null;
   videoAspect?: string;
@@ -201,6 +229,333 @@ const writeLocalStorage = (key: string, value: string) => {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(key, value);
 };
+
+const formatCount = (value?: number | null) =>
+  typeof value === "number" ? value.toLocaleString() : value === null ? "unknown" : "-";
+
+const formatUsageAge = (iso?: string | null) =>
+  iso ? new Date(iso).toLocaleTimeString() : null;
+
+const formatModelWindow = (value?: number | null) =>
+  typeof value === "number" ? value.toLocaleString() : value === null ? "unknown" : "";
+
+const idsFor = (models: ModelOption[]) => new Set(models.map((model) => model.id));
+
+const STATIC_MODEL_IDS = {
+  chutes: {
+    chat: idsFor(STATIC_CHUTES_LLM_MODELS),
+    image: idsFor(STATIC_CHUTES_IMAGE_MODELS),
+    video: idsFor(STATIC_CHUTES_VIDEO_MODELS),
+    audio: idsFor(STATIC_CHUTES_TTS_MODELS),
+  },
+  navy: {
+    chat: idsFor(STATIC_NAVY_CHAT_MODELS),
+    image: idsFor(STATIC_NAVY_IMAGE_MODELS),
+    video: idsFor(STATIC_NAVY_VIDEO_MODELS),
+    audio: idsFor(STATIC_NAVY_TTS_MODELS),
+  },
+} satisfies Record<ChatProvider, Record<"chat" | "image" | "video" | "audio", Set<string>>>;
+
+function NavyUsageFooter({
+  usage,
+  error,
+  loading,
+  updatedAt,
+  onRefresh,
+}: {
+  usage?: NavyUsageResponse | null;
+  error?: string | null;
+  loading?: boolean;
+  updatedAt?: string | null;
+  onRefresh?: () => Promise<void> | void;
+}) {
+  const usagePercent =
+    typeof usage?.usage?.percent_used === "number" ? usage.usage.percent_used : null;
+  const updatedLabel = formatUsageAge(updatedAt);
+
+  return (
+    <div className="border-t border-border/50 bg-secondary/20 px-3 py-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Gauge className="h-3.5 w-3.5 flex-none" />
+          <span className="truncate font-medium text-foreground">
+            {usage
+              ? `${formatCount(usage.usage.tokens_remaining_today)} tokens left`
+              : error
+                ? "Usage unavailable"
+                : "Usage not checked"}
+          </span>
+        </div>
+        {onRefresh ? (
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            disabled={loading}
+            className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+            Check
+          </button>
+        ) : null}
+      </div>
+      {usage ? (
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <span>{formatCount(usage.usage.tokens_used_today)} used today</span>
+          <span>{usagePercent !== null ? `${usagePercent.toFixed(1)}%` : "-"}</span>
+        </div>
+      ) : null}
+      {error ? <p className="mt-1 text-destructive">{error}</p> : null}
+      {updatedLabel ? <p className="mt-1 opacity-70">Updated {updatedLabel}</p> : null}
+    </div>
+  );
+}
+
+function ModelSearchSelect({
+  value,
+  onValueChange,
+  models,
+  staticModelIds,
+  placeholder,
+  ariaLabel,
+  title,
+  triggerClassName,
+  icon,
+  compact = false,
+  disabled = false,
+  footer,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  models: ModelOption[];
+  staticModelIds?: ReadonlySet<string>;
+  placeholder: string;
+  ariaLabel: string;
+  title: string;
+  triggerClassName?: string;
+  icon?: ReactNode;
+  compact?: boolean;
+  disabled?: boolean;
+  footer?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+  const options = useMemo(
+    () => ensureSelectedModelOption(models, value),
+    [models, value],
+  );
+  const selectedModel = options.find((model) => model.id === value);
+  const filteredOptions = useMemo(
+    () => filterModelOptions(options, query),
+    [options, query],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportPadding = 8;
+      const width = Math.min(384, Math.max(160, window.innerWidth - viewportPadding * 2));
+      const maxLeft = Math.max(viewportPadding, window.innerWidth - width - viewportPadding);
+      const left = Math.min(
+        Math.max(viewportPadding, rect.right - width),
+        maxLeft,
+      );
+      const maxHeight = Math.min(384, window.innerHeight - viewportPadding * 2);
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+      const openAbove = spaceBelow < 260 && rect.top > spaceBelow;
+      const top = openAbove
+        ? Math.max(viewportPadding, rect.top - maxHeight - 4)
+        : Math.min(rect.bottom + 4, window.innerHeight - maxHeight - viewportPadding);
+      setMenuStyle({
+        position: "fixed",
+        top,
+        left,
+        width,
+        maxHeight,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [open]);
+
+  const selectedFetchedOnly = selectedModel
+    ? isFetchedOnlyModel(selectedModel, staticModelIds)
+    : false;
+
+  return (
+    <div ref={rootRef} className={cn("relative flex-none", !compact && "min-w-0")}>
+      <Button
+        ref={triggerRef}
+        type="button"
+        variant="ghost"
+        onClick={() => setOpen((prev) => !prev)}
+        className={cn(
+          "glass-card h-9 min-w-0 border-0 bg-secondary/50 text-sm font-normal",
+          compact
+            ? "w-9 justify-center px-0"
+            : "justify-between px-3 sm:w-[240px]",
+          triggerClassName,
+        )}
+        title={title}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+      >
+        {compact ? (
+          icon
+        ) : (
+          <>
+            <span className="min-w-0 truncate text-left">
+              {selectedModel?.label ?? (value || placeholder)}
+            </span>
+            <span className="ml-2 flex flex-none items-center gap-1">
+              {selectedFetchedOnly ? (
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  New
+                </span>
+              ) : null}
+              {typeof selectedModel?.tokenMultiplier === "number" ? (
+                <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">
+                  {selectedModel.tokenMultiplier}x
+                </span>
+              ) : null}
+              <ChevronDown className="h-4 w-4 opacity-50" />
+            </span>
+          </>
+        )}
+      </Button>
+      {open && menuStyle && typeof document !== "undefined"
+        ? createPortal(
+        <div
+          ref={menuRef}
+          style={menuStyle}
+          className="z-50 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-xl"
+        >
+          <div className="border-b border-border/50 p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={inputRef}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search models"
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+          </div>
+          <div className="max-h-72 overflow-y-auto p-1" role="listbox" aria-label={ariaLabel}>
+            {filteredOptions.length ? (
+              filteredOptions.map((modelOption) => {
+                const selected = modelOption.id === value;
+                const fetchedOnly = isFetchedOnlyModel(modelOption, staticModelIds);
+                const metadata = hasModelMetadata(modelOption);
+                return (
+                  <button
+                    key={modelOption.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => {
+                      onValueChange(modelOption.id);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    className={cn(
+                      "flex w-full items-start gap-2 rounded-sm px-2 py-2 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground",
+                      selected && "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <span className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center">
+                      {selected ? <Check className="h-4 w-4" /> : null}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="truncate font-medium">{modelOption.label}</span>
+                        {fetchedOnly ? (
+                          <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                            New
+                          </span>
+                        ) : null}
+                        {modelOption.premium ? (
+                          <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">
+                            Premium
+                          </span>
+                        ) : null}
+                        {typeof modelOption.tokenMultiplier === "number" ? (
+                          <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">
+                            {modelOption.tokenMultiplier}x tokens
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                        {modelOption.id}
+                      </span>
+                      {metadata ? (
+                        <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+                          {[
+                            modelOption.endpoint,
+                            modelOption.contextWindow !== undefined
+                              ? `ctx ${formatModelWindow(modelOption.contextWindow)}`
+                              : "",
+                            modelOption.maxOutputTokens !== undefined
+                              ? `out ${formatModelWindow(modelOption.maxOutputTokens)}`
+                              : "",
+                            modelOption.outputModalities?.length
+                              ? `out ${modelOption.outputModalities.join(",")}`
+                              : "",
+                            modelOption.metadataStatus,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })
+            ) : (
+              <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No models match this search.
+              </p>
+            )}
+          </div>
+          {footer}
+        </div>,
+        document.body,
+      )
+        : null}
+    </div>
+  );
+}
 
 const extractTextFragment = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -443,6 +798,11 @@ export function ChutesChat({
   onRefreshModels,
   modelsLoading,
   modelsError,
+  navyUsage,
+  navyUsageError,
+  navyUsageLoading,
+  navyUsageUpdatedAt,
+  onRefreshUsage,
   saveToGallery = false,
   videoImage,
   videoAspect,
@@ -481,6 +841,17 @@ export function ChutesChat({
     [provider]
   );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
+  const staticModelIds = STATIC_MODEL_IDS[provider];
+  const navyToolUsageFooter =
+    provider === "navy" ? (
+      <NavyUsageFooter
+        usage={navyUsage}
+        error={navyUsageError}
+        loading={navyUsageLoading}
+        updatedAt={navyUsageUpdatedAt}
+        onRefresh={onRefreshUsage}
+      />
+    ) : null;
   const [headerCollapsed, setHeaderCollapsed] = useState(true);
   const [toolVideoModel, setToolVideoModel] = useState(
     videoModels[0]?.id ?? ""
@@ -515,6 +886,12 @@ export function ChutesChat({
       }),
     [imageModels, imageModelOrder, imagePipelineEnabled, toolImageModel]
   );
+  const refreshNavyUsageAfterMediaTool = () => {
+    if (provider !== "navy" || !onRefreshUsage) return;
+    void Promise.resolve(onRefreshUsage()).catch(() => {
+      // The generation result is more important than a best-effort usage refresh.
+    });
+  };
 
   useEffect(() => {
     const nextInput = initialInput?.trim() ?? "";
@@ -676,16 +1053,10 @@ export function ChutesChat({
 
     const fallbackVideoModel = videoModels[0]?.id ?? "";
     const fallbackAudioModel = audioModels[0]?.id ?? "";
-    const hasStoredVideoModel = videoModels.some(
-      (entry) => entry.id === storedToolVideoModel
-    );
-    const hasStoredAudioModel = audioModels.some(
-      (entry) => entry.id === storedToolAudioModel
-    );
 
     setToolSettings(nextToolSettings);
-    setToolVideoModel(hasStoredVideoModel ? storedToolVideoModel : fallbackVideoModel);
-    setToolAudioModel(hasStoredAudioModel ? storedToolAudioModel : fallbackAudioModel);
+    setToolVideoModel(storedToolVideoModel || fallbackVideoModel);
+    setToolAudioModel(storedToolAudioModel || fallbackAudioModel);
     setToolSettingsHydrated(true);
   }, [
     provider,
@@ -698,14 +1069,14 @@ export function ChutesChat({
 
   useEffect(() => {
     if (!videoModels.length) return;
-    if (!videoModels.some((entry) => entry.id === toolVideoModel)) {
+    if (!toolVideoModel) {
       setToolVideoModel(videoModels[0].id);
     }
   }, [videoModels, toolVideoModel]);
 
   useEffect(() => {
     if (!audioModels.length) return;
-    if (!audioModels.some((entry) => entry.id === toolAudioModel)) {
+    if (!toolAudioModel) {
       setToolAudioModel(audioModels[0].id);
     }
   }, [audioModels, toolAudioModel]);
@@ -2160,6 +2531,7 @@ ${defaultPrompt}`;
               model: result.model,
             });
           }
+          refreshNavyUsageAfterMediaTool();
           const imageStatus = result.errors.length
             ? `Generated ${result.images.length} image(s) using ${result.model}. Failed: ${result.errors.join("; ")}`
             : `Generated ${result.images.length} image(s) using ${result.model}.`;
@@ -2181,6 +2553,7 @@ ${defaultPrompt}`;
 
         if (toolName === "generate_video") {
           const result = await runGenerateVideo(args);
+          refreshNavyUsageAfterMediaTool();
           toolMessages.push({
             id: createId(),
             role: "tool",
@@ -2475,16 +2848,16 @@ ${defaultPrompt}`;
               </SelectContent>
             </Select>
 
-            <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className="glass-card h-9 min-w-0 flex-none border-0 bg-secondary/50 sm:w-[200px]">
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ModelSearchSelect
+              value={model}
+              onValueChange={setModel}
+              models={models}
+              staticModelIds={staticModelIds.chat}
+              placeholder="Select a model"
+              title="Chat Model"
+              ariaLabel="Chat Model"
+              triggerClassName="sm:w-[240px]"
+            />
 
             <div className="no-scrollbar col-span-2 flex min-w-0 items-center gap-1.5 overflow-x-auto pb-1 sm:contents sm:overflow-visible sm:pb-0">
             {isDeepSeekV4ChatModel ? (
@@ -2534,20 +2907,19 @@ ${defaultPrompt}`;
                 </Select>
               </>
             ) : null}
-            <Select
+            <ModelSearchSelect
               value={toolImageModel}
               onValueChange={setToolImageModel}
+              models={imageModels}
+              staticModelIds={staticModelIds.image}
+              placeholder="Select image model"
+              title="Image Tool Model"
+              ariaLabel="Image Tool Model"
               disabled={!toolSettings.image || !imageModels.length}
-            >
-              <SelectTrigger className="h-9 w-9 flex-none justify-center border-0 bg-secondary/50 px-0 glass-card" title="Image Tool Model" aria-label="Image Tool Model">
-                <ImageIcon className="h-4 w-4" />
-              </SelectTrigger>
-              <SelectContent>
-                {imageModels.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              icon={<ImageIcon className="h-4 w-4" />}
+              compact
+              footer={navyToolUsageFooter}
+            />
 
             <Dialog>
               <DialogTrigger asChild>
@@ -2675,35 +3047,53 @@ ${defaultPrompt}`;
               </DialogContent>
             </Dialog>
 
-            <Select
+            <ModelSearchSelect
               value={toolVideoModel}
               onValueChange={setToolVideoModel}
+              models={videoModels}
+              staticModelIds={staticModelIds.video}
+              placeholder="Select video model"
+              title="Video Tool Model"
+              ariaLabel="Video Tool Model"
               disabled={!toolSettings.video || !videoModels.length}
-            >
-              <SelectTrigger className="h-9 w-9 flex-none justify-center border-0 bg-secondary/50 px-0 glass-card" title="Video Tool Model" aria-label="Video Tool Model">
-                <Video className="h-4 w-4" />
-              </SelectTrigger>
-              <SelectContent>
-                {videoModels.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              icon={<Video className="h-4 w-4" />}
+              compact
+              footer={navyToolUsageFooter}
+            />
 
-            <Select
+            {provider === "navy" && (toolSettings.image || toolSettings.video) ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void onRefreshUsage?.()}
+                disabled={navyUsageLoading || !onRefreshUsage}
+                className="glass-card h-9 flex-none border-0 bg-secondary/50 px-2 text-xs"
+                title="Check NavyAI image and video usage"
+                aria-label="Check NavyAI image and video usage"
+              >
+                <Gauge className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">
+                  {navyUsage
+                    ? `${formatCount(navyUsage.usage.tokens_remaining_today)} left`
+                    : navyUsageError
+                      ? "Usage error"
+                      : "Usage"}
+                </span>
+              </Button>
+            ) : null}
+
+            <ModelSearchSelect
               value={toolAudioModel}
               onValueChange={setToolAudioModel}
+              models={audioModels}
+              staticModelIds={staticModelIds.audio}
+              placeholder="Select audio model"
+              title="Audio Tool Model"
+              ariaLabel="Audio Tool Model"
               disabled={!toolSettings.audio || !audioModels.length}
-            >
-              <SelectTrigger className="h-9 w-9 flex-none justify-center border-0 bg-secondary/50 px-0 glass-card" title="Audio Tool Model" aria-label="Audio Tool Model">
-                <AudioLines className="h-4 w-4" />
-              </SelectTrigger>
-              <SelectContent>
-                {audioModels.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              icon={<AudioLines className="h-4 w-4" />}
+              compact
+            />
 
             {onRefreshModels && (
               <Button variant="ghost" size="icon" onClick={onRefreshModels} disabled={modelsLoading} className="h-9 w-9 flex-none" title="Refresh models" aria-label="Refresh models">

@@ -31,6 +31,11 @@ export function ChatView({ initialInput }: ChatViewProps) {
         navyImageModels,
         navyVideoModels,
         navyTtsModels,
+        navyUsage,
+        navyUsageError,
+        navyUsageLoading,
+        navyUsageUpdatedAt,
+        refreshNavyUsage,
         saveChatImages,
         saveToGallery,
         imagePipelineEnabled,
@@ -76,7 +81,7 @@ export function ChatView({ initialInput }: ChatViewProps) {
     useEffect(() => {
         if (!isNavyChat) return;
         if (!resolvedNavyChatModels.length) return;
-        if (!resolvedNavyChatModels.some((model) => model.id === navyChatModel)) {
+        if (!navyChatModel) {
             setNavyChatModel(resolvedNavyChatModels[0].id);
         }
     }, [isNavyChat, navyChatModel, resolvedNavyChatModels, setNavyChatModel]);
@@ -84,10 +89,16 @@ export function ChatView({ initialInput }: ChatViewProps) {
     useEffect(() => {
         if (!isNavyChat) return;
         if (!navyImageModels.length) return;
-        if (!navyImageModels.some((model) => model.id === navyToolImageModel)) {
+        if (!navyToolImageModel) {
             setNavyToolImageModel(navyImageModels[0].id);
         }
     }, [isNavyChat, navyImageModels, navyToolImageModel, setNavyToolImageModel]);
+
+    useEffect(() => {
+        if (!isNavyChat) return;
+        if (!apiKeys.navy.trim()) return;
+        void refreshNavyUsage();
+    }, [apiKeys.navy, isNavyChat, refreshNavyUsage]);
 
     return (
         <div className="h-full w-full flex flex-col">
@@ -112,6 +123,11 @@ export function ChatView({ initialInput }: ChatViewProps) {
                 modelsLoading={modelsLoading}
                 modelsError={modelsError}
                 onRefreshModels={onRefreshModels}
+                navyUsage={isNavyChat ? navyUsage : null}
+                navyUsageError={isNavyChat ? navyUsageError : null}
+                navyUsageLoading={isNavyChat ? navyUsageLoading : false}
+                navyUsageUpdatedAt={isNavyChat ? navyUsageUpdatedAt : null}
+                onRefreshUsage={isNavyChat ? refreshNavyUsage : undefined}
                 saveToGallery={saveToGallery}
                 videoImage={videoImage}
                 videoAspect={videoAspect}
