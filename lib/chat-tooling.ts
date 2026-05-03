@@ -216,6 +216,18 @@ export const stripReasoningContentFromChatPayload = (
   return changed ? next : null;
 };
 
+export const buildAssistantToolContextContent = ({
+  content,
+  thinking,
+}: {
+  content?: string | null;
+  thinking?: string | null;
+}) =>
+  [content, thinking]
+    .map((value) => (typeof value === "string" ? normalizeValue(value) : ""))
+    .filter(Boolean)
+    .join("\n\n");
+
 export const buildChatCompletionRecoveryPayloads = (
   payload: Record<string, unknown>
 ) => {

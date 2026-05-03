@@ -56,6 +56,7 @@ import {
 import {
   type ChatImageAsset,
   type ChatMediaAsset,
+  buildAssistantToolContextContent,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
   isDeepSeekV4Model,
@@ -2291,6 +2292,10 @@ ${defaultPrompt}`;
 
         // After stream is done, final update to ensure consistency (and clean up any missing fields)
         const finalToolCalls = finalResult.toolCalls.filter(tc => tc.id && tc.function.name);
+        const assistantToolContext = buildAssistantToolContextContent({
+          content: finalResult.content,
+          thinking: finalResult.thinking,
+        });
 
         // Update the message in our local variable to be current
         const finalizedAssistantMessage: ChatMessage = {
@@ -2333,7 +2338,7 @@ ${defaultPrompt}`;
               requestedTool: forcedToolCall,
               provider,
               userPrompt: trimmed,
-              assistantContent: finalResult.content,
+              assistantContent: assistantToolContext,
               imageModel: toolImageModel,
               imagePipelineEnabled,
               videoModel: toolVideoModel,
@@ -2366,7 +2371,7 @@ ${defaultPrompt}`;
               const toolMessages = await handleToolCalls(
                 [syntheticToolCall],
                 applyProgressMessage,
-                { assistantContent: finalResult.content, userPrompt: trimmed }
+                { assistantContent: assistantToolContext, userPrompt: trimmed }
               );
               if (toolMessages.length) {
                 removeProgressMessages([syntheticToolCall]);
@@ -2383,7 +2388,7 @@ ${defaultPrompt}`;
         const toolMessages = await handleToolCalls(
           finalToolCalls,
           applyProgressMessage,
-          { assistantContent: finalResult.content, userPrompt: trimmed }
+          { assistantContent: assistantToolContext, userPrompt: trimmed }
         );
         removeProgressMessages(finalToolCalls);
         currentMessages = [...currentMessages, ...toolMessages];

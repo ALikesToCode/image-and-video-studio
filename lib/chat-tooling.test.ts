@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildChatCompletionPayload,
   buildChatCompletionRecoveryPayloads,
+  buildAssistantToolContextContent,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
   isDeepSeekV4Model,
@@ -61,6 +62,32 @@ test("Synthetic fallback builds an image tool call from the drafted prompt witho
     name: "generate_image",
     arguments: {
       prompt: "sharp modern anime portrait, blue rim light, clean silhouette.",
+    },
+  });
+});
+
+test("Synthetic fallback can use Kimi reasoning-only prompt drafts", () => {
+  const assistantContent = buildAssistantToolContextContent({
+    content: "",
+    thinking:
+      'The model is preparing the image tool arguments.\n\nPrompt:\n"High-detail modern anime illustration, humid aquatic center locker room, cold fluorescent lighting, tense cinematic mood."\n\nI should call generate_image with this prompt.',
+  });
+  const fallback = createSyntheticFallbackToolCall({
+    requestedTool: "generate_image",
+    provider: "navy",
+    userPrompt: "Create the locker-room anime image now.",
+    assistantContent,
+    imageModel: "gpt-image-2",
+    imagePipelineEnabled: true,
+    videoModel: "veo-3.1",
+    audioModel: "gpt-4o-mini-tts",
+  });
+
+  assert.deepEqual(fallback, {
+    name: "generate_image",
+    arguments: {
+      prompt:
+        "High-detail modern anime illustration, humid aquatic center locker room, cold fluorescent lighting, tense cinematic mood.",
     },
   });
 });
