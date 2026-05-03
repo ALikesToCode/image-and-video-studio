@@ -300,6 +300,24 @@ test("Chat recovery payloads strip reasoning before dropping tools", () => {
   assert.equal("tools" in recoveries[2].payload, false);
 });
 
+test("Chat recovery payloads can omit unsupported sampling fields", () => {
+  const payload = buildChatCompletionPayload({
+    model: "gpt-5",
+    messages: [{ role: "user", content: "Rewrite this prompt." }],
+    maxTokens: 700,
+    temperature: 0.2,
+  });
+
+  const recoveries = buildChatCompletionRecoveryPayloads(payload);
+  const omitSampling = recoveries.find(
+    (recovery) => recovery.label === "omit-sampling"
+  );
+
+  assert.ok(omitSampling);
+  assert.equal("temperature" in omitSampling.payload, false);
+  assert.equal(omitSampling.payload.max_tokens, 700);
+});
+
 test("Navy chat messages pass assistant reasoning content back for thinking-mode tool turns", () => {
   const messages = toChatCompletionMessages(
     [

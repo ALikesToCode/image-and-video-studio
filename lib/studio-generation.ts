@@ -462,12 +462,34 @@ export const buildImagePolicyRecoveryPrompt = ({
 Flagged moderation categories: ${categoryLabel}.
 ${categoryGuidance.length ? `Category-specific changes: ${categoryGuidance.join("; ")}.` : "Remove any likely unsafe, explicit, graphic, coercive, minor-related, or prohibited details."}
 
-Preserve the art medium, genre, composition, subject identity, non-explicit outfit concept, lighting, camera/framing, palette, mood, and quality level.
+Preserve the art medium, genre, setting, composition, named subject identity, age/adult context, lighting, camera/framing, palette, mood, and quality level.
+When clothing or swimwear is part of the scene, preserve its non-explicit visual role, color, and context while making it properly fitting and removing fabric-strain or body-part focus.
 Remove or neutralize the unsafe parts without replacing the requested style with a generic safe image.
 Return only the final rewritten image prompt. Do not mention policy, moderation, safety systems, provider errors, blocked categories, or request IDs in the final prompt.
 
 Prompt to rewrite:
 ${saferPrompt}`;
+};
+
+export const resolveImagePromptRecoveryChatModels = ({
+  provider,
+  activeModel,
+}: {
+  provider: string;
+  activeModel: string;
+}) => {
+  const candidates =
+    provider === "navy"
+      ? ["gpt-4o", "deepseek-v4-flash", "glm-5.1-venice", activeModel]
+      : [activeModel];
+  const seen = new Set<string>();
+  return candidates
+    .map((candidate) => candidate.trim())
+    .filter((candidate) => {
+      if (!candidate || seen.has(candidate)) return false;
+      seen.add(candidate);
+      return true;
+    });
 };
 
 export const buildSaferImagePromptForModel = (

@@ -22,6 +22,7 @@ import {
   normalizeImageRetryAttempts,
   prepareImageModelRequests,
   prepareImagePromptForModel,
+  resolveImagePromptRecoveryChatModels,
   resolveImageGenerationModelPipeline,
   resolveImageSizingOptions,
   resolveActiveImageToolModels,
@@ -565,8 +566,26 @@ test("Policy rejection recovery prompt preserves medium while targeting flagged 
   assert.match(recoveryPrompt, /try 2\/4/i);
   assert.match(recoveryPrompt, /sexual/i);
   assert.match(recoveryPrompt, /preserve.*art medium/i);
+  assert.match(recoveryPrompt, /properly fitting/i);
   assert.match(recoveryPrompt, /watercolor portrait/i);
   assert.match(recoveryPrompt, /do not mention.*safety/i);
+});
+
+test("Prompt recovery uses a stable Navy rewrite model before GPT-5 chat models", () => {
+  assert.deepEqual(
+    resolveImagePromptRecoveryChatModels({
+      provider: "navy",
+      activeModel: "gpt-5",
+    }),
+    ["gpt-4o", "deepseek-v4-flash", "glm-5.1-venice", "gpt-5"]
+  );
+  assert.deepEqual(
+    resolveImagePromptRecoveryChatModels({
+      provider: "chutes",
+      activeModel: "Qwen/Qwen3-32B",
+    }),
+    ["Qwen/Qwen3-32B"]
+  );
 });
 
 test("Policy-sensitive OpenAI and Gemini prompts remain unchanged before the first request", () => {

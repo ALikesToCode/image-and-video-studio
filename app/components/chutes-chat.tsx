@@ -77,6 +77,7 @@ import {
   isFluxModel,
   normalizeImageRetryAttempts,
   prepareImageModelRequests,
+  resolveImagePromptRecoveryChatModels,
   resolveNavyChatImageSizing,
   summarizeImageModelPrompts,
 } from "@/lib/studio-generation";
@@ -1346,42 +1347,51 @@ ${defaultPrompt}`;
       maxAttempts,
     });
 
-    try {
-      const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You rewrite image-generation prompts after provider moderation rejections. Return only one direct image prompt. Preserve the requested artistic medium, composition, mood, lighting, camera/framing, and quality level while removing unsafe details.",
-            },
-            { role: "user", content: recoveryInstruction },
-          ],
-          toolChoice: "none",
-          maxTokens: 700,
-          temperature: 0.2,
-          ...(isDeepSeekV4ChatModel
-            ? {
-                thinking: { type: "disabled" },
-              }
-            : {}),
-        }),
-      });
-      if (!response.ok) return fallbackPrompt;
-      return (
-        normalizeRecoveredImagePrompt(await readAssistantTextResponse(response)) ||
-        fallbackPrompt
-      );
-    } catch {
-      return fallbackPrompt;
+    const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
+    const recoveryModels = resolveImagePromptRecoveryChatModels({
+      provider,
+      activeModel: model,
+    });
+
+    for (const recoveryModel of recoveryModels) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            model: recoveryModel,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You rewrite image-generation prompts after provider moderation rejections. Return only one direct image prompt. Preserve the requested artistic medium, composition, mood, lighting, camera/framing, and quality level while removing unsafe details.",
+              },
+              { role: "user", content: recoveryInstruction },
+            ],
+            toolChoice: "none",
+            maxTokens: 700,
+            temperature: 0.2,
+            ...(provider === "navy" && isDeepSeekV4Model(recoveryModel)
+              ? {
+                  thinking: { type: "disabled" },
+                }
+              : {}),
+          }),
+        });
+        if (!response.ok) continue;
+        const recoveredPrompt = normalizeRecoveredImagePrompt(
+          await readAssistantTextResponse(response)
+        );
+        if (recoveredPrompt) return recoveredPrompt;
+      } catch {
+        // Try the next recovery model before falling back to the local rewrite.
+      }
     }
+
+    return fallbackPrompt;
   };
 
   const getStringArg = (args: Record<string, unknown>, keys: string[]) => {

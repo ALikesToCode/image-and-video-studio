@@ -232,6 +232,9 @@ export const buildChatCompletionRecoveryPayloads = (
   const withoutReasoning = stripReasoningContentFromChatPayload(payload);
   addCandidate("strip-reasoning", withoutReasoning);
 
+  const reasoningBase = withoutReasoning ?? payload;
+  addCandidate("omit-sampling", withoutPayloadFields(reasoningBase, ["temperature"]));
+
   const toolChoiceBase = withoutReasoning ?? payload;
   addCandidate("omit-tool-choice", withoutPayloadFields(toolChoiceBase, ["tool_choice"]));
 
