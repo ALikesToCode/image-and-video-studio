@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
+import { NAVY_CHAT_MODELS, NAVY_IMAGE_MODELS } from "./constants.ts";
 import {
   buildSaferImagePromptForModel,
   buildProviderPolicyHintForImageModels,
@@ -41,6 +42,63 @@ test("OpenRouter image-only models use image-only modality", () => {
       "image",
     ]),
     ["image", "text"]
+  );
+});
+
+test("Navy capability grouping preserves new catalog metadata and buckets", () => {
+  const grouped = groupNavyModelsByCapability({
+    data: [
+      {
+        id: "gpt-5.5",
+        endpoint: "/v1/chat/completions",
+        token_multiplier: 12,
+        premium: true,
+        context_window: 1050000,
+        max_output_tokens: 128000,
+        input_modalities: ["text", "image", "file"],
+        output_modalities: ["text"],
+        supports_reasoning: true,
+        pricing: { prompt: "0.000005", completion: "0.00003" },
+        metadata_status: "known",
+      },
+      {
+        id: "image-1",
+        endpoint: "/v1/images/generations",
+        output_modalities: ["image"],
+      },
+      {
+        id: "grok-4.3",
+        endpoint: "/v1/chat/completions",
+        token_multiplier: 3,
+        output_modalities: ["text"],
+      },
+    ],
+  });
+
+  assert.equal(grouped.chat[0]?.id, "gpt-5.5");
+  assert.equal(grouped.chat[0]?.tokenMultiplier, 12);
+  assert.equal(grouped.chat[0]?.premium, true);
+  assert.equal(grouped.chat[0]?.contextWindow, 1050000);
+  assert.equal(grouped.chat[0]?.maxOutputTokens, 128000);
+  assert.equal(grouped.chat[0]?.supportsReasoning, true);
+  assert.deepEqual(grouped.chat[0]?.pricing, {
+    prompt: "0.000005",
+    completion: "0.00003",
+  });
+  assert.equal(grouped.image[0]?.id, "image-1");
+  assert.equal(grouped.chat[1]?.id, "grok-4.3");
+  assert.equal(grouped.chat[1]?.tokenMultiplier, 3);
+});
+
+test("Static Navy fallbacks include recently announced models", () => {
+  assert.equal(NAVY_IMAGE_MODELS.some((model) => model.id === "image-1"), true);
+  assert.equal(
+    NAVY_CHAT_MODELS.find((model) => model.id === "gpt-5.5")?.tokenMultiplier,
+    12
+  );
+  assert.equal(
+    NAVY_CHAT_MODELS.find((model) => model.id === "grok-4.3")?.tokenMultiplier,
+    3
   );
 });
 

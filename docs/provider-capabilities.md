@@ -11,6 +11,7 @@ The capability foundation lives in `lib/providers`. Static fallbacks are built f
 ## NavyAI
 
 - `/v1/models` is used for endpoint-compatible model catalogs and capability metadata. Nullable fields such as `context_window`, `max_output_tokens`, modalities, support flags, descriptions, pricing, `metadata_source`, and `metadata_status` must be preserved; `null` means unknown, not zero or false.
+- Dynamic catalog metadata should remain the source of truth for high-cost or newly added models. Current observed Navy additions include `gpt-5.5` at a 12x multiplier, `grok-4.3` at a 3x multiplier, and image model `image-1`.
 - `/v1/images/generations` is used for image and video jobs.
 - Navy image generation accepts `image_url` as one string or an array of up to 5 reference images for multi-reference editing. Studio image mode and chat image tools should pass selected/user-provided references through that shape.
 - `/v1/audio/speech` is used for TTS.

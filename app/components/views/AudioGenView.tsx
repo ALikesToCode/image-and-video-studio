@@ -1,13 +1,12 @@
 "use client";
 
 import { useStudio } from "@/app/contexts/StudioContext";
-import { useEffect, useRef } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "@/app/components/prompt-input";
 import { Button } from "@/app/components/ui/button";
-import { Loader2, Music, Download, AudioLines, Settings2 } from "lucide-react";
+import { Loader2, Music, Download, AudioLines, Settings2, FileText, Upload, X } from "lucide-react";
 import { Card } from "@/app/components/ui/card";
-import { useState } from "react";
 import {
     Dialog,
     DialogContent,
@@ -15,6 +14,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/app/components/ui/dialog";
+import { extractPdfTextFromFile, type PdfTextExtractionResult } from "@/lib/client/pdf-text";
 
 export function AudioGenView() {
     const context = useStudio();
@@ -26,7 +26,11 @@ export function AudioGenView() {
     } = context;
 
     const audioRef = useRef<HTMLAudioElement>(null);
+    const pdfInputRef = useRef<HTMLInputElement>(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [pdfLoading, setPdfLoading] = useState(false);
+    const [pdfError, setPdfError] = useState<string | null>(null);
+    const [pdfResult, setPdfResult] = useState<PdfTextExtractionResult | null>(null);
 
     useEffect(() => {
         if (mode !== "tts") setMode("tts");
@@ -38,6 +42,30 @@ export function AudioGenView() {
             audioRef.current.load();
         }
     }, [audioUrl]);
+
+    const handlePdfUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+
+        setPdfLoading(true);
+        setPdfError(null);
+        setPdfResult(null);
+        try {
+            const result = await extractPdfTextFromFile(file);
+            context.setPrompt(result.text);
+            setPdfResult(result);
+        } catch (error) {
+            setPdfError(error instanceof Error ? error.message : "Unable to read PDF text.");
+        } finally {
+            setPdfLoading(false);
+        }
+    };
+
+    const clearPdfText = () => {
+        setPdfResult(null);
+        setPdfError(null);
+    };
 
     return (
         <div className="flex h-full flex-col lg:flex-row">
@@ -145,6 +173,69 @@ export function AudioGenView() {
                 {/* Input Area */}
                 <div className="glass-panel z-10 mt-auto border-t border-white/10 bg-background/50 p-3 backdrop-blur-xl md:p-6">
                     <div className="max-w-3xl mx-auto">
+                        <Card className="mb-3 rounded-lg border-border/60 bg-card/80 p-3 shadow-sm">
+                            <input
+                                ref={pdfInputRef}
+                                type="file"
+                                accept="application/pdf,.pdf"
+                                className="hidden"
+                                onChange={handlePdfUpload}
+                                disabled={hasActiveJobs || pdfLoading}
+                            />
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <div className="rounded-md bg-primary/10 p-2 text-primary">
+                                        <FileText className="h-4 w-4" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium">PDF reader</p>
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {pdfLoading
+                                                ? "Extracting text..."
+                                                : pdfResult
+                                                    ? `${pdfResult.fileName} · ${pdfResult.pagesRead}/${pdfResult.totalPages} pages · ${pdfResult.charCount.toLocaleString()} chars`
+                                                    : "Upload a PDF to fill the speech text"}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2">
+                                    {pdfResult || pdfError ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={clearPdfText}
+                                            disabled={pdfLoading}
+                                            title="Clear PDF status"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </Button>
+                                    ) : null}
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => pdfInputRef.current?.click()}
+                                        disabled={hasActiveJobs || pdfLoading}
+                                    >
+                                        {pdfLoading ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <Upload className="h-4 w-4" />
+                                        )}
+                                        PDF
+                                    </Button>
+                                </div>
+                            </div>
+                            {pdfResult?.truncatedByChars || pdfResult?.truncatedByPages ? (
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    Trimmed for TTS. Edit the text below before generating if needed.
+                                </p>
+                            ) : null}
+                            {pdfError ? (
+                                <p className="mt-2 text-xs text-destructive">{pdfError}</p>
+                            ) : null}
+                        </Card>
                         <PromptInput
                             prompt={context.prompt}
                             setPrompt={context.setPrompt}
