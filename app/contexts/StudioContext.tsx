@@ -44,11 +44,14 @@ import {
     getActiveJobCount,
     mergeGeneratedImagesInDisplayOrder,
     normalizeImageModelOrder,
+    normalizeImageRetryAttempts,
     resolveImageSizingOptions,
     resolveImageGenerationModelPipeline,
+    retryAsyncOperation,
     isGptImage2Model,
     isValidGptImage2Size,
     isValidNavyImagePixelSize,
+    DEFAULT_IMAGE_RETRY_ATTEMPTS,
 } from "@/lib/studio-generation";
 import { normalizeVeoDuration } from "@/lib/studio-validation";
 import {
@@ -108,6 +111,7 @@ export type GenerationJob = {
     referenceIds?: string[];
 
     imageCount?: number;
+    imageRetryAttempts?: number;
     imageAspect?: string;
     imageSize?: string;
     navyImageSize?: string;
@@ -178,6 +182,7 @@ type StoredSettings = Partial<{
     negativePrompt: string;
     imagePipelineEnabled: boolean;
     imageModelOrder: string[];
+    imageRetryAttempts: number;
     imageCount: number;
     imageAspect: string;
     imageSize: string;
@@ -575,6 +580,8 @@ interface StudioContextType {
     setImagePipelineEnabled: (enabled: boolean) => void;
     imageModelOrder: string[];
     setImageModelOrder: React.Dispatch<React.SetStateAction<string[]>>;
+    imageRetryAttempts: number;
+    setImageRetryAttempts: (n: number) => void;
     imageAspect: string;
     setImageAspect: (s: string) => void;
     imageSize: string;
@@ -761,6 +768,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [imageCount, setImageCount] = useState(1);
     const [imagePipelineEnabled, setImagePipelineEnabled] = useState(false);
     const [imageModelOrder, setImageModelOrder] = useState<string[]>([]);
+    const [imageRetryAttempts, setImageRetryAttempts] = useState(DEFAULT_IMAGE_RETRY_ATTEMPTS);
     const [imageAspect, setImageAspect] = useState(AUTO_IMAGE_OPTION);
     const [imageSize, setImageSize] = useState(AUTO_IMAGE_OPTION);
     const [navyImageSize, setNavyImageSize] = useState(AUTO_IMAGE_OPTION);
@@ -1160,12 +1168,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const generateImages = async (job: GenerationJob) => {
         startJob(job, "Generating image...");
         try {
-            let images: GeneratedImage[] = [];
-            let url = `/api/${job.provider}/image`;
-            let body: Record<string, unknown> = {
-                model: job.model,
-                prompt: job.prompt,
-            };
             const requestHeaders = {
                 "Content-Type": "application/json",
                 "x-user-api-key": job.apiKey,
@@ -1177,163 +1179,193 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 navyImageSize: job.navyImageSize,
             });
 
-            if (job.provider === "gemini") {
-                body = {
-                    ...body,
-                    ...imageSizing,
-                    numberOfImages: job.imageCount,
-                    referenceImages,
-                };
-            } else if (job.provider === "openrouter") {
-                body = {
-                    ...body,
-                    ...imageSizing,
-                    outputModalities: job.outputModalities,
-                    referenceImages,
-                };
-            } else if (job.provider === "navy") {
-                const imageUrl = buildNavyImageUrlPayload(referenceImages);
-                body = {
-                    ...body,
-                    ...imageSizing,
-                    numberOfImages: job.imageCount,
-                    quality: job.navyImageQuality,
-                    negativePrompt: job.negativePrompt,
-                    promptAgentModel: job.promptAgentModel,
-                    imageUrl,
-                    sync: false,
-                };
-            } else {
-                url = "/api/chutes/image";
-                body = {
-                    ...body,
-                    negativePrompt: job.negativePrompt,
-                    guidanceScale: Number(job.chutesGuidanceScale),
-                    width: Number(job.chutesWidth),
-                    height: Number(job.chutesHeight),
-                    numInferenceSteps: Number(job.chutesSteps),
-                    resolution: job.chutesResolution,
-                    seed: Number(job.chutesSeed) || null,
-                };
-            }
-
-            let payload: Record<string, unknown> = {};
-            if (job.provider === "navy" && job.remoteJobId) {
-                updateJob(job.id, {
-                    progress: `Resuming Navy image job ${job.remoteJobId}...`,
-                });
-                payload = { id: job.remoteJobId };
-            } else {
-                updateJob(job.id, {
-                    progress: `Submitting image request to ${job.model}...`,
-                });
-                const response = await fetch(url, {
-                    method: "POST",
-                    headers: requestHeaders,
-                    body: JSON.stringify(body),
-                });
-                payload = await response.json();
-                if (!response.ok) {
-                    throw new Error(errorMessageFromPayload(payload, "Image generation failed."));
-                }
-            }
-
-            if (job.provider === "navy") {
-                let navyPayload = payload;
-                const existingJobId = job.remoteJobId;
-                const submittedJobId =
-                    typeof payload?.id === "string" ? payload.id : existingJobId;
-                if (typeof submittedJobId === "string" && submittedJobId) {
+            const images = await retryAsyncOperation<GeneratedImage[]>({
+                maxAttempts: job.remoteJobId ? 1 : job.imageRetryAttempts,
+                onAttempt: ({ attempt, maxAttempts }) => {
+                    if (maxAttempts <= 1) return;
                     updateJob(job.id, {
-                        remoteJobId: submittedJobId,
-                        remoteStatus:
-                            typeof payload?.status === "string" ? payload.status : undefined,
+                        progress: `Generating image with ${job.model} (try ${attempt}/${maxAttempts})...`,
                     });
-                    let delayMs = 5000;
-                    for (let attempt = 0; attempt < 60; attempt += 1) {
+                },
+                onError: ({ attempt, maxAttempts, error, final }) => {
+                    if (final) return;
+                    const message =
+                        error instanceof Error ? error.message : "Image generation failed.";
+                    updateJob(job.id, {
+                        progress: `Retrying ${job.model} after try ${attempt}/${maxAttempts}: ${message}`,
+                    });
+                },
+                run: async ({ attempt, maxAttempts }) => {
+                    const attemptLabel =
+                        maxAttempts > 1 ? ` (try ${attempt}/${maxAttempts})` : "";
+                    let images: GeneratedImage[] = [];
+                    let url = `/api/${job.provider}/image`;
+                    let body: Record<string, unknown> = {
+                        model: job.model,
+                        prompt: job.prompt,
+                    };
+
+                    if (job.provider === "gemini") {
+                        body = {
+                            ...body,
+                            ...imageSizing,
+                            numberOfImages: job.imageCount,
+                            referenceImages,
+                        };
+                    } else if (job.provider === "openrouter") {
+                        body = {
+                            ...body,
+                            ...imageSizing,
+                            outputModalities: job.outputModalities,
+                            referenceImages,
+                        };
+                    } else if (job.provider === "navy") {
+                        const imageUrl = buildNavyImageUrlPayload(referenceImages);
+                        body = {
+                            ...body,
+                            ...imageSizing,
+                            numberOfImages: job.imageCount,
+                            quality: job.navyImageQuality,
+                            negativePrompt: job.negativePrompt,
+                            promptAgentModel: job.promptAgentModel,
+                            imageUrl,
+                            sync: false,
+                        };
+                    } else {
+                        url = "/api/chutes/image";
+                        body = {
+                            ...body,
+                            negativePrompt: job.negativePrompt,
+                            guidanceScale: Number(job.chutesGuidanceScale),
+                            width: Number(job.chutesWidth),
+                            height: Number(job.chutesHeight),
+                            numInferenceSteps: Number(job.chutesSteps),
+                            resolution: job.chutesResolution,
+                            seed: Number(job.chutesSeed) || null,
+                        };
+                    }
+
+                    let payload: Record<string, unknown> = {};
+                    if (job.provider === "navy" && job.remoteJobId) {
                         updateJob(job.id, {
-                            progress: `Waiting for Navy image render (${attempt + 1}/60)...`,
+                            progress: `Resuming Navy image job ${job.remoteJobId}...`,
                         });
-                        await sleep(delayMs);
-                        const pollResponse = await fetch(
-                            `/api/navy/image?id=${encodeURIComponent(submittedJobId)}`,
-                            {
-                                headers: {
-                                    "x-user-api-key": job.apiKey,
-                                },
+                        payload = { id: job.remoteJobId };
+                    } else {
+                        updateJob(job.id, {
+                            progress: `Submitting image request to ${job.model}${attemptLabel}...`,
+                        });
+                        const response = await fetch(url, {
+                            method: "POST",
+                            headers: requestHeaders,
+                            body: JSON.stringify(body),
+                        });
+                        payload = await response.json();
+                        if (!response.ok) {
+                            throw new Error(errorMessageFromPayload(payload, "Image generation failed."));
+                        }
+                    }
+
+                    if (job.provider === "navy") {
+                        let navyPayload = payload;
+                        const existingJobId = job.remoteJobId;
+                        const submittedJobId =
+                            typeof payload?.id === "string" ? payload.id : existingJobId;
+                        if (typeof submittedJobId === "string" && submittedJobId) {
+                            updateJob(job.id, {
+                                remoteJobId: submittedJobId,
+                                remoteStatus:
+                                    typeof payload?.status === "string" ? payload.status : undefined,
+                            });
+                            let delayMs = 5000;
+                            for (let pollAttempt = 0; pollAttempt < 60; pollAttempt += 1) {
+                                updateJob(job.id, {
+                                    progress: `Waiting for Navy image render${attemptLabel} (${pollAttempt + 1}/60)...`,
+                                });
+                                await sleep(delayMs);
+                                const pollResponse = await fetch(
+                                    `/api/navy/image?id=${encodeURIComponent(submittedJobId)}`,
+                                    {
+                                        headers: {
+                                            "x-user-api-key": job.apiKey,
+                                        },
+                                    }
+                                );
+                                navyPayload = await pollResponse.json();
+                                if (!pollResponse.ok && pollResponse.status !== 429) {
+                                    throw new Error(errorMessageFromPayload(navyPayload, "Unable to poll Navy image job."));
+                                }
+                                if (
+                                    typeof navyPayload?.retryAfterMs === "number" &&
+                                    Number.isFinite(navyPayload.retryAfterMs)
+                                ) {
+                                    delayMs = Math.min(Math.max(navyPayload.retryAfterMs, 1000), 30000);
+                                    updateJob(job.id, {
+                                        remoteStatus: "rate_limited",
+                                        progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
+                                    });
+                                    continue;
+                                }
+                                if (pollResponse.status === 429) {
+                                    delayMs = Math.min(delayMs * 2, 30000);
+                                    updateJob(job.id, {
+                                        remoteStatus: "rate_limited",
+                                        progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
+                                    });
+                                    continue;
+                                }
+                                if (navyPayload?.done) {
+                                    break;
+                                }
+                                delayMs = 5000;
                             }
-                        );
-                        navyPayload = await pollResponse.json();
-                        if (!pollResponse.ok && pollResponse.status !== 429) {
-                            throw new Error(errorMessageFromPayload(navyPayload, "Unable to poll Navy image job."));
                         }
-                        if (
-                            typeof navyPayload?.retryAfterMs === "number" &&
-                            Number.isFinite(navyPayload.retryAfterMs)
-                        ) {
-                            delayMs = Math.min(Math.max(navyPayload.retryAfterMs, 1000), 30000);
-                            updateJob(job.id, {
-                                remoteStatus: "rate_limited",
-                                progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
-                            });
-                            continue;
-                        }
-                        if (pollResponse.status === 429) {
-                            delayMs = Math.min(delayMs * 2, 30000);
-                            updateJob(job.id, {
-                                remoteStatus: "rate_limited",
-                                progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
-                            });
-                            continue;
-                        }
-                        if (navyPayload?.done) {
-                            break;
-                        }
-                        delayMs = 5000;
-                    }
-                }
 
-                const navyImages = Array.isArray(navyPayload?.images)
-                    ? (navyPayload.images as Array<{
-                        url?: string;
-                        b64_json?: string;
-                        data?: string;
-                        mimeType?: string;
-                        mime_type?: string;
-                    }>)
-                    : [];
-                for (const image of navyImages) {
-                    const base64Data =
-                        typeof image?.data === "string" && image.data
-                            ? image.data
-                            : typeof image?.b64_json === "string" && image.b64_json
-                                ? image.b64_json
-                                : "";
-                    if (base64Data) {
-                        const mimeType =
-                            typeof image.mimeType === "string"
-                                ? image.mimeType
-                                : typeof image.mime_type === "string"
-                                    ? image.mime_type
-                                    : "image/png";
-                        images.push({
-                            id: createId(),
-                            dataUrl: dataUrlFromBase64(base64Data, mimeType),
-                            mimeType,
-                        });
-                        continue;
+                        const navyImages = Array.isArray(navyPayload?.images)
+                            ? (navyPayload.images as Array<{
+                                url?: string;
+                                b64_json?: string;
+                                data?: string;
+                                mimeType?: string;
+                                mime_type?: string;
+                            }>)
+                            : [];
+                        for (const image of navyImages) {
+                            const base64Data =
+                                typeof image?.data === "string" && image.data
+                                    ? image.data
+                                    : typeof image?.b64_json === "string" && image.b64_json
+                                        ? image.b64_json
+                                        : "";
+                            if (base64Data) {
+                                const mimeType =
+                                    typeof image.mimeType === "string"
+                                        ? image.mimeType
+                                        : typeof image.mime_type === "string"
+                                            ? image.mime_type
+                                            : "image/png";
+                                images.push({
+                                    id: createId(),
+                                    dataUrl: dataUrlFromBase64(base64Data, mimeType),
+                                    mimeType,
+                                });
+                                continue;
+                            }
+                            if (!image?.url) continue;
+                            const dataUrl = await fetchAsDataUrl(image.url);
+                            images.push({ id: createId(), dataUrl, mimeType: "image/png" });
+                        }
+                    } else {
+                        images = buildGeneratedImages(payload);
                     }
-                    if (!image?.url) continue;
-                    const dataUrl = await fetchAsDataUrl(image.url);
-                    images.push({ id: createId(), dataUrl, mimeType: "image/png" });
-                }
-            } else {
-                images = buildGeneratedImages(payload);
-            }
 
-            if (!images.length) {
-                throw new Error("No images were returned by the model.");
-            }
+                    if (!images.length) {
+                        throw new Error("No images were returned by the model.");
+                    }
+
+                    return images;
+                },
+            });
 
             const finalizedImages = images.map((image, index) => ({
                 ...image,
@@ -1842,6 +1874,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             activeMode === "image" && imagePipelineEnabled
                 ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
                 : [model];
+        const normalizedImageRetryAttempts = normalizeImageRetryAttempts(imageRetryAttempts);
         const normalizedNavyImageSize = navyImageSize.trim().toLowerCase();
         if (
             activeMode === "image" &&
@@ -1878,6 +1911,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 batchOrder: index,
                 outputModalities: selectedModel?.outputModalities ?? undefined,
                 imageCount,
+                imageRetryAttempts: normalizedImageRetryAttempts,
                 imageAspect,
                 imageSize,
                 navyImageSize: normalizedNavyImageSize || AUTO_IMAGE_OPTION,
@@ -1910,7 +1944,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setJobs((prev) => [...prev, ...jobsToQueue]);
         setStatusMessage(
             jobsToQueue.length > 1
-                ? `Queued ${jobsToQueue.length} image jobs to run in parallel.`
+                ? `Queued ${jobsToQueue.length} image jobs to run in parallel with ${normalizedImageRetryAttempts} tries per model.`
                 : "Queued..."
         );
     };
@@ -2166,6 +2200,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 getBoolean(storedSettings.imagePipelineEnabled, false)
             );
             setImageModelOrder(normalizeImageModelOrder(storedSettings.imageModelOrder));
+            setImageRetryAttempts(
+                normalizeImageRetryAttempts(storedSettings.imageRetryAttempts)
+            );
 
             const storedImageCount = getNumber(storedSettings.imageCount, 1);
             if (storedImageCount > 0) setImageCount(storedImageCount);
@@ -2438,6 +2475,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             negativePrompt,
             imagePipelineEnabled,
             imageModelOrder: normalizeImageModelOrder(imageModelOrder),
+            imageRetryAttempts: normalizeImageRetryAttempts(imageRetryAttempts),
             imageCount,
             imageAspect,
             imageSize,
@@ -2473,6 +2511,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         negativePrompt,
         imagePipelineEnabled,
         imageModelOrder,
+        imageRetryAttempts,
         imageCount,
         imageAspect,
         imageSize,
@@ -2688,6 +2727,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         imageCount, setImageCount,
         imagePipelineEnabled, setImagePipelineEnabled,
         imageModelOrder, setImageModelOrder,
+        imageRetryAttempts, setImageRetryAttempts,
         imageAspect, setImageAspect,
         imageSize, setImageSize,
         navyImageSize, setNavyImageSize,

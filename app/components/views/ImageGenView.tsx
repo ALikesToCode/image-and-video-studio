@@ -104,6 +104,8 @@ export function ImageGenView() {
                             setImagePipelineEnabled={context.setImagePipelineEnabled}
                             imageModelOrder={context.imageModelOrder}
                             setImageModelOrder={context.setImageModelOrder}
+                            imageRetryAttempts={context.imageRetryAttempts}
+                            setImageRetryAttempts={context.setImageRetryAttempts}
                             imageAspect={context.imageAspect}
                             setImageAspect={context.setImageAspect}
                             imageSize={context.imageSize}
@@ -174,6 +176,8 @@ export function ImageGenView() {
                             setImagePipelineEnabled={context.setImagePipelineEnabled}
                             imageModelOrder={context.imageModelOrder}
                             setImageModelOrder={context.setImageModelOrder}
+                            imageRetryAttempts={context.imageRetryAttempts}
+                            setImageRetryAttempts={context.setImageRetryAttempts}
                             imageAspect={context.imageAspect}
                             setImageAspect={context.setImageAspect}
                             imageSize={context.imageSize}

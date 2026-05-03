@@ -13,6 +13,7 @@ import {
   resolveToolArguments,
   resolveRequestedImageModels,
   runImageModelFallbackSequence,
+  runImageModelPipelineParallel,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   shouldOmitToolChoiceForModel,
@@ -593,6 +594,72 @@ test("Image model fallback sequence returns all errors when every model fails", 
     "gpt-image-2",
     "flux",
   ]);
+});
+
+test("Image model parallel pipeline starts ordered models before waiting", async () => {
+  let releaseFirstModel: () => void = () => {};
+  const firstModelGate = new Promise<void>((resolve) => {
+    releaseFirstModel = resolve;
+  });
+  const calls: string[] = [];
+
+  const resultPromise = runImageModelPipelineParallel({
+    models: ["gpt-image-2", "flux"],
+    maxAttempts: 1,
+    runModel: async (model) => {
+      calls.push(model);
+      if (model === "gpt-image-2") {
+        await firstModelGate;
+      }
+      return [`image:${model}`];
+    },
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(calls, ["gpt-image-2", "flux"]);
+  releaseFirstModel();
+
+  const result = await resultPromise;
+  assert.equal(result.status, "fulfilled");
+  assert.deepEqual(
+    result.values.map((entry) => entry.model),
+    ["gpt-image-2", "flux"]
+  );
+  assert.deepEqual(
+    result.values.flatMap((entry) => entry.value),
+    ["image:gpt-image-2", "image:flux"]
+  );
+});
+
+test("Image model parallel pipeline retries each failed model up to the configured tries", async () => {
+  const calls: string[] = [];
+
+  const result = await runImageModelPipelineParallel({
+    models: ["gpt-image-2", "flux"],
+    maxAttempts: 4,
+    runModel: async (model) => {
+      calls.push(model);
+      const modelCalls = calls.filter((entry) => entry === model).length;
+      if (model === "gpt-image-2" && modelCalls < 4) {
+        throw new Error(`temporary failure ${modelCalls}`);
+      }
+      return [`image:${model}:${modelCalls}`];
+    },
+  });
+
+  assert.equal(result.status, "fulfilled");
+  assert.deepEqual(
+    calls.filter((entry) => entry === "gpt-image-2"),
+    ["gpt-image-2", "gpt-image-2", "gpt-image-2", "gpt-image-2"]
+  );
+  assert.deepEqual(
+    calls.filter((entry) => entry === "flux"),
+    ["flux"]
+  );
+  assert.deepEqual(
+    result.values.map((entry) => entry.value),
+    [["image:gpt-image-2:4"], ["image:flux:1"]]
+  );
 });
 
 test("Chat image assets preserve per-image model labels", () => {

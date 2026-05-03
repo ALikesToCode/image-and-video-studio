@@ -56,6 +56,8 @@ interface ImgGenSettingsProps {
     setImageModelOrder: (
         value: string[] | ((prev: string[]) => string[])
     ) => void;
+    imageRetryAttempts: number;
+    setImageRetryAttempts: (value: number) => void;
     chutesGuidanceScale: string;
     setChutesGuidanceScale: (v: string) => void;
     chutesWidth: string;
@@ -125,6 +127,8 @@ export function ImgGenSettings({
     setImagePipelineEnabled,
     imageModelOrder,
     setImageModelOrder,
+    imageRetryAttempts,
+    setImageRetryAttempts,
     navyImageSize = AUTO_IMAGE_OPTION,
     setNavyImageSize,
     navyImageQuality = "medium",
@@ -571,6 +575,24 @@ export function ImgGenSettings({
                                 </Select>
                             </div>
                         )}
+                        <div className="space-y-2">
+                            <Label>Tries per model</Label>
+                            <Select
+                                value={imageRetryAttempts.toString()}
+                                onValueChange={(value) => setImageRetryAttempts(parseInt(value))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {[1, 2, 3, 4].map((attempts) => (
+                                        <SelectItem key={attempts} value={attempts.toString()}>
+                                            {attempts}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
                 )}
 

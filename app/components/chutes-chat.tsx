@@ -63,7 +63,7 @@ import {
   repairImageToolArguments,
   resolveToolArguments,
   resolveRequestedImageModels,
-  runImageModelFallbackSequence,
+  runImageModelPipelineParallel,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   stripHeavyMediaFromMessagesForStorage,
@@ -74,6 +74,7 @@ import {
   buildProviderPolicyHintForImageModels,
   isLikelyImagePolicyError,
   isFluxModel,
+  normalizeImageRetryAttempts,
   prepareImageModelRequests,
   resolveNavyChatImageSizing,
   summarizeImageModelPrompts,
@@ -118,6 +119,8 @@ type ChutesChatProps = {
   setImagePipelineEnabled: (value: boolean) => void;
   imageModelOrder: string[];
   setImageModelOrder: React.Dispatch<React.SetStateAction<string[]>>;
+  imageRetryAttempts: number;
+  setImageRetryAttempts: (value: number) => void;
   onRefreshModels?: () => void;
   modelsLoading?: boolean;
   modelsError?: string | null;
@@ -432,6 +435,8 @@ export function ChutesChat({
   setImagePipelineEnabled,
   imageModelOrder,
   setImageModelOrder,
+  imageRetryAttempts,
+  setImageRetryAttempts,
   onRefreshModels,
   modelsLoading,
   modelsError,
@@ -1306,6 +1311,8 @@ ${defaultPrompt}`;
     onModelProgress?: (update: {
       model: string;
       status: "running" | "success" | "error";
+      attempt?: number;
+      maxAttempts?: number;
       prompt?: string;
       images?: ChatImageAsset[];
       error?: string;
@@ -1508,13 +1515,11 @@ ${defaultPrompt}`;
       }
     };
 
-    const attemptedModels: string[] = [];
-    const result = await runImageModelFallbackSequence({
+    const normalizedRetryAttempts = normalizeImageRetryAttempts(imageRetryAttempts);
+    const result = await runImageModelPipelineParallel({
       models: modelsToRun,
-      runModel: async (targetModel) => {
-        attemptedModels.push(targetModel);
-        return await invokeImageModel(targetModel);
-      },
+      maxAttempts: normalizedRetryAttempts,
+      runModel: invokeImageModel,
       onUpdate: (update) => {
         const targetModel = update.model;
         const request = imageRequestByModel.get(targetModel);
@@ -1524,6 +1529,8 @@ ${defaultPrompt}`;
           onModelProgress?.({
             model: targetModel,
             status: "running",
+            attempt: update.attempt,
+            maxAttempts: update.maxAttempts,
             prompt: promptForModel,
           });
           return;
@@ -1532,6 +1539,8 @@ ${defaultPrompt}`;
           onModelProgress?.({
             model: targetModel,
             status: "success",
+            attempt: update.attempt,
+            maxAttempts: update.maxAttempts,
             prompt: promptForModel,
             images: update.value,
           });
@@ -1546,35 +1555,39 @@ ${defaultPrompt}`;
           onModelProgress?.({
             model: targetModel,
             status: "error",
+            attempt: update.attempt,
+            maxAttempts: update.maxAttempts,
             prompt: promptForModel,
             error: message,
           });
         }
       },
     });
-    const parsedImages = result.status === "fulfilled" ? result.value : [];
-    const errors = result.errors.map(({ model, reason }) => {
+    const parsedImages =
+      result.status === "fulfilled"
+        ? result.values.flatMap((entry) => entry.value)
+        : [];
+    const errors = result.errors.map(({ model, reason, attempts }) => {
       const message =
         reason instanceof Error
           ? reason.message
           : "Image generation failed.";
-      return `${model}: ${message}`;
+      return `${model}: ${message} after ${attempts} ${attempts === 1 ? "try" : "tries"}`;
     });
 
     if (!parsedImages.length) {
       throw new Error(errors.join(" | ") || "No usable images returned by tool.");
     }
 
-    const attemptedRequests = imageRequests.filter((request) =>
-      attemptedModels.includes(request.model)
-    );
+    const successfulModels =
+      result.status === "fulfilled"
+        ? result.values.map((entry) => entry.model)
+        : [];
 
     return {
       images: parsedImages,
-      model: result.status === "fulfilled" ? result.model : modelsToRun.join(", "),
-      prompt: summarizeImageModelPrompts(
-        attemptedRequests.length ? attemptedRequests : imageRequests
-      ),
+      model: successfulModels.length ? successfulModels.join(", ") : modelsToRun.join(", "),
+      prompt: summarizeImageModelPrompts(imageRequests),
       errors,
     };
   };
@@ -1950,12 +1963,16 @@ ${defaultPrompt}`;
         if (toolName === "generate_image") {
           const result = await runGenerateImage(args, context, (update) => {
             const imageCount = update.images?.length ?? 0;
+            const attemptLabel =
+              update.maxAttempts && update.maxAttempts > 1 && update.attempt
+                ? ` (try ${update.attempt}/${update.maxAttempts})`
+                : "";
             const content =
               update.status === "running"
-                ? `Generating image with ${update.model}...`
+                ? `Generating image with ${update.model}${attemptLabel}...`
                 : update.status === "success"
                   ? `Generated ${imageCount} image${imageCount === 1 ? "" : "s"} with ${update.model}.`
-                  : `Image generation failed with ${update.model}: ${update.error ?? "Unknown error."}`;
+                  : `Image generation failed with ${update.model}${attemptLabel}: ${update.error ?? "Unknown error."}`;
             onProgress?.({
               id: `${toolCall.id}:image:${update.model}`,
               role: "tool",
@@ -2388,7 +2405,8 @@ ${defaultPrompt}`;
                     <div>
                       <div className="text-sm font-medium">Enable ordered pipeline</div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        When enabled, chat image generation tries this order until one succeeds. If the tool chooses a model, that model is tried first, then this order continues.
+                        When enabled, chat image generation runs selected models in parallel. If the tool
+                        chooses a model, that model is ordered first.
                       </p>
                     </div>
                     <input
@@ -2398,6 +2416,25 @@ ${defaultPrompt}`;
                       className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                     />
                   </label>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Tries per model</div>
+                    <Select
+                      value={imageRetryAttempts.toString()}
+                      onValueChange={(value) => setImageRetryAttempts(parseInt(value))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 4].map((attempts) => (
+                          <SelectItem key={attempts} value={attempts.toString()}>
+                            {attempts}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
                   <div className="space-y-2">
                     {imageModels.map((suggestion) => {
@@ -2461,7 +2498,7 @@ ${defaultPrompt}`;
                   <p className="text-xs text-muted-foreground">
                     {imagePipelineEnabled
                       ? orderedToolImageModels.length
-                        ? `Chat will prefer ${orderedToolImageModels.length} image model${orderedToolImageModels.length === 1 ? "" : "s"} in order and keep trying until one succeeds.`
+                        ? `Chat will run ${orderedToolImageModels.length} image model${orderedToolImageModels.length === 1 ? "" : "s"} in parallel with ${imageRetryAttempts} tries each.`
                         : "No extra models selected yet. Chat falls back to the default image model."
                       : "Pipeline is disabled. Chat uses the single selected image model only."}
                   </p>

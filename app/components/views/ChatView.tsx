@@ -37,6 +37,8 @@ export function ChatView({ initialInput }: ChatViewProps) {
         setImagePipelineEnabled,
         imageModelOrder,
         setImageModelOrder,
+        imageRetryAttempts,
+        setImageRetryAttempts,
         videoImage,
         videoAspect,
         videoDuration,
@@ -105,6 +107,8 @@ export function ChatView({ initialInput }: ChatViewProps) {
                 setImagePipelineEnabled={setImagePipelineEnabled}
                 imageModelOrder={imageModelOrder}
                 setImageModelOrder={setImageModelOrder}
+                imageRetryAttempts={imageRetryAttempts}
+                setImageRetryAttempts={setImageRetryAttempts}
                 modelsLoading={modelsLoading}
                 modelsError={modelsError}
                 onRefreshModels={onRefreshModels}
