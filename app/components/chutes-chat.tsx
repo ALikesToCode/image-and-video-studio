@@ -72,6 +72,7 @@ import {
 import {
   buildSaferImagePromptForModel,
   buildProviderPolicyHintForImageModels,
+  buildImagePolicyRecoveryPrompt,
   isLikelyImagePolicyError,
   isFluxModel,
   normalizeImageRetryAttempts,
@@ -1250,6 +1251,139 @@ ${defaultPrompt}`;
     };
   };
 
+  const readAssistantTextResponse = async (response: Response) => {
+    if (!response.body) {
+      throw new Error("No response body.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let contentAcc = "";
+    let rawAcc = "";
+    const parser = createParser({
+      onEvent: (event: EventSourceMessage) => {
+        if (event.data === "[DONE]") return;
+        try {
+          const json = JSON.parse(event.data);
+          const choice = json.choices?.[0];
+          const delta =
+            choice?.delta && typeof choice.delta === "object"
+              ? (choice.delta as Record<string, unknown>)
+              : null;
+          const message =
+            choice?.message && typeof choice.message === "object"
+              ? (choice.message as Record<string, unknown>)
+              : null;
+          contentAcc +=
+            extractTextFragment(delta?.content) ||
+            extractTextFragment(message?.content) ||
+            "";
+        } catch {
+          // Ignore malformed stream chunks; callers fall back if no text arrives.
+        }
+      },
+    });
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        rawAcc += chunk;
+        parser.feed(chunk);
+      }
+      const finalChunk = decoder.decode();
+      if (finalChunk) {
+        rawAcc += finalChunk;
+        parser.feed(finalChunk);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (contentAcc.trim()) return contentAcc.trim();
+    const raw = rawAcc.trim();
+    if (!raw.startsWith("{")) return "";
+    try {
+      const json = JSON.parse(raw);
+      return extractTextFragment(json?.choices?.[0]?.message?.content).trim();
+    } catch {
+      return "";
+    }
+  };
+
+  const normalizeRecoveredImagePrompt = (value: string) => {
+    const trimmed = value
+      .trim()
+      .replace(/^```(?:text|markdown)?\s*/i, "")
+      .replace(/```$/i, "")
+      .replace(/^(?:final\s+)?(?:rewritten\s+)?(?:image\s+)?prompt\s*:\s*/i, "")
+      .trim();
+    if (trimmed.length < 12) return "";
+    if (/\b(?:i can(?:not|'t)|sorry|unable to)\b/i.test(trimmed)) return "";
+    return trimmed;
+  };
+
+  const recoverImagePromptAfterPolicyFailure = async ({
+    targetModel,
+    currentPrompt,
+    errorMessage,
+    nextAttempt,
+    maxAttempts,
+  }: {
+    targetModel: string;
+    currentPrompt: string;
+    errorMessage: string;
+    nextAttempt: number;
+    maxAttempts: number;
+  }) => {
+    const fallbackPrompt = buildSaferImagePromptForModel(targetModel, currentPrompt);
+    const recoveryInstruction = buildImagePolicyRecoveryPrompt({
+      model: targetModel,
+      prompt: currentPrompt,
+      errorMessage,
+      nextAttempt,
+      maxAttempts,
+    });
+
+    try {
+      const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You rewrite image-generation prompts after provider moderation rejections. Return only one direct image prompt. Preserve the requested artistic medium, composition, mood, lighting, camera/framing, and quality level while removing unsafe details.",
+            },
+            { role: "user", content: recoveryInstruction },
+          ],
+          toolChoice: "none",
+          maxTokens: 700,
+          temperature: 0.2,
+          ...(isDeepSeekV4ChatModel
+            ? {
+                thinking: { type: "disabled" },
+              }
+            : {}),
+        }),
+      });
+      if (!response.ok) return fallbackPrompt;
+      return (
+        normalizeRecoveredImagePrompt(await readAssistantTextResponse(response)) ||
+        fallbackPrompt
+      );
+    } catch {
+      return fallbackPrompt;
+    }
+  };
+
   const getStringArg = (args: Record<string, unknown>, keys: string[]) => {
     for (const key of keys) {
       const value = args[key];
@@ -1310,7 +1444,7 @@ ${defaultPrompt}`;
     context?: { assistantContent: string; userPrompt: string },
     onModelProgress?: (update: {
       model: string;
-      status: "running" | "success" | "error";
+      status: "running" | "rewriting" | "success" | "error";
       attempt?: number;
       maxAttempts?: number;
       prompt?: string;
@@ -1383,7 +1517,10 @@ ${defaultPrompt}`;
     const imageRequestByModel = new Map(
       imageRequests.map((request) => [request.model, request])
     );
-    const invokeImageModel = async (targetModel: string) => {
+    const invokeImageModel = async (
+      targetModel: string,
+      state: { attempt: number; maxAttempts: number }
+    ) => {
       const request = imageRequestByModel.get(targetModel);
       if (!request) {
         throw new Error(`Image model ${targetModel} is not prepared.`);
@@ -1501,17 +1638,32 @@ ${defaultPrompt}`;
         const message = error instanceof Error ? error.message : "Image tool failed.";
         const currentPrompt =
           typeof request.body.prompt === "string" ? request.body.prompt : prompt;
-        const retryPrompt = buildSaferImagePromptForModel(targetModel, currentPrompt);
-        const shouldRetry =
-          retryPrompt !== currentPrompt &&
-          isLikelyImagePolicyError(message) &&
-          (provider !== "navy" || message.startsWith("Async image job failed:"));
-        if (!shouldRetry) {
+        const shouldRecoverPrompt =
+          state.attempt < state.maxAttempts && isLikelyImagePolicyError(message);
+        if (!shouldRecoverPrompt) {
           throw error;
         }
-        request.prompt = retryPrompt;
-        request.body.prompt = retryPrompt;
-        return await executeRequest();
+
+        onModelProgress?.({
+          model: targetModel,
+          status: "rewriting",
+          attempt: state.attempt + 1,
+          maxAttempts: state.maxAttempts,
+          prompt: currentPrompt,
+          error: message,
+        });
+        const retryPrompt = await recoverImagePromptAfterPolicyFailure({
+          targetModel,
+          currentPrompt,
+          errorMessage: message,
+          nextAttempt: state.attempt + 1,
+          maxAttempts: state.maxAttempts,
+        });
+        if (retryPrompt && retryPrompt !== currentPrompt) {
+          request.prompt = retryPrompt;
+          request.body.prompt = retryPrompt;
+        }
+        throw error;
       }
     };
 
@@ -1970,9 +2122,11 @@ ${defaultPrompt}`;
             const content =
               update.status === "running"
                 ? `Generating image with ${update.model}${attemptLabel}...`
-                : update.status === "success"
-                  ? `Generated ${imageCount} image${imageCount === 1 ? "" : "s"} with ${update.model}.`
-                  : `Image generation failed with ${update.model}${attemptLabel}: ${update.error ?? "Unknown error."}`;
+                : update.status === "rewriting"
+                  ? `Rephrasing prompt for ${update.model}${attemptLabel} after safety rejection...`
+                  : update.status === "success"
+                    ? `Generated ${imageCount} image${imageCount === 1 ? "" : "s"} with ${update.model}.`
+                    : `Image generation failed with ${update.model}${attemptLabel}: ${update.error ?? "Unknown error."}`;
             onProgress?.({
               id: `${toolCall.id}:image:${update.model}`,
               role: "tool",

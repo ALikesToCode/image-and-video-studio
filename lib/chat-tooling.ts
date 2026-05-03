@@ -672,6 +672,11 @@ type ImageModelPipelineSettled<T> =
       attempts: number;
     };
 
+type ImageModelPipelineRunState = {
+  attempt: number;
+  maxAttempts: number;
+};
+
 export const runImageModelFallbackSequence = async <T>({
   models,
   runModel,
@@ -714,7 +719,7 @@ export const runImageModelPipelineParallel = async <T>({
 }: {
   models: string[];
   maxAttempts: unknown;
-  runModel: (model: string) => Promise<T>;
+  runModel: (model: string, state: ImageModelPipelineRunState) => Promise<T>;
   onUpdate?: (update: ImageModelPipelineUpdate<T>) => void;
 }): Promise<
   | {
@@ -741,7 +746,7 @@ export const runImageModelPipelineParallel = async <T>({
               maxAttempts: attempts,
             });
           },
-          run: async () => await runModel(model),
+          run: async (state) => await runModel(model, state),
           onError: ({ attempt, maxAttempts: attempts, error, final }) => {
             lastAttempt = attempt;
             if (!final) return;

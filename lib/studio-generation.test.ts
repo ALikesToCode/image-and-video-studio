@@ -8,8 +8,10 @@ import {
   buildProviderPolicyHintForImageModels,
   buildGeminiImagePayload,
   buildGeminiVideoPayload,
+  buildImagePolicyRecoveryPrompt,
   buildNavyImageGenerationPayload,
   buildOpenRouterImagePayload,
+  extractImagePolicyViolationCategories,
   buildChutesChatSystemPrompt,
   extractOpenRouterImageModels,
   getActiveJobCount,
@@ -542,6 +544,29 @@ test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompt
   assert.match(geminiPrompt, /child-safety/i);
   assert.equal(fluxPrompt, "Create a provocative nightclub editorial portrait.");
   assert.equal(isLikelyImagePolicyError("blocked by image safety policy"), true);
+});
+
+test("Policy rejection recovery prompt preserves medium while targeting flagged categories", () => {
+  const errorMessage =
+    "Your request was rejected by the safety system. safety_violations=[sexual].";
+
+  assert.deepEqual(extractImagePolicyViolationCategories(errorMessage), [
+    "sexual",
+  ]);
+
+  const recoveryPrompt = buildImagePolicyRecoveryPrompt({
+    model: "gpt-image-2",
+    prompt: "Anime watercolor portrait of an adult nightclub singer in dramatic teal lighting.",
+    errorMessage,
+    nextAttempt: 2,
+    maxAttempts: 4,
+  });
+
+  assert.match(recoveryPrompt, /try 2\/4/i);
+  assert.match(recoveryPrompt, /sexual/i);
+  assert.match(recoveryPrompt, /preserve.*art medium/i);
+  assert.match(recoveryPrompt, /watercolor portrait/i);
+  assert.match(recoveryPrompt, /do not mention.*safety/i);
 });
 
 test("Policy-sensitive OpenAI and Gemini prompts remain unchanged before the first request", () => {

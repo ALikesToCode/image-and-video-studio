@@ -633,11 +633,13 @@ test("Image model parallel pipeline starts ordered models before waiting", async
 
 test("Image model parallel pipeline retries each failed model up to the configured tries", async () => {
   const calls: string[] = [];
+  const attempts: Array<{ model: string; attempt: number; maxAttempts: number }> = [];
 
   const result = await runImageModelPipelineParallel({
     models: ["gpt-image-2", "flux"],
     maxAttempts: 4,
-    runModel: async (model) => {
+    runModel: async (model, state) => {
+      attempts.push({ model, attempt: state.attempt, maxAttempts: state.maxAttempts });
       calls.push(model);
       const modelCalls = calls.filter((entry) => entry === model).length;
       if (model === "gpt-image-2" && modelCalls < 4) {
@@ -659,6 +661,15 @@ test("Image model parallel pipeline retries each failed model up to the configur
   assert.deepEqual(
     result.values.map((entry) => entry.value),
     [["image:gpt-image-2:4"], ["image:flux:1"]]
+  );
+  assert.deepEqual(
+    attempts.filter((entry) => entry.model === "gpt-image-2"),
+    [
+      { model: "gpt-image-2", attempt: 1, maxAttempts: 4 },
+      { model: "gpt-image-2", attempt: 2, maxAttempts: 4 },
+      { model: "gpt-image-2", attempt: 3, maxAttempts: 4 },
+      { model: "gpt-image-2", attempt: 4, maxAttempts: 4 },
+    ]
   );
 });
 

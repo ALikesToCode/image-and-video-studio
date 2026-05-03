@@ -363,6 +363,113 @@ export const isLikelyImagePolicyError = (message: string) =>
     message,
   );
 
+const IMAGE_POLICY_CATEGORIES = [
+  "sexual/minors",
+  "sexual",
+  "violence/graphic",
+  "violence",
+  "self-harm/instructions",
+  "self-harm/intent",
+  "self-harm",
+  "harassment/threatening",
+  "harassment",
+  "hate/threatening",
+  "hate",
+  "illicit/violent",
+  "illicit",
+] as const;
+
+const IMAGE_POLICY_CATEGORY_GUIDANCE: Record<string, string> = {
+  sexual:
+    "remove sexual arousal framing, explicit sexual activity, fetishized anatomy, eroticized posing, and intimate body-part focus",
+  "sexual/minors":
+    "remove any sexualization and any age ambiguity; use clearly adult subjects only when people are relevant",
+  violence:
+    "remove depictions of injury, death, gore, or physical harm while preserving cinematic tension through lighting and composition",
+  "violence/graphic":
+    "remove gore, wounds, blood detail, dismemberment, and graphic injury while preserving non-graphic cinematic atmosphere",
+  "self-harm":
+    "remove self-harm depiction or encouragement while preserving mood through safe visual symbolism",
+  "self-harm/intent":
+    "remove intent to self-harm and show a safe, supported scene instead",
+  "self-harm/instructions":
+    "remove instructions or actionable self-harm details entirely",
+  harassment:
+    "remove harassing or demeaning language while preserving neutral character dynamics",
+  "harassment/threatening":
+    "remove threats and violent intimidation while preserving non-threatening dramatic tension",
+  hate: "remove hateful references to protected traits while preserving neutral worldbuilding details",
+  "hate/threatening":
+    "remove hateful threats and protected-class targeting while preserving non-hateful conflict only if needed",
+  illicit:
+    "remove instructions or facilitation of illicit acts while preserving lawful scene context",
+  "illicit/violent":
+    "remove violent illicit instructions, weapons procurement, or facilitation details while preserving safe visual context",
+};
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export const extractImagePolicyViolationCategories = (message: string) => {
+  const categories = new Set<string>();
+  const lowered = message.toLowerCase();
+  for (const match of lowered.matchAll(
+    /(?:safety_violations|policy_violations|violations|categories)\s*[:=]\s*\[([^\]]+)\]/g,
+  )) {
+    const rawCategories = match[1] ?? "";
+    for (const rawCategory of rawCategories.split(/[,|]/)) {
+      const category = rawCategory.replace(/['"`]/g, "").trim();
+      if (IMAGE_POLICY_CATEGORIES.includes(category as typeof IMAGE_POLICY_CATEGORIES[number])) {
+        categories.add(category);
+      }
+    }
+  }
+
+  for (const category of IMAGE_POLICY_CATEGORIES) {
+    const pattern = new RegExp(`(^|[^a-z0-9_/-])${escapeRegExp(category)}([^a-z0-9_/-]|$)`, "i");
+    if (pattern.test(message)) {
+      categories.add(category);
+    }
+  }
+
+  return Array.from(categories);
+};
+
+export const buildImagePolicyRecoveryPrompt = ({
+  model,
+  prompt,
+  errorMessage,
+  nextAttempt,
+  maxAttempts,
+}: {
+  model: string;
+  prompt: string;
+  errorMessage: string;
+  nextAttempt: number;
+  maxAttempts: number;
+}) => {
+  const categories = extractImagePolicyViolationCategories(errorMessage);
+  const categoryLabel = categories.length ? categories.join(", ") : "unknown";
+  const categoryGuidance = categories
+    .map((category) => IMAGE_POLICY_CATEGORY_GUIDANCE[category])
+    .filter(Boolean);
+  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
+  const saferPrompt = supportsSaferImagePromptRetry(model)
+    ? buildSaferImagePromptForModel(model, normalizedPrompt)
+    : normalizedPrompt;
+
+  return `Rewrite this image prompt for ${model} after a provider safety rejection (try ${nextAttempt}/${maxAttempts}).
+Flagged moderation categories: ${categoryLabel}.
+${categoryGuidance.length ? `Category-specific changes: ${categoryGuidance.join("; ")}.` : "Remove any likely unsafe, explicit, graphic, coercive, minor-related, or prohibited details."}
+
+Preserve the art medium, genre, composition, subject identity, non-explicit outfit concept, lighting, camera/framing, palette, mood, and quality level.
+Remove or neutralize the unsafe parts without replacing the requested style with a generic safe image.
+Return only the final rewritten image prompt. Do not mention policy, moderation, safety systems, provider errors, blocked categories, or request IDs in the final prompt.
+
+Prompt to rewrite:
+${saferPrompt}`;
+};
+
 export const buildSaferImagePromptForModel = (
   model: string,
   prompt: string,
