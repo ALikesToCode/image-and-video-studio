@@ -1652,8 +1652,6 @@ ${defaultPrompt}`;
       if (!videoUrl) {
         throw new Error("Video generation timed out before a result was available.");
       }
-      let resolvedVideoUrl = videoUrl;
-      let resolvedMimeType = "video/mp4";
       const downloadResponse = await fetch("/api/navy/video/download", {
         method: "POST",
         headers: {
@@ -1662,11 +1660,21 @@ ${defaultPrompt}`;
         },
         body: JSON.stringify({ url: videoUrl }),
       });
-      if (downloadResponse.ok) {
-        const blob = await downloadResponse.blob();
-        resolvedMimeType = blob.type || "video/mp4";
-        resolvedVideoUrl = await blobToDataUrl(blob);
+      if (!downloadResponse.ok) {
+        let message = "Unable to download generated video.";
+        try {
+          const payload = await downloadResponse.json();
+          if (typeof payload?.error === "string" && payload.error) {
+            message = payload.error;
+          }
+        } catch {
+          // Keep the concise fallback when the route returns a non-JSON error.
+        }
+        throw new Error(message);
       }
+      const blob = await downloadResponse.blob();
+      const resolvedMimeType = blob.type || "video/mp4";
+      const resolvedVideoUrl = await blobToDataUrl(blob);
       return {
         media: [
           {

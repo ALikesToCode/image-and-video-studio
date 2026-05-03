@@ -175,18 +175,15 @@ export async function safeFetchExternalMedia(
       throw new Error("Unable to download media.");
     }
 
-    if (
-      !isAllowedContentType(
-        response.headers.get("content-type"),
-        options.allowedContentTypes
-      )
-    ) {
-      throw new Error("Unexpected media content type.");
+    const contentType = response.headers.get("content-type");
+    if (!isAllowedContentType(contentType, options.allowedContentTypes)) {
+      throw new Error(
+        `Unexpected media content type: ${contentType ?? "unknown"}.`
+      );
     }
 
     const body = await readBoundedBody(response, options.maxBytes);
     const headers = new Headers();
-    const contentType = response.headers.get("content-type");
     if (contentType) headers.set("Content-Type", contentType);
     headers.set("Content-Length", String(body.byteLength));
     return new Response(body, {

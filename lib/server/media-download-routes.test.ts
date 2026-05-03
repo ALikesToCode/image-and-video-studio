@@ -128,6 +128,42 @@ test("Navy video download route sends bearer only to Navy hosts", async () => {
   }
 });
 
+test("Navy video download route downloads Replicate-hosted videos without bearer", async () => {
+  const originalFetch = globalThis.fetch;
+  let authorization: string | null = null;
+  let fetchedUrl = "";
+  globalThis.fetch = async (input, init) => {
+    fetchedUrl = input instanceof Request ? input.url : String(input);
+    authorization = new Headers(init?.headers).get("authorization");
+    return new Response(new Uint8Array([3, 4]), {
+      headers: { "content-type": "video/mp4", "content-length": "2" },
+    });
+  };
+
+  try {
+    const response = await navyVideoDownload(
+      new Request("https://studio.test/api/navy/video/download", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          url: "https://replicate.delivery/xezq/generated.mp4",
+        }),
+      })
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(fetchedUrl, "https://replicate.delivery/xezq/generated.mp4");
+    assert.equal(authorization, null);
+    assert.equal(response.headers.get("content-type"), "video/mp4");
+    assert.equal((await response.arrayBuffer()).byteLength, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route downloads generated CDN URLs server-side", async () => {
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; authorization: string | null }> = [];
@@ -547,6 +583,49 @@ test("Navy image route accepts direct result URLs from async jobs", async () => 
     assert.deepEqual(calls, [
       "https://api.navy/v1/images/generations/job_direct_url",
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy image route explains when async job returns video media", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url === "https://api.navy/v1/images/generations/job_video_url") {
+      return Response.json({
+        id: "job_video_url",
+        status: "completed",
+        result: {
+          data: [{ url: "https://replicate.delivery/xezq/generated.mp4" }],
+        },
+      });
+    }
+
+    if (url === "https://replicate.delivery/xezq/generated.mp4") {
+      return new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "video/mp4" },
+      });
+    }
+
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const response = await navyImageGet(
+      new Request("https://studio.test/api/navy/image?id=job_video_url", {
+        headers: {
+          "x-user-api-key": "navy-secret",
+        },
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.equal(
+      payload.error,
+      "NavyAI returned a video file for this image request. Switch to Video mode or choose an image-capable NavyAI model."
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

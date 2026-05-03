@@ -1570,8 +1570,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(errText || "Failed to generate video");
+                let message = "Failed to generate video";
+                const errorContentType = response.headers.get("content-type") ?? "";
+                if (errorContentType.includes("application/json")) {
+                    try {
+                        message = errorMessageFromPayload(await response.json(), message);
+                    } catch {
+                        // Keep the concise fallback when the route returns invalid JSON.
+                    }
+                } else {
+                    const errText = await response.text();
+                    message = errText || message;
+                }
+                throw new Error(message);
             }
 
             const contentType = response.headers.get("content-type") ?? "";

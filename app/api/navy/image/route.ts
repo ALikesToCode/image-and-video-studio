@@ -17,6 +17,7 @@ import {
   isNavyGenerationPending,
   supportsSaferImagePromptRetry,
 } from "@/lib/studio-generation";
+import { NAVY_MEDIA_HOSTS } from "@/lib/server/navy-media";
 
 type ImageRequest = {
   apiKey?: string;
@@ -44,17 +45,6 @@ type NavyImagePayload = {
   model?: string;
 };
 
-const NAVY_IMAGE_MEDIA_HOSTS = [
-  "api.navy",
-  ".api.navy",
-  "api.together.ai",
-  "replicate.delivery",
-  ".replicate.delivery",
-  ".blob.core.windows.net",
-  "storage.googleapis.com",
-  ".storage.googleapis.com",
-  ".googleusercontent.com",
-];
 const retryAfterMs = (response: Response, fallbackMs = 8_000) => {
   const retryAfter = response.headers.get("retry-after");
   if (!retryAfter) return fallbackMs;
@@ -156,6 +146,93 @@ const contentTypeFromRecord = (record: Record<string, unknown>) =>
       ? record.mime_type
       : "image/png";
 
+const normalizedContentType = (value: string) =>
+  value.split(";")[0]?.trim().toLowerCase() ?? "";
+
+const nonImageMediaKindFromContentType = (value: string | null | undefined) => {
+  if (!value) return null;
+  const contentType = normalizedContentType(value);
+  if (contentType.startsWith("video/")) return "video";
+  if (contentType.startsWith("audio/")) return "audio";
+  return null;
+};
+
+const nonImageMediaKindFromUrl = (value: string | null | undefined) => {
+  if (!value) return null;
+  const dataUrlMediaType = /^data:([^;,]+)/i.exec(value.trim())?.[1];
+  const dataUrlMediaKind = nonImageMediaKindFromContentType(dataUrlMediaType);
+  if (dataUrlMediaKind) return dataUrlMediaKind;
+  try {
+    const pathname = new URL(value).pathname.toLowerCase();
+    if (/\.(?:mp4|m4v|mov|webm|mpeg|mpg|avi|mkv)$/.test(pathname)) {
+      return "video";
+    }
+    if (/\.(?:mp3|mpeg|wav|m4a|aac|flac|ogg|opus)$/.test(pathname)) {
+      return "audio";
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const nonImageMediaErrorMessage = (kind: string) =>
+  `NavyAI returned a ${kind} file for this image request. Switch to ${kind === "video" ? "Video" : "Audio"} mode or choose an image-capable NavyAI model.`;
+
+const nonImageMediaKindFromRecord = (record: Record<string, unknown>) => {
+  const contentType =
+    typeof record.mimeType === "string"
+      ? record.mimeType
+      : typeof record.mime_type === "string"
+        ? record.mime_type
+        : typeof record.contentType === "string"
+          ? record.contentType
+          : typeof record.content_type === "string"
+            ? record.content_type
+            : null;
+  const mediaKind = nonImageMediaKindFromContentType(contentType);
+  if (mediaKind) return mediaKind;
+
+  const url =
+    typeof record.video_url === "string"
+      ? record.video_url
+      : typeof record.audio_url === "string"
+        ? record.audio_url
+        : typeof record.url === "string"
+          ? record.url
+          : null;
+  return nonImageMediaKindFromUrl(url);
+};
+
+const nonImageMediaKindFromNavyRecord = (record: Record<string, unknown>) => {
+  const result =
+    record.result && typeof record.result === "object"
+      ? (record.result as Record<string, unknown>)
+      : record;
+  const records = [record, result];
+  for (const field of ["data", "images"]) {
+    const items = Array.isArray(result[field]) ? result[field] : [];
+    for (const item of items) {
+      if (item && typeof item === "object") {
+        records.push(item as Record<string, unknown>);
+      }
+    }
+  }
+  for (const item of records) {
+    const mediaKind = nonImageMediaKindFromRecord(item);
+    if (mediaKind) return mediaKind;
+  }
+  return null;
+};
+
+const nonImageMediaKindFromError = (error: unknown) => {
+  if (!(error instanceof Error)) return null;
+  const match = /Unexpected media content type:\s*([^.;]+)/i.exec(
+    error.message
+  );
+  return nonImageMediaKindFromContentType(match?.[1]);
+};
+
 const dataUrlImagePayload = (value: unknown): NavyImagePayload | null => {
   const parsed = parseDataUrl(value, IMAGE_MIME_TYPES);
   if (parsed) {
@@ -174,6 +251,10 @@ const inlineImagePayload = (
   const dataUrlPayload = dataUrlImagePayload(value);
   if (dataUrlPayload) return dataUrlPayload;
   if (typeof value !== "string" || !value) return null;
+  const mediaKind = nonImageMediaKindFromContentType(fallbackMimeType);
+  if (mediaKind) {
+    throw new Error(`Unexpected media content type: ${fallbackMimeType}.`);
+  }
   return {
     data: value,
     mimeType: fallbackMimeType,
@@ -182,7 +263,7 @@ const inlineImagePayload = (
 
 const downloadGeneratedImage = async (url: string): Promise<NavyImagePayload> => {
   const response = await safeFetchExternalMedia(url, {
-    allowedHosts: NAVY_IMAGE_MEDIA_HOSTS,
+    allowedHosts: NAVY_MEDIA_HOSTS,
     allowedContentTypes: ["image/"],
     maxBytes: 50 * 1024 * 1024,
     timeoutMs: 30_000,
@@ -283,12 +364,18 @@ const imageResponsePayload = (
   };
 };
 
-const imageDownloadError = (req: Request) =>
-  janitorAiJsonResponse(
+const imageDownloadError = (req: Request, error?: unknown) => {
+  const mediaKind = nonImageMediaKindFromError(error);
+  return janitorAiJsonResponse(
     req,
-    { error: "Unable to download generated image." },
+    {
+      error: mediaKind
+        ? nonImageMediaErrorMessage(mediaKind)
+        : "Unable to download generated image.",
+    },
     { status: 502 }
   );
+};
 
 const imageJobFailure = (req: Request, data: unknown) =>
   janitorAiJsonResponse(
@@ -406,6 +493,14 @@ export async function POST(req: Request) {
   if (isFailedNavyGenerationStatus(dataRecord.status)) {
     return imageJobFailure(req, data);
   }
+  const mediaKind = nonImageMediaKindFromNavyRecord(dataRecord);
+  if (mediaKind) {
+    return janitorAiJsonResponse(
+      req,
+      { error: nonImageMediaErrorMessage(mediaKind) },
+      { status: 502 }
+    );
+  }
   if (typeof dataRecord.id === "string" && !Array.isArray(dataRecord.data)) {
     return janitorAiJsonResponse(req, {
       id: dataRecord.id,
@@ -416,8 +511,8 @@ export async function POST(req: Request) {
   let images: NavyImagePayload[];
   try {
     images = await normalizeNavyImages(navyImageCandidates(dataRecord));
-  } catch {
-    return imageDownloadError(req);
+  } catch (error) {
+    return imageDownloadError(req, error);
   }
 
   if (!images?.length) {
@@ -483,12 +578,20 @@ export async function GET(req: Request) {
   if (isNavyGenerationPending(typeof dataRecord.status === "string" ? dataRecord.status : null)) {
     return janitorAiJsonResponse(req, { done: false, status: dataRecord.status });
   }
+  const mediaKind = nonImageMediaKindFromNavyRecord(dataRecord);
+  if (mediaKind) {
+    return janitorAiJsonResponse(
+      req,
+      { error: nonImageMediaErrorMessage(mediaKind) },
+      { status: 502 }
+    );
+  }
 
   let images: NavyImagePayload[];
   try {
     images = await normalizeNavyImages(navyImageCandidates(dataRecord));
-  } catch {
-    return imageDownloadError(req);
+  } catch (error) {
+    return imageDownloadError(req, error);
   }
 
   if (!images.length) {

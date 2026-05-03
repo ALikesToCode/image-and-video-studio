@@ -1,9 +1,7 @@
 export const runtime = "edge";
 
 import { safeFetchExternalMedia, validateExternalMediaUrl } from "@/lib/server/safe-fetch";
-
-const shouldAttachNavyAuth = (url: URL) =>
-  url.hostname === "api.navy" || url.hostname.endsWith(".api.navy");
+import { NAVY_MEDIA_HOSTS, shouldAttachNavyAuth } from "@/lib/server/navy-media";
 
 export async function POST(req: Request) {
   let body: { url?: string };
@@ -19,7 +17,7 @@ export async function POST(req: Request) {
   }
   let downloadUrl: URL;
   try {
-    downloadUrl = validateExternalMediaUrl(url, ["api.navy", ".api.navy"]);
+    downloadUrl = validateExternalMediaUrl(url, NAVY_MEDIA_HOSTS);
   } catch {
     return Response.json({ error: "Invalid video URL." }, { status: 400 });
   }
@@ -28,7 +26,7 @@ export async function POST(req: Request) {
   let response: Response;
   try {
     response = await safeFetchExternalMedia(downloadUrl.toString(), {
-      allowedHosts: ["api.navy", ".api.navy"],
+      allowedHosts: NAVY_MEDIA_HOSTS,
       allowedContentTypes: ["video/"],
       maxBytes: 512 * 1024 * 1024,
       timeoutMs: 60_000,
