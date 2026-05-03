@@ -47,10 +47,10 @@
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^10.3.0",
+    "eslint": "^9.39.4",
     "eslint-config-next": "16.2.4",
     "tsx": "^4.21.0",
-    "typescript": "^6",
+    "typescript": "^5.9.3",
     "wrangler": "4.87.0"
   },
   "pnpm": {
