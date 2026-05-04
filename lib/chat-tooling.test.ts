@@ -10,6 +10,7 @@ import {
   isDeepSeekV4Model,
   normalizeDeepSeekReasoningEffort,
   normalizeImageToolModelRequest,
+  normalizeReasoningEffort,
   repairImageToolArguments,
   resolveToolArguments,
   resolveRequestedImageModels,
@@ -244,6 +245,42 @@ test("DeepSeek V4 payloads support max reasoning effort aliases", () => {
 
   assert.deepEqual(payload.thinking, { type: "enabled" });
   assert.equal(payload.reasoning_effort, "max");
+});
+
+test("General Navy reasoning effort supports full documented levels", () => {
+  assert.equal(normalizeReasoningEffort("none"), "none");
+  assert.equal(normalizeReasoningEffort("minimal"), "minimal");
+  assert.equal(normalizeReasoningEffort("low"), "low");
+  assert.equal(normalizeReasoningEffort("medium"), "medium");
+  assert.equal(normalizeReasoningEffort("high"), "high");
+  assert.equal(normalizeReasoningEffort("xhigh"), "xhigh");
+  assert.equal(normalizeReasoningEffort("max"), "xhigh");
+  assert.equal(normalizeReasoningEffort("invalid"), "high");
+
+  const payload = buildChatCompletionPayload({
+    model: "gpt-5.5",
+    messages: [{ role: "user", content: "Think carefully." }],
+    reasoningEffort: "xhigh",
+    temperature: 0.7,
+  });
+
+  assert.equal("thinking" in payload, false);
+  assert.equal(payload.reasoning_effort, "xhigh");
+  assert.equal(payload.temperature, 0.7);
+});
+
+test("Chat recovery can drop unsupported reasoning controls", () => {
+  const payload = buildChatCompletionPayload({
+    model: "gpt-5.5",
+    messages: [{ role: "user", content: "Think carefully." }],
+    reasoningEffort: "xhigh",
+    temperature: 0.7,
+  });
+
+  const recoveries = buildChatCompletionRecoveryPayloads(payload);
+  assert.equal(recoveries[0]?.label, "omit-reasoning-controls");
+  assert.equal("reasoning_effort" in recoveries[0].payload, false);
+  assert.equal(recoveries[0].payload.temperature, 0.7);
 });
 
 test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {

@@ -109,6 +109,21 @@ export const isDeepSeekV4Model = (model: string) => {
 export const normalizeDeepSeekThinkingType = (value: unknown) =>
   value === "disabled" ? "disabled" : "enabled";
 
+export const normalizeReasoningEffort = (value: unknown) => {
+  if (
+    value === "none" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+  ) {
+    return value;
+  }
+  if (value === "max") return "xhigh";
+  return "high";
+};
+
 export const normalizeDeepSeekReasoningEffort = (value: unknown) => {
   if (value === "max" || value === "xhigh") return "max";
   return "high";
@@ -127,6 +142,7 @@ export const buildChatCompletionPayload = ({
   reasoningEffort,
 }: ChatCompletionPayloadInput) => {
   const isDeepSeekV4 = isDeepSeekV4Model(model);
+  const hasReasoningEffort = reasoningEffort !== undefined;
   const thinkingType = isDeepSeekV4
     ? normalizeDeepSeekThinkingType(thinking?.type)
     : null;
@@ -141,6 +157,8 @@ export const buildChatCompletionPayload = ({
     if (thinkingType === "enabled") {
       payload.reasoning_effort = normalizeDeepSeekReasoningEffort(reasoningEffort);
     }
+  } else if (hasReasoningEffort) {
+    payload.reasoning_effort = normalizeReasoningEffort(reasoningEffort);
   }
 
   const hasTools = Array.isArray(tools) && tools.length > 0;
@@ -245,6 +263,10 @@ export const buildChatCompletionRecoveryPayloads = (
   addCandidate("strip-reasoning", withoutReasoning);
 
   const reasoningBase = withoutReasoning ?? payload;
+  addCandidate(
+    "omit-reasoning-controls",
+    withoutPayloadFields(reasoningBase, ["reasoning_effort", "thinking"])
+  );
   addCandidate("omit-sampling", withoutPayloadFields(reasoningBase, ["temperature"]));
 
   const toolChoiceBase = withoutReasoning ?? payload;

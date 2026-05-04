@@ -204,8 +204,21 @@ const getToolVideoModelStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_tool_video_model`;
 const getToolAudioModelStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_tool_audio_model`;
+const getReasoningPreferencesStorageKey = (provider: ChatProvider) =>
+  `studio_chat_${provider}_reasoning_preferences`;
 const MAX_CHAT_MESSAGES = 120;
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
+
+type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Max" },
+];
 
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -228,6 +241,27 @@ const readLocalStorage = <T,>(key: string, fallback: T): T => {
 const writeLocalStorage = (key: string, value: string) => {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(key, value);
+};
+
+const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
+  value === "none" ||
+  value === "minimal" ||
+  value === "low" ||
+  value === "medium" ||
+  value === "high" ||
+  value === "xhigh";
+
+const sanitizeReasoningPreferences = (value: unknown): Record<string, ReasoningEffort> => {
+  if (!value || typeof value !== "object") return {};
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, ReasoningEffort>>(
+    (acc, [modelId, effort]) => {
+      if (modelId.trim() && isReasoningEffort(effort)) {
+        acc[modelId] = effort;
+      }
+      return acc;
+    },
+    {},
+  );
 };
 
 const formatCount = (value?: number | null) =>
@@ -255,6 +289,12 @@ const STATIC_MODEL_IDS = {
     audio: idsFor(STATIC_NAVY_TTS_MODELS),
   },
 } satisfies Record<ChatProvider, Record<"chat" | "image" | "video" | "audio", Set<string>>>;
+
+const modelSupportsReasoning = (
+  provider: ChatProvider,
+  modelId: string,
+  modelOption?: ModelOption,
+) => provider === "navy" && (modelOption?.supportsReasoning === true || isDeepSeekV4Model(modelId));
 
 function NavyUsageFooter({
   usage,
@@ -823,6 +863,7 @@ export function ChutesChat({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const consumedInitialInputRef = useRef<string | null>(null);
+  const reasoningPreferenceModelRef = useRef("");
   const storageKey = useMemo(() => getChatStorageKey(provider), [provider]);
   const systemPromptStorageKey = useMemo(
     () => getSystemPromptStorageKey(provider),
@@ -838,6 +879,10 @@ export function ChutesChat({
   );
   const toolAudioModelStorageKey = useMemo(
     () => getToolAudioModelStorageKey(provider),
+    [provider]
+  );
+  const reasoningPreferencesStorageKey = useMemo(
+    () => getReasoningPreferencesStorageKey(provider),
     [provider]
   );
   const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
@@ -862,11 +907,15 @@ export function ChutesChat({
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
     ...DEFAULT_TOOL_SETTINGS,
   });
-  const [deepSeekThinkingEnabled, setDeepSeekThinkingEnabled] = useState(true);
-  const [deepSeekReasoningEffort, setDeepSeekReasoningEffort] =
-    useState<"high" | "max">("high");
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("high");
   const [toolSettingsHydrated, setToolSettingsHydrated] = useState(false);
+  const [reasoningPreferencesHydrated, setReasoningPreferencesHydrated] = useState(false);
+  const selectedChatModel = useMemo(
+    () => ensureSelectedModelOption(models, model).find((entry) => entry.id === model),
+    [models, model],
+  );
   const isDeepSeekV4ChatModel = provider === "navy" && isDeepSeekV4Model(model);
+  const chatModelSupportsReasoning = modelSupportsReasoning(provider, model, selectedChatModel);
   const availableImageModelIds = useMemo(
     () => new Set(imageModels.map((item) => item.id)),
     [imageModels]
@@ -1106,6 +1155,40 @@ export function ChutesChat({
       window.localStorage.removeItem(toolAudioModelStorageKey);
     }
   }, [toolAudioModel, toolAudioModelStorageKey, toolSettingsHydrated]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    reasoningPreferenceModelRef.current = "";
+    const handle = window.setTimeout(() => {
+      const preferences = sanitizeReasoningPreferences(
+        readLocalStorage<unknown>(reasoningPreferencesStorageKey, {})
+      );
+      setReasoningEffort(preferences[model] ?? "high");
+      reasoningPreferenceModelRef.current = model;
+      setReasoningPreferencesHydrated(true);
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [model, reasoningPreferencesStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!reasoningPreferencesHydrated || !model || !chatModelSupportsReasoning) return;
+    if (reasoningPreferenceModelRef.current !== model) return;
+    const handle = window.setTimeout(() => {
+      const preferences = sanitizeReasoningPreferences(
+        readLocalStorage<unknown>(reasoningPreferencesStorageKey, {})
+      );
+      preferences[model] = reasoningEffort;
+      writeLocalStorage(reasoningPreferencesStorageKey, JSON.stringify(preferences));
+    }, 150);
+    return () => window.clearTimeout(handle);
+  }, [
+    chatModelSupportsReasoning,
+    model,
+    reasoningEffort,
+    reasoningPreferencesHydrated,
+    reasoningPreferencesStorageKey,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1452,6 +1535,19 @@ ${defaultPrompt}`;
   ) => {
     const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
     const hasEnabledTools = toolSpec.length > 0;
+    const reasoningPayload =
+      provider === "navy" && chatModelSupportsReasoning
+        ? {
+            ...(isDeepSeekV4ChatModel
+              ? {
+                  thinking: {
+                    type: reasoningEffort === "none" ? "disabled" : "enabled",
+                  },
+                }
+              : {}),
+            reasoningEffort,
+          }
+        : {};
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -1479,14 +1575,7 @@ ${defaultPrompt}`;
         ),
         maxTokens: 1024,
         temperature: 0.7,
-        ...(isDeepSeekV4ChatModel
-          ? {
-              thinking: {
-                type: deepSeekThinkingEnabled ? "enabled" : "disabled",
-              },
-              reasoningEffort: deepSeekReasoningEffort,
-            }
-          : {}),
+        ...reasoningPayload,
       }),
     });
 
@@ -2860,52 +2949,29 @@ ${defaultPrompt}`;
             />
 
             <div className="no-scrollbar col-span-2 flex min-w-0 items-center gap-1.5 overflow-x-auto pb-1 sm:contents sm:overflow-visible sm:pb-0">
-            {isDeepSeekV4ChatModel ? (
-              <>
-                <Button
-                  type="button"
-                  variant={deepSeekThinkingEnabled ? "secondary" : "ghost"}
-                  size="icon"
-                  onClick={() => setDeepSeekThinkingEnabled((prev) => !prev)}
-                  className="h-9 w-9 flex-none"
-                  title={
-                    deepSeekThinkingEnabled
-                      ? "Disable DeepSeek Thinking"
-                      : "Enable DeepSeek Thinking"
-                  }
-                  aria-label={
-                    deepSeekThinkingEnabled
-                      ? "Disable DeepSeek Thinking"
-                      : "Enable DeepSeek Thinking"
-                  }
+            {chatModelSupportsReasoning ? (
+              <Select
+                value={reasoningEffort}
+                onValueChange={(value) =>
+                  setReasoningEffort(isReasoningEffort(value) ? value : "high")
+                }
+              >
+                <SelectTrigger
+                  className="glass-card h-9 w-[112px] flex-none border-0 bg-secondary/50"
+                  title="Reasoning Effort"
+                  aria-label="Reasoning Effort"
                 >
-                  {deepSeekThinkingEnabled ? (
-                    <ToggleRight className="h-4 w-4" />
-                  ) : (
-                    <ToggleLeft className="h-4 w-4" />
-                  )}
-                </Button>
-                <Select
-                  value={deepSeekReasoningEffort}
-                  onValueChange={(value) =>
-                    setDeepSeekReasoningEffort(value === "max" ? "max" : "high")
-                  }
-                  disabled={!deepSeekThinkingEnabled}
-                >
-                  <SelectTrigger
-                    className="glass-card h-9 w-[96px] flex-none border-0 bg-secondary/50"
-                    title="DeepSeek Reasoning Effort"
-                    aria-label="DeepSeek Reasoning Effort"
-                  >
-                    <BrainCircuit className="mr-1.5 h-3.5 w-3.5" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="max">Max</SelectItem>
-                  </SelectContent>
-                </Select>
-              </>
+                  <BrainCircuit className="mr-1.5 h-3.5 w-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REASONING_EFFORT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : null}
             <ModelSearchSelect
               value={toolImageModel}
