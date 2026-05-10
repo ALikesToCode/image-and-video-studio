@@ -16,6 +16,7 @@ import {
   resolveRequestedImageModels,
   runImageModelFallbackSequence,
   runImageModelPipelineParallel,
+  sanitizeChatAttachmentAssets,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   shouldOmitToolChoiceForModel,
@@ -543,6 +544,96 @@ test("Navy chat messages pass assistant reasoning content back without a tool ca
   );
 });
 
+test("User chat attachments become OpenAI-compatible multimodal content parts", () => {
+  const messages = toChatCompletionMessages([
+    {
+      role: "user",
+      content: "Describe these inputs.",
+      attachments: [
+        {
+          id: "att-image",
+          kind: "image",
+          name: "scene.png",
+          mimeType: "image/png",
+          dataUrl: "data:image/png;base64,abc",
+        },
+        {
+          id: "att-pdf",
+          kind: "pdf",
+          name: "brief.pdf",
+          mimeType: "application/pdf",
+          text: "Extracted PDF text",
+          pagesRead: 2,
+          totalPages: 3,
+          truncated: true,
+        },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(messages, [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Describe these inputs." },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,abc" },
+        },
+        {
+          type: "text",
+          text: 'Attached pdf "brief.pdf" (PDF, application/pdf, 2/3 pages, truncated)\n\nExtracted PDF text',
+        },
+      ],
+    },
+  ]);
+});
+
+test("Sanitized chat attachments reject missing payloads and preserve usable files", () => {
+  assert.deepEqual(
+    sanitizeChatAttachmentAssets([
+      {
+        id: "img-1",
+        kind: "image",
+        name: "image.png",
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,abc",
+        size: 42,
+      },
+      {
+        id: "bad-img",
+        kind: "image",
+        name: "missing-data.png",
+        mimeType: "image/png",
+      },
+      {
+        id: "text-1",
+        kind: "text",
+        name: "notes.md",
+        mimeType: "text/markdown",
+        text: "Notes",
+      },
+    ]),
+    [
+      {
+        id: "img-1",
+        kind: "image",
+        name: "image.png",
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,abc",
+        size: 42,
+      },
+      {
+        id: "text-1",
+        kind: "text",
+        name: "notes.md",
+        mimeType: "text/markdown",
+        text: "Notes",
+      },
+    ]
+  );
+});
+
 test("Chat messages omit assistant thinking unless reasoning content is requested", () => {
   assert.deepEqual(
     toChatCompletionMessages([
@@ -879,6 +970,15 @@ test("Persisted chat history drops heavy media payloads and keeps newest entries
         role: "tool",
         content: "Generated image.",
         images: [{ id: "img-1", dataUrl: "data:image/png;base64,new" }],
+        attachments: [
+          {
+            id: "att-1",
+            kind: "image",
+            name: "source.png",
+            mimeType: "image/png",
+            dataUrl: "data:image/png;base64,source",
+          },
+        ],
       },
     ],
     1

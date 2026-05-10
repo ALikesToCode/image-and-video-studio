@@ -31,6 +31,19 @@ export type ChatMediaAsset = {
   model?: string;
 };
 
+export type ChatAttachmentAsset = {
+  id: string;
+  kind: "image" | "pdf" | "text";
+  name: string;
+  mimeType: string;
+  size?: number;
+  dataUrl?: string;
+  text?: string;
+  pagesRead?: number;
+  totalPages?: number;
+  truncated?: boolean;
+};
+
 type SyntheticFallbackToolCallOptions = {
   requestedTool: ForcedToolCall;
   provider: ChatProvider;
@@ -73,6 +86,7 @@ type ChatCompletionMessageInput = {
   toolCalls?: unknown[];
   toolCallId?: string;
   name?: string;
+  attachments?: ChatAttachmentAsset[];
 };
 
 type ChatCompletionMessagesOptions = {
@@ -309,7 +323,10 @@ export const toChatCompletionMessages = (
       message.toolCalls.length > 0;
     const base: Record<string, unknown> = {
       role: message.role,
-      content: message.content,
+      content:
+        message.role === "user"
+          ? buildUserMessageContent(message.content, message.attachments)
+          : message.content,
     };
 
     if (
@@ -339,6 +356,54 @@ export const toChatCompletionMessages = (
 
     return [base];
   });
+};
+
+const attachmentTextHeader = (attachment: ChatAttachmentAsset) => {
+  const detailParts = [
+    attachment.kind.toUpperCase(),
+    attachment.mimeType,
+    typeof attachment.size === "number" ? `${attachment.size} bytes` : "",
+    typeof attachment.pagesRead === "number" && typeof attachment.totalPages === "number"
+      ? `${attachment.pagesRead}/${attachment.totalPages} pages`
+      : "",
+    attachment.truncated ? "truncated" : "",
+  ].filter(Boolean);
+  return `Attached ${attachment.kind} "${attachment.name}"${
+    detailParts.length ? ` (${detailParts.join(", ")})` : ""
+  }`;
+};
+
+export const buildUserMessageContent = (
+  content: string,
+  attachments?: ChatAttachmentAsset[]
+) => {
+  const normalizedContent = normalizeValue(content);
+  const normalizedAttachments = sanitizeChatAttachmentAssets(attachments);
+  if (!normalizedAttachments.length) return content;
+
+  const parts: Array<Record<string, unknown>> = [];
+  if (normalizedContent) {
+    parts.push({ type: "text", text: normalizedContent });
+  }
+
+  for (const attachment of normalizedAttachments) {
+    if (attachment.kind === "image" && attachment.dataUrl) {
+      parts.push({
+        type: "image_url",
+        image_url: { url: attachment.dataUrl },
+      });
+      continue;
+    }
+
+    if (attachment.text?.trim()) {
+      parts.push({
+        type: "text",
+        text: `${attachmentTextHeader(attachment)}\n\n${attachment.text.trim()}`,
+      });
+    }
+  }
+
+  return parts.length ? parts : content;
 };
 
 const extractTaggedBlock = (assistantContent: string, labels: string[]) => {
@@ -561,6 +626,70 @@ export const sanitizeChatMediaAssets = (value: unknown): ChatMediaAsset[] => {
       };
     })
     .filter((entry): entry is ChatMediaAsset => !!entry);
+};
+
+export const sanitizeChatAttachmentAssets = (value: unknown): ChatAttachmentAsset[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id : "";
+      const kind = record.kind;
+      const name =
+        typeof record.name === "string" && record.name.trim()
+          ? record.name.trim()
+          : "";
+      const mimeType =
+        typeof record.mimeType === "string" && record.mimeType.trim()
+          ? record.mimeType.trim()
+          : kind === "pdf"
+            ? "application/pdf"
+            : kind === "image"
+              ? "image/png"
+              : "text/plain";
+      const size =
+        typeof record.size === "number" && Number.isFinite(record.size)
+          ? record.size
+          : undefined;
+      const dataUrl =
+        typeof record.dataUrl === "string" && record.dataUrl.trim()
+          ? record.dataUrl.trim()
+          : undefined;
+      const text =
+        typeof record.text === "string" && record.text.trim()
+          ? record.text.trim()
+          : undefined;
+      const pagesRead =
+        typeof record.pagesRead === "number" && Number.isFinite(record.pagesRead)
+          ? record.pagesRead
+          : undefined;
+      const totalPages =
+        typeof record.totalPages === "number" && Number.isFinite(record.totalPages)
+          ? record.totalPages
+          : undefined;
+      const truncated =
+        typeof record.truncated === "boolean" ? record.truncated : undefined;
+
+      if (!id || !name) return null;
+      if (kind !== "image" && kind !== "pdf" && kind !== "text") return null;
+      if (kind === "image" && !dataUrl) return null;
+      if ((kind === "pdf" || kind === "text") && !text) return null;
+
+      return {
+        id,
+        kind,
+        name,
+        mimeType,
+        ...(size !== undefined ? { size } : {}),
+        ...(dataUrl ? { dataUrl } : {}),
+        ...(text ? { text } : {}),
+        ...(pagesRead !== undefined ? { pagesRead } : {}),
+        ...(totalPages !== undefined ? { totalPages } : {}),
+        ...(truncated !== undefined ? { truncated } : {}),
+      };
+    })
+    .filter((entry): entry is ChatAttachmentAsset => !!entry);
 };
 
 export const detectForcedToolCall = (
@@ -922,7 +1051,7 @@ export const createSyntheticFallbackToolCall = ({
 };
 
 export const stripHeavyMediaFromMessagesForStorage = <
-  T extends { images?: unknown; media?: unknown }
+  T extends { images?: unknown; media?: unknown; attachments?: unknown }
 >(
   messages: T[],
   maxMessages: number
@@ -931,5 +1060,6 @@ export const stripHeavyMediaFromMessagesForStorage = <
     const clonedMessage = { ...message };
     delete clonedMessage.images;
     delete clonedMessage.media;
+    delete clonedMessage.attachments;
     return clonedMessage;
   });
