@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   Loader2,
@@ -25,6 +25,14 @@ import {
   Search,
   RefreshCw,
   Gauge,
+  Paperclip,
+  X,
+  FileText,
+  Maximize2,
+  Minimize2,
+  Info,
+  Code2,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
@@ -77,6 +85,7 @@ import {
   putStudioState,
 } from "@/lib/studio-state-db";
 import {
+  type ChatAttachmentAsset,
   type ChatImageAsset,
   type ChatMediaAsset,
   buildAssistantToolContextContent,
@@ -88,6 +97,7 @@ import {
   resolveToolArguments,
   resolveRequestedImageModels,
   runImageModelPipelineParallel,
+  sanitizeChatAttachmentAssets,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
   stripHeavyMediaFromMessagesForStorage,
@@ -105,6 +115,7 @@ import {
   resolveNavyChatImageSizing,
   summarizeImageModelPrompts,
 } from "@/lib/studio-generation";
+import { extractPdfTextFromFile, isSupportedPdfFile } from "@/lib/client/pdf-text";
 
 type ToolCall = {
   id: string;
@@ -126,7 +137,14 @@ type ChatMessage = {
   name?: string;
   images?: ChatImageAsset[];
   media?: ChatMediaAsset[];
+  attachments?: ChatAttachmentAsset[];
   transient?: boolean;
+};
+
+type QueuedChatTurn = {
+  id: string;
+  content: string;
+  attachments: ChatAttachmentAsset[];
 };
 
 type ChutesChatProps = {
@@ -208,6 +226,10 @@ const getReasoningPreferencesStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_reasoning_preferences`;
 const MAX_CHAT_MESSAGES = 120;
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
+const MAX_PENDING_ATTACHMENTS = 6;
+const CHAT_TEXT_ATTACHMENT_MAX_CHARS = 18_000;
+const CHAT_TEXT_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
+const CHAT_IMAGE_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
 
 type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -272,6 +294,32 @@ const formatUsageAge = (iso?: string | null) =>
 
 const formatModelWindow = (value?: number | null) =>
   typeof value === "number" ? value.toLocaleString() : value === null ? "unknown" : "";
+
+const normalizeModalityList = (value?: string[] | null) =>
+  (value ?? [])
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+const summarizeModalities = (value?: string[] | null) => {
+  const normalized = normalizeModalityList(value);
+  return normalized.length ? normalized.join(", ") : "unknown";
+};
+
+const acceptsTextFile = (file: File) => {
+  const type = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  return (
+    type.startsWith("text/") ||
+    /\.(txt|md|markdown|csv|json|log|xml|yaml|yml)$/i.test(file.name)
+  );
+};
+
+const fileToDataUrl = async (file: File) =>
+  await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Unable to read attachment."));
+    reader.readAsDataURL(file);
+  });
 
 const idsFor = (models: ModelOption[]) => new Set(models.map((model) => model.id));
 
@@ -569,6 +617,9 @@ function ModelSearchSelect({
                             modelOption.maxOutputTokens !== undefined
                               ? `out ${formatModelWindow(modelOption.maxOutputTokens)}`
                               : "",
+                            modelOption.inputModalities?.length
+                              ? `in ${modelOption.inputModalities.join(",")}`
+                              : "",
                             modelOption.outputModalities?.length
                               ? `out ${modelOption.outputModalities.join(",")}`
                               : "",
@@ -696,6 +747,11 @@ const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
           mimeType: image.mimeType,
           ...(image.model ? { model: image.model } : {}),
         }));
+      }
+
+      if (Array.isArray(record.attachments)) {
+        const attachments = sanitizeChatAttachmentAssets(record.attachments);
+        if (attachments.length) message.attachments = attachments;
       }
 
       return message;
@@ -858,9 +914,20 @@ export function ChutesChat({
   const [customSystemPrompt, setCustomSystemPrompt] = useState("");
   const [systemPromptHydrated, setSystemPromptHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const queuedTurnsRef = useRef<QueuedChatTurn[]>([]);
+  const [queuedTurns, setQueuedTurns] = useState<QueuedChatTurn[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachmentAsset[]>([]);
+  const [attachmentLoading, setAttachmentLoading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [embedDialogOpen, setEmbedDialogOpen] = useState(false);
+  const [embedOrigin, setEmbedOrigin] = useState("");
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedPromptMessageId, setCopiedPromptMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const consumedInitialInputRef = useRef<string | null>(null);
   const reasoningPreferenceModelRef = useRef("");
@@ -910,10 +977,73 @@ export function ChutesChat({
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("high");
   const [toolSettingsHydrated, setToolSettingsHydrated] = useState(false);
   const [reasoningPreferencesHydrated, setReasoningPreferencesHydrated] = useState(false);
+  const setChatBusy = useCallback((value: boolean) => {
+    busyRef.current = value;
+    setBusy(value);
+  }, []);
+  const commitMessages = useCallback((nextMessages: ChatMessage[]) => {
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+  }, []);
+  const updateQueuedTurns = useCallback((
+    updater: QueuedChatTurn[] | ((prev: QueuedChatTurn[]) => QueuedChatTurn[])
+  ) => {
+    const nextTurns =
+      typeof updater === "function" ? updater(queuedTurnsRef.current) : updater;
+    queuedTurnsRef.current = nextTurns;
+    setQueuedTurns(nextTurns);
+    return nextTurns;
+  }, []);
+  const enqueueChatTurn = useCallback((content: string, attachments: ChatAttachmentAsset[]) => {
+    updateQueuedTurns((prev) => [
+      ...prev,
+      {
+        id: createId(),
+        content,
+        attachments,
+      },
+    ]);
+  }, [updateQueuedTurns]);
+  const takeNextQueuedTurn = useCallback((): QueuedChatTurn | null => {
+    let nextTurn: QueuedChatTurn | null = null;
+    updateQueuedTurns((prev) => {
+      if (!prev.length) return prev;
+      const [head, ...rest] = prev;
+      nextTurn = head;
+      return rest;
+    });
+    return nextTurn;
+  }, [updateQueuedTurns]);
   const selectedChatModel = useMemo(
     () => ensureSelectedModelOption(models, model).find((entry) => entry.id === model),
     [models, model],
   );
+  const inputModalities = useMemo(
+    () => normalizeModalityList(selectedChatModel?.inputModalities),
+    [selectedChatModel]
+  );
+  const outputModalities = useMemo(
+    () => normalizeModalityList(selectedChatModel?.outputModalities),
+    [selectedChatModel]
+  );
+  const supportsImageAttachments =
+    selectedChatModel?.supportsVision === true || inputModalities.includes("image");
+  const supportsFileAttachments =
+    inputModalities.includes("file") ||
+    inputModalities.includes("document") ||
+    inputModalities.includes("pdf");
+  const supportsAudioInput =
+    selectedChatModel?.supportsAudioInput === true || inputModalities.includes("audio");
+  const supportsVideoInput = inputModalities.includes("video");
+  const attachmentAccept = [
+    supportsImageAttachments ? "image/png,image/jpeg,image/webp,image/gif" : "",
+    supportsFileAttachments
+      ? "application/pdf,.pdf,text/plain,text/markdown,.txt,.md,.markdown,.csv,.json,.log"
+      : "",
+  ]
+    .filter(Boolean)
+    .join(",");
+  const attachmentUploadDisabled = !supportsImageAttachments && !supportsFileAttachments;
   const isDeepSeekV4ChatModel = provider === "navy" && isDeepSeekV4Model(model);
   const chatModelSupportsReasoning = modelSupportsReasoning(provider, model, selectedChatModel);
   const availableImageModelIds = useMemo(
@@ -941,6 +1071,32 @@ export function ChutesChat({
       // The generation result is more important than a best-effort usage refresh.
     });
   };
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    setPendingAttachments((prev) => {
+      const next = prev.filter((attachment) => {
+        if (attachment.kind === "image") return supportsImageAttachments;
+        return supportsFileAttachments;
+      });
+      if (next.length !== prev.length) {
+        setAttachmentError("Removed attachments that the selected model does not advertise support for.");
+      }
+      return next;
+    });
+  }, [supportsFileAttachments, supportsImageAttachments]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setEmbedOrigin(window.location.origin);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("fullscreen") === "1") {
+      setFullscreen(true);
+    }
+  }, []);
 
   useEffect(() => {
     const nextInput = initialInput?.trim() ?? "";
@@ -993,21 +1149,21 @@ export function ChutesChat({
       }
 
       if (!cancelled) {
-        setMessages(storedMessages);
+        commitMessages(storedMessages);
       }
     };
 
-    setMessages([]);
+    commitMessages([]);
     void loadMessages();
     return () => {
       cancelled = true;
     };
-  }, [storageKey]);
+  }, [storageKey, commitMessages]);
 
   useEffect(() => {
     if (messages.length <= MAX_CHAT_MESSAGES) return;
-    setMessages((prev) => prev.slice(-MAX_CHAT_MESSAGES));
-  }, [messages, storageKey]);
+    commitMessages(messages.slice(-MAX_CHAT_MESSAGES));
+  }, [messages, storageKey, commitMessages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2508,6 +2664,108 @@ ${defaultPrompt}`;
     };
   };
 
+  const readChatAttachment = async (file: File): Promise<ChatAttachmentAsset> => {
+    if (file.type.startsWith("image/")) {
+      if (!supportsImageAttachments) {
+        throw new Error("The selected chat model does not advertise image input support.");
+      }
+      if (file.size > CHAT_IMAGE_ATTACHMENT_MAX_BYTES) {
+        throw new Error("Image attachment is larger than 8 MB.");
+      }
+      return {
+        id: createId(),
+        kind: "image",
+        name: file.name,
+        mimeType: file.type || "image/png",
+        size: file.size,
+        dataUrl: await fileToDataUrl(file),
+      };
+    }
+
+    if (isSupportedPdfFile(file)) {
+      if (!supportsFileAttachments) {
+        throw new Error("The selected chat model does not advertise file/PDF input support.");
+      }
+      const result = await extractPdfTextFromFile(file, {
+        maxChars: CHAT_TEXT_ATTACHMENT_MAX_CHARS,
+      });
+      return {
+        id: createId(),
+        kind: "pdf",
+        name: result.fileName,
+        mimeType: file.type || "application/pdf",
+        size: file.size,
+        text: result.text,
+        pagesRead: result.pagesRead,
+        totalPages: result.totalPages,
+        truncated: result.truncatedByChars || result.truncatedByPages,
+      };
+    }
+
+    if (acceptsTextFile(file)) {
+      if (!supportsFileAttachments) {
+        throw new Error("The selected chat model does not advertise file/text input support.");
+      }
+      if (file.size > CHAT_TEXT_ATTACHMENT_MAX_BYTES) {
+        throw new Error("Text attachment is larger than 2 MB.");
+      }
+      const rawText = await file.text();
+      const truncated = rawText.length > CHAT_TEXT_ATTACHMENT_MAX_CHARS;
+      return {
+        id: createId(),
+        kind: "text",
+        name: file.name,
+        mimeType: file.type || "text/plain",
+        size: file.size,
+        text: (truncated ? rawText.slice(0, CHAT_TEXT_ATTACHMENT_MAX_CHARS) : rawText).trim(),
+        truncated,
+      };
+    }
+
+    throw new Error(`Unsupported attachment type for ${file.name}.`);
+  };
+
+  const addAttachmentFiles = async (files: FileList | File[]) => {
+    const candidates = Array.from(files).slice(
+      0,
+      Math.max(0, MAX_PENDING_ATTACHMENTS - pendingAttachments.length)
+    );
+    if (!candidates.length) return;
+
+    setAttachmentLoading(true);
+    setAttachmentError(null);
+    try {
+      const nextAttachments = await Promise.all(candidates.map(readChatAttachment));
+      setPendingAttachments((prev) => [
+        ...prev,
+        ...nextAttachments,
+      ].slice(0, MAX_PENDING_ATTACHMENTS));
+    } catch (error) {
+      setAttachmentError(
+        error instanceof Error ? error.message : "Unable to attach file."
+      );
+    } finally {
+      setAttachmentLoading(false);
+    }
+  };
+
+  const removePendingAttachment = (id: string) => {
+    setPendingAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+  };
+
+  const copyEmbedMarkdown = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedPromptMessageId("embed-markdown");
+      window.setTimeout(
+        () => setCopiedPromptMessageId((prev) => (prev === "embed-markdown" ? null : prev)),
+        1500
+      );
+    } catch {
+      setAttachmentError("Unable to copy embed markdown.");
+    }
+  };
+
   const copyPromptText = async (messageId: string, promptText: string) => {
     if (!promptText.trim()) return;
     try {
@@ -2691,30 +2949,43 @@ ${defaultPrompt}`;
     return toolMessages;
   };
 
-  const submitMessage = async () => {
-    const trimmed = input.trim();
-    if (!trimmed || busy) return;
+  const runChatTurn = async (
+    trimmed: string,
+    attachments: ChatAttachmentAsset[] = []
+  ) => {
     if (!apiKey.trim()) {
       setChatError(`Add your ${providerLabel} API key in settings.`);
+      const nextQueuedTurn = takeNextQueuedTurn();
+      if (nextQueuedTurn) {
+        void runChatTurn(nextQueuedTurn.content, nextQueuedTurn.attachments);
+      } else {
+        setChatBusy(false);
+      }
       return;
     }
     if (!model) {
       setChatError("Select a chat model.");
+      const nextQueuedTurn = takeNextQueuedTurn();
+      if (nextQueuedTurn) {
+        void runChatTurn(nextQueuedTurn.content, nextQueuedTurn.attachments);
+      } else {
+        setChatBusy(false);
+      }
       return;
     }
     setChatError(null);
-    setInput("");
+    setChatBusy(true);
 
     const userMessage: ChatMessage = {
       id: createId(),
       role: "user",
-      content: trimmed,
+      content: trimmed || "Please analyze the attached file(s).",
+      attachments,
     };
 
     // Optimistic update
-    let currentMessages: ChatMessage[] = [...messages, userMessage];
-    setMessages(currentMessages);
-    setBusy(true);
+    let currentMessages: ChatMessage[] = [...messagesRef.current, userMessage];
+    commitMessages(currentMessages);
     const forcedToolCall = detectForcedToolCall(trimmed, toolSettings);
 
     try {
@@ -2729,13 +3000,13 @@ ${defaultPrompt}`;
 
         // Add to state immediately
         currentMessages = [...currentMessages, assistantMessage];
-        setMessages(currentMessages);
+        commitMessages(currentMessages);
 
         // Stream content into this message
         const finalResult = await callChatStreaming(
           currentMessages.slice(0, -1), // Send history excluding the placeholder
           (update) => {
-            setMessages((prev) => prev.map((msg) => {
+            currentMessages = currentMessages.map((msg) => {
               if (msg.id === assistantId) {
                 return {
                   ...msg,
@@ -2745,7 +3016,8 @@ ${defaultPrompt}`;
                 };
               }
               return msg;
-            }));
+            });
+            commitMessages(currentMessages);
           },
           step === 0 && forcedToolCall
             ? { type: "function", function: { name: forcedToolCall } }
@@ -2770,12 +3042,12 @@ ${defaultPrompt}`;
 
         // Replace the placeholder in currentMessages with the finalized one
         currentMessages = [...currentMessages.slice(0, -1), finalizedAssistantMessage];
-        setMessages(currentMessages);
+        commitMessages(currentMessages);
         const applyProgressMessage = (message: ChatMessage) => {
           currentMessages = currentMessages.some((item) => item.id === message.id)
             ? currentMessages.map((item) => item.id === message.id ? message : item)
             : [...currentMessages, message];
-          setMessages(currentMessages);
+          commitMessages(currentMessages);
         };
         const removeProgressMessages = (completedToolCalls: ToolCall[]) => {
           const completedToolCallIds = new Set(
@@ -2790,7 +3062,7 @@ ${defaultPrompt}`;
                 completedToolCallIds.has(message.toolCallId)
               )
           );
-          setMessages(currentMessages);
+          commitMessages(currentMessages);
         };
 
         // Check for tool calls
@@ -2829,7 +3101,7 @@ ${defaultPrompt}`;
                 ...currentMessages.slice(0, -1),
                 assistantWithSyntheticToolCall,
               ];
-              setMessages(currentMessages);
+              commitMessages(currentMessages);
               const toolMessages = await handleToolCalls(
                 [syntheticToolCall],
                 applyProgressMessage,
@@ -2838,7 +3110,7 @@ ${defaultPrompt}`;
               if (toolMessages.length) {
                 removeProgressMessages([syntheticToolCall]);
                 currentMessages = [...currentMessages, ...toolMessages];
-                setMessages(currentMessages);
+                commitMessages(currentMessages);
                 continue;
               }
             }
@@ -2854,15 +3126,45 @@ ${defaultPrompt}`;
         );
         removeProgressMessages(finalToolCalls);
         currentMessages = [...currentMessages, ...toolMessages];
-        setMessages(currentMessages);
+        commitMessages(currentMessages);
       }
     } catch (error) {
       setChatError(
         error instanceof Error ? error.message : "Unable to run chat."
       );
     } finally {
-      setBusy(false);
+      const nextQueuedTurn = takeNextQueuedTurn();
+      if (nextQueuedTurn) {
+        void runChatTurn(nextQueuedTurn.content, nextQueuedTurn.attachments);
+      } else {
+        setChatBusy(false);
+      }
     }
+  };
+
+  const submitMessage = () => {
+    const trimmed = input.trim();
+    const attachmentsToSend = pendingAttachments;
+    if (!trimmed && !attachmentsToSend.length) return;
+    if (!apiKey.trim()) {
+      setChatError(`Add your ${providerLabel} API key in settings.`);
+      return;
+    }
+    if (!model) {
+      setChatError("Select a chat model.");
+      return;
+    }
+    setChatError(null);
+    setInput("");
+    setPendingAttachments([]);
+    setAttachmentError(null);
+
+    if (busyRef.current || queuedTurnsRef.current.length) {
+      enqueueChatTurn(trimmed, attachmentsToSend);
+      return;
+    }
+
+    void runChatTurn(trimmed, attachmentsToSend);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -2873,7 +3175,8 @@ ${defaultPrompt}`;
   };
 
   const clearChat = () => {
-    setMessages([]);
+    commitMessages([]);
+    updateQueuedTurns([]);
     setChatError(null);
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(storageKey);
@@ -2887,11 +3190,32 @@ ${defaultPrompt}`;
     setCustomSystemPrompt("");
   };
 
+  const embedBaseUrl = embedOrigin || "https://your-domain.example";
+  const chatEmbedUrl = `${embedBaseUrl}/?view=chat&embed=1`;
+  const fullscreenChatEmbedUrl = `${chatEmbedUrl}&fullscreen=1`;
+  const studioEmbedUrl = `${embedBaseUrl}/?view=image&embed=1`;
+  const embedMarkdown = [
+    '<iframe',
+    `  src="${chatEmbedUrl}"`,
+    '  title="Studio chat"',
+    '  loading="lazy"',
+    '  allow="clipboard-read; clipboard-write; fullscreen"',
+    '  style="width:100%; min-height:720px; border:0; border-radius:12px;"',
+    "></iframe>",
+  ].join("\n");
+
   return (
-    <div className="flex flex-col h-full bg-background/50 isolate">
+    <div
+      className={cn(
+        "flex flex-col bg-background/50 isolate",
+        fullscreen
+          ? "fixed inset-0 z-50 h-[100dvh] w-screen"
+          : "h-full"
+      )}
+    >
       {/* Header */}
       <header className="glass sticky top-0 z-10 flex-none border-b p-2.5 sm:p-4">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <div className="flex min-w-0 items-center gap-2 sm:hidden">
             <div className="rounded-xl bg-primary/10 p-2 text-primary">
               <Bot className="h-4 w-4" />
@@ -3167,6 +3491,168 @@ ${defaultPrompt}`;
               </Button>
             )}
 
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 flex-none"
+                  title="Model input details"
+                  aria-label="Model input details"
+                >
+                  <Info className="h-4 w-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>Model modalities</DialogTitle>
+                  <DialogDescription>
+                    Upload controls follow the selected model metadata.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border/60 bg-secondary/20 p-3">
+                    <div className="text-sm font-semibold">{selectedChatModel?.label ?? model}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{model}</div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inputs</div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(inputModalities.length ? inputModalities : ["unknown"]).map((item) => (
+                          <span key={item} className="rounded-full bg-secondary px-2 py-1 text-xs">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Outputs</div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(outputModalities.length ? outputModalities : ["unknown"]).map((item) => (
+                          <span key={item} className="rounded-full bg-secondary px-2 py-1 text-xs">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                      Image upload: {supportsImageAttachments ? "available" : "not advertised"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                      PDF/text upload: {supportsFileAttachments ? "available" : "not advertised"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                      Audio input: {supportsAudioInput ? "advertised" : "not advertised"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                      Video input: {supportsVideoInput ? "advertised" : "not advertised"}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Image uploads are sent as multimodal image parts. PDF and text files are extracted locally and sent as text context for provider compatibility.
+                  </p>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={embedDialogOpen} onOpenChange={setEmbedDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 flex-none"
+                  title="Embed chat"
+                  aria-label="Embed chat"
+                >
+                  <Code2 className="h-4 w-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Embed Studio chat</DialogTitle>
+                  <DialogDescription>
+                    Responsive iframe snippets for chat-only or generation views.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <a
+                      href={chatEmbedUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-border/60 bg-secondary/20 p-3 text-sm hover:bg-secondary/40"
+                    >
+                      <span className="flex items-center gap-2 font-medium">
+                        Chat embed <ExternalLink className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="mt-1 block break-all text-[11px] text-muted-foreground">
+                        {chatEmbedUrl}
+                      </span>
+                    </a>
+                    <a
+                      href={fullscreenChatEmbedUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-border/60 bg-secondary/20 p-3 text-sm hover:bg-secondary/40"
+                    >
+                      <span className="flex items-center gap-2 font-medium">
+                        Fullscreen chat <ExternalLink className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="mt-1 block break-all text-[11px] text-muted-foreground">
+                        {fullscreenChatEmbedUrl}
+                      </span>
+                    </a>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Markdown / HTML
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void copyEmbedMarkdown(embedMarkdown)}
+                        className="h-7 px-2 text-xs"
+                      >
+                        {copiedPromptMessageId === "embed-markdown" ? (
+                          <>
+                            <Check className="h-3 w-3" />
+                            Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" />
+                            Copy
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/40 p-3 text-xs">
+                      {embedMarkdown}
+                    </pre>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Use <code className="rounded bg-secondary px-1 py-0.5">?view=image&amp;embed=1</code>, <code className="rounded bg-secondary px-1 py-0.5">?view=video&amp;embed=1</code>, or <code className="rounded bg-secondary px-1 py-0.5">?view=audio&amp;embed=1</code> to embed generation tools. Example image URL: {studioEmbedUrl}
+                  </p>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setFullscreen((prev) => !prev)}
+              className="h-9 w-9 flex-none"
+              title={fullscreen ? "Exit fullscreen" : "Fullscreen chat"}
+              aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen chat"}
+            >
+              {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
+
             <Button
               variant="ghost"
               size="icon"
@@ -3191,11 +3677,11 @@ ${defaultPrompt}`;
               className="overflow-hidden"
             >
               {modelsError ? (
-                <div className="max-w-5xl mx-auto w-full pt-2">
+                <div className="max-w-7xl mx-auto w-full pt-2">
                   <p className="text-xs text-destructive">{modelsError}</p>
                 </div>
               ) : null}
-              <div className="max-w-5xl mx-auto w-full pt-2">
+              <div className="max-w-7xl mx-auto w-full pt-2">
                 <div className="glass-card border-0 bg-secondary/30 p-2.5">
                   <div className="flex items-center justify-between gap-2 pb-2">
                     <p className="text-xs font-medium text-muted-foreground">
@@ -3260,7 +3746,7 @@ ${defaultPrompt}`;
                   </div>
                 </div>
               </div>
-              <div className="max-w-5xl mx-auto w-full pt-2">
+              <div className="max-w-7xl mx-auto w-full pt-2">
                 <div className="glass-card border-0 bg-secondary/30 p-2.5">
                   <div className="flex items-center justify-between gap-2 pb-2">
                     <p className="text-xs font-medium text-muted-foreground">
@@ -3291,8 +3777,8 @@ ${defaultPrompt}`;
       </header>
 
       {/* Messages Area */}
-      <div className="container mx-auto min-h-0 flex-1 overflow-y-auto" ref={scrollRef}>
-        <div className="mx-auto max-w-3xl space-y-4 px-3 py-4 sm:space-y-6 sm:px-4 sm:py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 sm:px-4" ref={scrollRef}>
+        <div className="mx-auto w-full max-w-7xl space-y-4 py-4 sm:space-y-6 sm:py-6">
           <AnimatePresence initial={false} mode="popLayout">
             {messages.length === 0 ? (
               <motion.div
@@ -3323,6 +3809,7 @@ ${defaultPrompt}`;
                     kind: "image" as const,
                   })) ??
                     []);
+                const attachmentItems = message.attachments ?? [];
 
                 if (
                   isTool &&
@@ -3368,7 +3855,7 @@ ${defaultPrompt}`;
                     </Avatar>
 
                     <div className={cn(
-                      "flex flex-col gap-2 max-w-[92%] sm:max-w-[85%]",
+                      "flex flex-col gap-2 max-w-[96%] sm:max-w-[88%]",
                       isUser ? "items-end" : "items-start",
                       "w-full"
                     )}>
@@ -3388,6 +3875,41 @@ ${defaultPrompt}`;
                       )}>
 
                         {thoughtContent && <ThinkingBlock content={thoughtContent} />}
+
+                        {attachmentItems.length ? (
+                          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {attachmentItems.map((attachment) => (
+                              <div
+                                key={attachment.id}
+                                className="flex min-w-0 items-center gap-2 rounded-lg border border-border/50 bg-background/45 p-2"
+                              >
+                                {attachment.kind === "image" && attachment.dataUrl ? (
+                                  <img
+                                    src={attachment.dataUrl}
+                                    alt=""
+                                    className="h-12 w-12 rounded-md object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-12 w-12 items-center justify-center rounded-md bg-secondary/70 text-muted-foreground">
+                                    <FileText className="h-5 w-5" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1 text-left">
+                                  <div className="truncate text-xs font-semibold">
+                                    {attachment.name}
+                                  </div>
+                                  <div className="truncate text-[11px] text-muted-foreground">
+                                    {attachment.kind}
+                                    {attachment.pagesRead && attachment.totalPages
+                                      ? ` · ${attachment.pagesRead}/${attachment.totalPages} pages`
+                                      : ""}
+                                    {attachment.truncated ? " · truncated" : ""}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
 
                         {displayContent ? (
                           isUser ? (
@@ -3449,7 +3971,7 @@ ${defaultPrompt}`;
 
                         {/* Media Grid */}
                         {mediaItems.length ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 w-full">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 mt-3 w-full">
                             {mediaItems.map((item) => (
                               <motion.div
                                 key={item.id}
@@ -3521,7 +4043,7 @@ ${defaultPrompt}`;
 
       {/* Input Area */}
       <footer className="glass mt-auto flex-none border-t p-2.5 sm:p-4">
-        <div className="max-w-3xl mx-auto w-full relative">
+        <div className="max-w-7xl mx-auto w-full relative">
           <AnimatePresence>
             {messages.length > 0 && (
               <motion.div
@@ -3543,13 +4065,86 @@ ${defaultPrompt}`;
             )}
           </AnimatePresence>
 
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={attachmentAccept}
+            className="hidden"
+            onChange={(event) => {
+              if (event.target.files) {
+                void addAttachmentFiles(event.target.files);
+              }
+              event.currentTarget.value = "";
+            }}
+          />
+
+          {pendingAttachments.length ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {pendingAttachments.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="flex max-w-full items-center gap-2 rounded-lg border border-border/60 bg-background/75 px-2 py-1.5 text-xs"
+                >
+                  {attachment.kind === "image" && attachment.dataUrl ? (
+                    <img
+                      src={attachment.dataUrl}
+                      alt=""
+                      className="h-8 w-8 rounded object-cover"
+                    />
+                  ) : (
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <span className="max-w-[14rem] truncate">
+                    {attachment.name}
+                    {attachment.truncated ? " (truncated)" : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removePendingAttachment(attachment.id)}
+                    className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    aria-label={`Remove ${attachment.name}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div className="glass-card relative flex items-end gap-2 rounded-2xl p-1.5 shadow-lg ring-1 ring-white/20 sm:rounded-3xl">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={attachmentUploadDisabled || attachmentLoading || pendingAttachments.length >= MAX_PENDING_ATTACHMENTS}
+              title={
+                attachmentUploadDisabled
+                  ? "Selected model does not advertise image or file input"
+                  : "Attach image, PDF, or text file"
+              }
+              aria-label="Attach file"
+              className="mb-1 h-10 w-10 rounded-full"
+            >
+              {attachmentLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Paperclip className="h-5 w-5" />
+              )}
+            </Button>
             <div className="flex-1">
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message ${providerLabel} Agent...`}
+                placeholder={
+                  busy
+                    ? `Queue another ${providerLabel} request...`
+                    : pendingAttachments.length
+                      ? "Ask about the attached files..."
+                      : `Message ${providerLabel} Agent...`
+                }
                 className="max-h-[140px] min-h-[46px] w-full resize-none border-0 bg-transparent px-3 py-3 text-base focus-visible:ring-0 sm:max-h-[200px] sm:px-4"
                 rows={1}
               />
@@ -3557,17 +4152,55 @@ ${defaultPrompt}`;
             <Button
               size="icon"
               onClick={() => void submitMessage()}
-              disabled={!input.trim() || busy || !apiKey.trim()}
+              disabled={(!input.trim() && !pendingAttachments.length) || !apiKey.trim()}
+              title={busy ? "Queue request" : "Send request"}
+              aria-label={busy ? "Queue request" : "Send request"}
               className={cn(
                 "h-10 w-10 rounded-full mb-1 transition-all duration-300 shadow",
                 input.trim() ? "bg-primary text-primary-foreground hover:scale-105" : "bg-muted text-muted-foreground"
               )}
             >
-              {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+              {busy && !input.trim() ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+              Input: {summarizeModalities(selectedChatModel?.inputModalities)}
+            </span>
+            <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+              Output: {summarizeModalities(selectedChatModel?.outputModalities)}
+            </span>
+            {attachmentUploadDisabled ? (
+              <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                Uploads unavailable for this model metadata
+              </span>
+            ) : null}
+          </div>
+          {(busy || queuedTurns.length > 0) ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                <Loader2 className={cn("h-3 w-3", busy && "animate-spin")} />
+                {busy ? "Running" : "Idle"}
+              </span>
+              <span className="inline-flex rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                {queuedTurns.length} queued
+              </span>
+              {queuedTurns.slice(0, 2).map((turn, index) => (
+                <span
+                  key={turn.id}
+                  className="max-w-[22rem] truncate rounded-full border border-border/60 bg-background/60 px-2 py-1"
+                  title={turn.content}
+                >
+                  #{index + 1} {turn.content}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {chatError ? (
             <p className="mt-2 text-xs text-destructive">{chatError}</p>
+          ) : null}
+          {attachmentError ? (
+            <p className="mt-2 text-xs text-destructive">{attachmentError}</p>
           ) : null}
         </div>
       </footer>

@@ -15,6 +15,7 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
 - Gemini image generation/editing through Gemini native image models, plus Imagen via its separate `:predict` payload.
 - Gemini Veo 3.1 text-to-video and image/reference-assisted video workflows.
 - NavyAI image, video, chat, usage, model catalog, and TTS support.
+- Chat attachments for advertised image/file-capable models, plus iframe embedding for chat and generation views.
 - OpenRouter image-capable chat completion models with output modality discovery.
 - Chutes image, video, audio, and chat support with provider-specific settings isolated.
 - Local reference strip for source images, style, character, product/object, first-frame, and last-frame references.
@@ -35,6 +36,8 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
   - `settings`
 - Legacy gallery blobs from the old `images` object store are still read during migration.
 - Heavy chat media payloads are stripped before chat history is stored.
+
+See [Chat Embedding And Attachments](docs/chat-embedding.md) for iframe snippets, fullscreen chat URLs, and attachment behavior.
 
 ## Provider setup
 

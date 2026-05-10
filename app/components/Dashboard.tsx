@@ -30,6 +30,25 @@ const TAB_META: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: "audio", label: "Audio", icon: Music },
     { id: "gallery", label: "Gallery", icon: Grid },
 ];
+const isTab = (value: string | null): value is Tab =>
+    value === "chat" ||
+    value === "image" ||
+    value === "video" ||
+    value === "audio" ||
+    value === "gallery";
+
+const readInitialTab = (): Tab => {
+    if (typeof window === "undefined") return "chat";
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get("view");
+    return isTab(view) ? view : "chat";
+};
+
+const readInitialEmbedMode = () => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("embed") === "1" || params.get("embed") === "true";
+};
 const ChatView = dynamic(() => import("./views/ChatView").then((mod) => mod.ChatView), {
     loading: () => <ViewLoading label="Loading chat" />,
 });
@@ -61,7 +80,8 @@ export function Dashboard() {
         setMode,
         setPrompt,
     } = studio;
-    const [activeTab, setActiveTab] = useState<Tab>("chat");
+    const [activeTab, setActiveTab] = useState<Tab>(readInitialTab);
+    const [embedMode, setEmbedMode] = useState(readInitialEmbedMode);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [pendingJanitorAutoGeneratePrompt, setPendingJanitorAutoGeneratePrompt] =
         useState<string | null>(null);
@@ -97,6 +117,19 @@ export function Dashboard() {
     }, [hydrated, setMode, setPrompt]);
 
     useEffect(() => {
+        if (typeof window === "undefined") return;
+        const handle = window.setTimeout(() => {
+            const params = new URLSearchParams(window.location.search);
+            const view = params.get("view");
+            if (isTab(view)) {
+                setActiveTab(view);
+            }
+            setEmbedMode(params.get("embed") === "1" || params.get("embed") === "true");
+        }, 0);
+        return () => window.clearTimeout(handle);
+    }, []);
+
+    useEffect(() => {
         if (!pendingJanitorAutoGeneratePrompt) return;
         if (!hydrated || mode !== "image" || !selectedModelIsReady) return;
         if (janitorAutoGenerateStartedRef.current) return;
@@ -117,6 +150,7 @@ export function Dashboard() {
     return (
         <div className="flex h-[100dvh] w-full overflow-hidden bg-background text-foreground">
             {/* Desktop Sidebar */}
+            {!embedMode ? (
             <aside
                 className={cn(
                     "relative z-20 hidden flex-col border-r bg-background/95 backdrop-blur transition-all duration-300 ease-in-out lg:flex",
@@ -180,10 +214,12 @@ export function Dashboard() {
                     </div>
                 </div>
             </aside>
+            ) : null}
 
             {/* Content Shell */}
             <div className="flex min-w-0 flex-1 flex-col">
                 {/* Mobile Header */}
+                {!embedMode ? (
                 <header className="glass shrink-0 border-b px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.45rem)] shadow-sm shadow-black/5 lg:hidden">
                     <div className="flex min-h-12 items-center justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-2">
@@ -203,6 +239,7 @@ export function Dashboard() {
                         </div>
                     </div>
                 </header>
+                ) : null}
 
                 {/* Main Content */}
                 <main className="relative min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_top,hsla(var(--primary),0.08),transparent_34rem),hsl(var(--background))]">
@@ -218,6 +255,7 @@ export function Dashboard() {
                 </main>
 
                 {/* Mobile Bottom Navigation */}
+                {!embedMode ? (
                 <nav className="glass shrink-0 border-t px-2 pb-[calc(env(safe-area-inset-bottom)+0.45rem)] pt-2 shadow-[0_-10px_30px_rgba(0,0,0,0.08)] lg:hidden">
                     <div className="grid grid-cols-5 gap-1">
                         {TAB_META.map((tab) => {
@@ -244,6 +282,7 @@ export function Dashboard() {
                         })}
                     </div>
                 </nav>
+                ) : null}
             </div>
         </div>
     );
