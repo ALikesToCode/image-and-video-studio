@@ -204,6 +204,8 @@ const ADULT_IMAGE_PROMPT_PATTERN =
   /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
 const OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE =
   "Allowed visual goal: Preserve the theme through symbolism, fashion, environment, expression, lighting, texture, composition, color palette, and cinematic staging. Use safe visual language with no graphic injury, sexual exploitation, real-person impersonation, private data, instructions for wrongdoing, weapon-use detail, extremist praise or recruitment, self-harm depiction, or deceptive realism. Use clearly adult subjects, non-explicit styling, and consensual/non-threatening staging when people are relevant.";
+const OPENAI_GPT_IMAGE_PRODUCTION_GUIDE_NOTE =
+  "OpenAI GPT Image production prompt guide (instructions, not visible image text): Use a clear production image brief ordered as background/scene, subject, key details, composition, lighting/mood, and constraints. Include the intended output format from the request, such as photorealistic image, ad, UI mockup, infographic, diagram, logo, product mockup, comic panel, or slide. Be concrete about materials, shapes, textures, color, camera/framing, viewpoint, placement, scale, pose, gaze, and object interactions when relevant. For photorealism, preserve natural lighting, real materials, texture, and believable camera framing. For edits or reference images, preserve identity, geometry, layout, brand elements, camera angle, saturation, contrast, and surrounding objects unless the user asks to change them. For text in images, render only text explicitly requested in quotes or ALL CAPS; keep it exact, legible, high contrast, and placed as requested. Do not invent extra words. Keep the final image polished and production-ready with no watermark, no signature, no unrelated logos, and no generic stock-photo treatment.";
 const NAVY_IMAGE_ASPECT_RATIOS = new Set([
   "1:1",
   "16:9",
@@ -405,12 +407,16 @@ const buildOpenAiAllowedImagePrompt = (
 ) => {
   const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
   if (!normalizedPrompt) return normalizedPrompt;
-  if (!force && !isPolicySensitiveImagePrompt(normalizedPrompt)) {
-    return normalizedPrompt;
-  }
+  const policyReadyPrompt =
+    force || isPolicySensitiveImagePrompt(normalizedPrompt)
+      ? appendPromptNote(
+          reframePolicySensitiveVisualDetails(normalizedPrompt),
+          OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE,
+        )
+      : normalizedPrompt;
   return appendPromptNote(
-    reframePolicySensitiveVisualDetails(normalizedPrompt),
-    OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE,
+    policyReadyPrompt,
+    OPENAI_GPT_IMAGE_PRODUCTION_GUIDE_NOTE,
   );
 };
 
@@ -1329,6 +1335,9 @@ export const resolveActiveImageToolModels = ({
   );
 
 const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `For OpenAI GPT Image and Gemini Nano Banana models, always rephrase the image prompt before calling generate_image. Preserve the user's image intent while removing or softening offending, disallowed, non-visual, or unsupported parts. Translate risky intent into a safe visual language instead of hiding it.
+For OpenAI GPT Image models, follow the production prompting guide: structure prompts as background/scene, subject, key details, composition, lighting/mood, and constraints; include the intended format such as photorealistic image, ad, UI mockup, infographic, diagram, logo, product mockup, comic panel, or slide; describe materials, textures, camera/framing, viewpoint, placement, pose, gaze, and object interactions; and keep the prompt skimmable instead of keyword-stuffed.
+For OpenAI GPT Image text-in-image requests, put exact visible copy in quotes or ALL CAPS, specify typography/placement when available, and do not add any extra words, captions, watermarks, signatures, or unrelated logos.
+For OpenAI GPT Image edits or reference images, explicitly state what changes and what must remain invariant, including identity, geometry, layout, brand elements, camera angle, lighting, saturation, contrast, and surrounding objects.
 Preserve the theme through symbolism, fashion, environment, expression, cinematic composition, lighting, texture, and color while removing operational or harmful detail.
 For any human subject, state "adult woman in her mid-20s" or "adult man in his mid-20s" early when age is relevant, and use tasteful artistic framing such as "tasteful artistic illustration", "vibrant intricate anime style", or "glamorous editorial artwork".
 For Nano Banana models, be especially conservative: avoid repeated emphasis on bust, breasts, cleavage, wide hips, body-hugging fabric, submission, eroticism, seductive framing, BDSM-coded collars, or explicit arching poses. Replace them with safer visible wording such as "pronounced hourglass silhouette", "fitted outfit that follows the figure", "confident presentation", "glamorous poise", "warm amusement", "teasing smirk", "playful fondness", "intimate domestic mood", or "artistically charged atmosphere".

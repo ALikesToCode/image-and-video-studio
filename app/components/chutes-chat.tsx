@@ -1423,11 +1423,13 @@ export function ChutesChat({
                     },
                     quality: {
                       type: "string",
-                      description: "DALL-E 3 quality: standard or hd.",
+                      description:
+                        "OpenAI GPT Image quality: low, medium, high, or auto.",
                     },
                     style: {
                       type: "string",
-                      description: "DALL-E 3 style: vivid or natural.",
+                      description:
+                        "Optional provider style when the selected image model supports it.",
                     },
                     image_url: {
                       oneOf: [
@@ -1653,7 +1655,7 @@ export function ChutesChat({
 Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
       : "";
     const imagePromptInstruction =
-      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Prefer the active image model order from left to right. Include a model only when one available model clearly fits the request; that model will be tried first and the tool will continue through the ordered pipeline if it fails. Do not include the default model just to restate the default; omit model when uncertain so the preferred order starts from the top. Try the ordered pipeline rather than giving up after one model. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
+      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Prefer the active image model order from left to right. Include a model only when one available model clearly fits the request; that model will be tried first before ordered fallback. Do not include the default model just to restate the default; omit model when uncertain so the preferred order starts from the top. Try the ordered pipeline rather than giving up after one model. For OpenAI GPT Image models, write prompts in a production guide shape: background/scene, subject, key details, composition, lighting/mood, and constraints; include the intended output format; describe materials, textures, framing, viewpoint, placement, pose, gaze, and object interactions; render exact in-image text only when explicitly requested; and preserve explicit edit/reference invariants. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
 
     const defaultPrompt = `${promptGuide}
 ${FLUX_CROSS_MODAL_GUIDE}

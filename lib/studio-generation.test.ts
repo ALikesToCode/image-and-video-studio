@@ -540,6 +540,21 @@ test("OpenAI adult-themed image prompts keep art direction without explicit body
   );
 });
 
+test("OpenAI GPT image prompts get production guide structure even when not policy-sensitive", () => {
+  const prepared = prepareImagePromptForModel(
+    "gpt-image-2",
+    "Create a photorealistic ceramic teapot on a walnut table beside morning window light."
+  );
+
+  assert.match(prepared.prompt, /^Create a photorealistic ceramic teapot/i);
+  assert.match(prepared.prompt, /OpenAI GPT Image production prompt guide/i);
+  assert.match(prepared.prompt, /background\/scene, subject, key details, composition, lighting\/mood, and constraints/i);
+  assert.match(prepared.prompt, /For photorealism, preserve natural lighting, real materials, texture, and believable camera framing/i);
+  assert.match(prepared.prompt, /Render only text explicitly requested/i);
+  assert.match(prepared.prompt, /no watermark, no signature, no unrelated logos/i);
+  assert.equal(prepared.negativePrompt, undefined);
+});
+
 test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompts", () => {
   const openAiPrompt = buildSaferImagePromptForModel(
     "gpt-image-1.5",
