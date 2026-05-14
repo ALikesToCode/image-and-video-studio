@@ -202,6 +202,8 @@ const NEGATIVE_PROMPT_UPGRADES: Array<[RegExp, string]> = [
 
 const ADULT_IMAGE_PROMPT_PATTERN =
   /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
+const OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE =
+  "Allowed visual goal: Preserve the theme through symbolism, fashion, environment, expression, lighting, texture, composition, color palette, and cinematic staging. Use safe visual language with no graphic injury, sexual exploitation, real-person impersonation, private data, instructions for wrongdoing, weapon-use detail, extremist praise or recruitment, self-harm depiction, or deceptive realism. Use clearly adult subjects, non-explicit styling, and consensual/non-threatening staging when people are relevant.";
 const NAVY_IMAGE_ASPECT_RATIOS = new Set([
   "1:1",
   "16:9",
@@ -285,7 +287,7 @@ const isLikelyAdultImagePrompt = (prompt: string) =>
   ADULT_IMAGE_PROMPT_PATTERN.test(prompt);
 
 const POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN =
-  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust|apparent\s+age\s+18|18[-\s]?year[-\s]?old|student\s+council|school\s+uniform|slim\s+yet\s+curvy|curvy\s+build|dilated\s+pupils?|vacant\s+(?:eyes|gaze)|glassy\s+eyes?)\b/i;
+  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust|apparent\s+age\s+18|18[-\s]?year[-\s]?old|student\s+council|school\s+uniform|slim\s+yet\s+curvy|curvy\s+build|dilated\s+pupils?|vacant\s+(?:eyes|gaze)|glassy\s+(?:eyes?|gaze)|bloody|blood\s*soaked|gore|gory|body\s+parts?|dismember(?:ed|ment)?|decapitat(?:ed|ion)|graphic\s+injur(?:y|ies)|torture|final\s+blow|suicide|self-?harm|cutting|hanging|overdose|terroris[mt]|extremis[mt]|propaganda|recruitment|build\s+(?:a\s+)?(?:bomb|gun|weapon)|weapon\s+(?:construction|procurement|use)|phishing|credential\s+theft|steal(?:ing)?\s+.*passwords?|malware|deepfake|impersonat(?:e|ion)|photorealistic\s+likeness)\b/i;
 
 const isPolicySensitiveImagePrompt = (prompt: string) =>
   isLikelyAdultImagePrompt(prompt) ||
@@ -295,7 +297,24 @@ export const supportsSaferImagePromptRetry = (model: string) =>
   isOpenAiImageModel(model) || isGeminiImagePolicyModel(model);
 
 const softenPolicySensitiveImagePrompt = (prompt: string) => {
-  const softened = normalizeWhitespace(stripPromptEnvelope(prompt))
+  const softened = reframePolicySensitiveVisualDetails(prompt);
+
+  return appendPromptNote(
+    softened,
+    "Safety preflight: Reframe as a policy-compliant tasteful editorial anime illustration with clearly adult subjects, non-explicit styling, consensual/non-threatening staging, and no graphic sexual focus.",
+  );
+};
+
+const reframePolicySensitiveVisualDetails = (prompt: string) =>
+  normalizeWhitespace(stripPromptEnvelope(prompt))
+    .replace(
+      /\bicy\s+blue\s+eyes\s+rendered\s+glassy\s+and\s+vacant\s+with\s+dilated\s+pupils\b/gi,
+      "soft blue eyes rendered bright and reflective",
+    )
+    .replace(
+      /\b(\d{2})[-\s]?year[-\s]?old\s+adult\s+(woman|man|person)\b/gi,
+      "clearly adult $2",
+    )
     .replace(
       /\bapparent\s+age\s+18\b/gi,
       "clearly adult university-age appearance",
@@ -312,6 +331,13 @@ const softenPolicySensitiveImagePrompt = (prompt: string) => {
     .replace(/\bslim\s+yet\s+curvy\b/gi, "slim, balanced")
     .replace(/\bcurvy\s+build\b/gi, "balanced build")
     .replace(/\bcurvy\b/gi, "balanced")
+    .replace(/\bimpossibly\s+wide\s+hips\b/gi, "balanced silhouette")
+    .replace(/\berotic\s+standoff\s+atmosphere\b/gi, "dramatic editorial tension")
+    .replace(/\berotic\b/gi, "dramatic editorial")
+    .replace(/\bprovocative\b/gi, "glamorous")
+    .replace(/\bsexualized\b/gi, "fashion editorial")
+    .replace(/\bseductive\b/gi, "confident")
+    .replace(/\bsexy\b/gi, "stylish")
     .replace(/\bdilated\s+pupils?\b/gi, "soft blue eyes")
     .replace(/\bvacant\s+(?:eyes|gaze)\b/gi, "reflective gaze")
     .replace(/\bvacant\b/gi, "reflective")
@@ -350,11 +376,41 @@ const softenPolicySensitiveImagePrompt = (prompt: string) => {
     .replace(/\bheaving\s+chest\b/gi, "upper body")
     .replace(/\bpleading\s+(?:wide\s+)?eyes\b/gi, "wide expressive eyes")
     .replace(/\bmasked\s+man\b/gi, "mysterious figure")
-    .replace(/\bnon-?consensual\b/gi, "consensual");
+    .replace(/\bnon-?consensual\b/gi, "consensual")
+    .replace(/\bblood\s*soaked\b/gi, "rain-darkened")
+    .replace(/\bbloody\b/gi, "non-graphic")
+    .replace(/\bblood\b/gi, "dark rain")
+    .replace(/\bbody\s+parts\s+everywhere\b/gi, "shattered armor and debris everywhere")
+    .replace(/\bbody\s+parts\b/gi, "scattered debris")
+    .replace(/\bgory?\b/gi, "non-graphic")
+    .replace(/\bdismember(?:ed|ment)?\b/gi, "obscured aftermath")
+    .replace(/\bdecapitat(?:ed|ion)\b/gi, "obscured aftermath")
+    .replace(/\bgraphic\s+injur(?:y|ies)\b/gi, "non-graphic aftermath")
+    .replace(/\btorture\b/gi, "symbolic conflict")
+    .replace(/\bfinal\s+blow\b/gi, "decisive symbolic strike")
+    .replace(/\bsuicide|self-?harm|cutting|hanging|overdose\b/gi, "symbolic recovery")
+    .replace(/\bterroris[mt]\b/gi, "fictional authoritarian threat")
+    .replace(/\bextremis[mt]\b/gi, "fictional authoritarian faction")
+    .replace(/\bpropaganda|recruitment\b/gi, "historical warning poster")
+    .replace(/\b(?:build\s+(?:a\s+)?(?:bomb|gun|weapon)|weapon\s+(?:construction|procurement|use))\b/gi, "nonfunctional fantasy prop on a museum display")
+    .replace(/\bphishing\b/gi, "simulated phishing incident")
+    .replace(/\bcredential\s+theft\b/gi, "defensive credential-safety audit")
+    .replace(/\bsteal(?:ing)?\s+.*passwords?\b/gi, "reviewing a simulated security incident with dummy data")
+    .replace(/\bmalware\b/gi, "defensive malware-analysis dashboard")
+    .replace(/\bdeepfake|impersonat(?:e|ion)|photorealistic\s+likeness\b/gi, "fictionalized non-deceptive likeness");
 
+const buildOpenAiAllowedImagePrompt = (
+  prompt: string,
+  { force = false }: { force?: boolean } = {},
+) => {
+  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
+  if (!normalizedPrompt) return normalizedPrompt;
+  if (!force && !isPolicySensitiveImagePrompt(normalizedPrompt)) {
+    return normalizedPrompt;
+  }
   return appendPromptNote(
-    softened,
-    "Safety preflight: Reframe as a policy-compliant tasteful editorial anime illustration with clearly adult subjects, non-explicit styling, consensual/non-threatening staging, and no graphic sexual focus.",
+    reframePolicySensitiveVisualDetails(normalizedPrompt),
+    OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE,
   );
 };
 
@@ -498,13 +554,15 @@ export const buildSaferImagePromptForModel = (
 ) => {
   const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
   if (!supportsSaferImagePromptRetry(model)) return normalizedPrompt;
+  if (isOpenAiImageModel(model)) {
+    return buildOpenAiAllowedImagePrompt(normalizedPrompt, { force: true });
+  }
 
   const saferPrompt = isPolicySensitiveImagePrompt(normalizedPrompt)
     ? softenPolicySensitiveImagePrompt(normalizedPrompt)
     : normalizedPrompt;
-  const policyNote = isOpenAiImageModel(model)
-    ? "Safety recovery: Rewrite this as a policy-compliant OpenAI image prompt. Preserve the user's lawful visual intent, but remove or soften any explicit sexual, graphic, non-consensual, minor-related, deceptive likeness, or otherwise disallowed details. Use clearly adult subjects only when people are relevant, and prefer tasteful editorial styling over explicit depiction."
-    : "Safety recovery: Rewrite this as a policy-compliant Gemini image prompt. Preserve the user's lawful visual intent, but respect Gemini built-in safety filtering, avoid sexually explicit output, avoid any child-safety risk, and remove or soften details likely to trigger prohibited-content or image-safety blocks.";
+  const policyNote =
+    "Safety recovery: Rewrite this as a policy-compliant Gemini image prompt. Preserve the user's lawful visual intent, but respect Gemini built-in safety filtering, avoid sexually explicit output, avoid any child-safety risk, and remove or soften details likely to trigger prohibited-content or image-safety blocks.";
 
   return appendPromptNote(saferPrompt, policyNote);
 };
@@ -575,6 +633,13 @@ export const prepareImagePromptForModel = (
   const rawPrompt = prompt.trim().replace(/\r\n/g, "\n");
   const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
   const trimmedNegativePrompt = negativePrompt?.trim() || undefined;
+
+  if (isOpenAiImageModel(model)) {
+    return {
+      prompt: buildOpenAiAllowedImagePrompt(normalizedPrompt),
+      negativePrompt: trimmedNegativePrompt,
+    };
+  }
 
   if (!isFluxModel(model)) {
     return {
@@ -1263,7 +1328,8 @@ export const resolveActiveImageToolModels = ({
     availableModels,
   );
 
-const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `For OpenAI GPT Image and Gemini Nano Banana models, always rephrase the image prompt before calling generate_image. Preserve the user's image intent while removing or softening offending, disallowed, non-visual, or unsupported parts.
+const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `For OpenAI GPT Image and Gemini Nano Banana models, always rephrase the image prompt before calling generate_image. Preserve the user's image intent while removing or softening offending, disallowed, non-visual, or unsupported parts. Translate risky intent into a safe visual language instead of hiding it.
+Preserve the theme through symbolism, fashion, environment, expression, cinematic composition, lighting, texture, and color while removing operational or harmful detail.
 For any human subject, state "adult woman in her mid-20s" or "adult man in his mid-20s" early when age is relevant, and use tasteful artistic framing such as "tasteful artistic illustration", "vibrant intricate anime style", or "glamorous editorial artwork".
 For Nano Banana models, be especially conservative: avoid repeated emphasis on bust, breasts, cleavage, wide hips, body-hugging fabric, submission, eroticism, seductive framing, BDSM-coded collars, or explicit arching poses. Replace them with safer visible wording such as "pronounced hourglass silhouette", "fitted outfit that follows the figure", "confident presentation", "glamorous poise", "warm amusement", "teasing smirk", "playful fondness", "intimate domestic mood", or "artistically charged atmosphere".
 If another person appears in an intimate or tense scene, prefer a silhouetted, distant, or partially visible figure unless the user explicitly needs that person as the main subject. Avoid describing coercion, explicit sexual focus, or direct physical interaction as the center of the still image.

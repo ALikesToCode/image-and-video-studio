@@ -371,10 +371,18 @@ test("Navy image route retries flagged OpenAI image prompts with safer wording",
     assert.equal(prompts.length, 2);
     assert.match(
       prompts[0] ?? "",
-      /Create a provocative nightclub editorial portrait\./
+      /Create a glamorous nightclub editorial portrait\./
     );
-    assert.doesNotMatch(prompts[0] ?? "", /Safety recovery/i);
-    assert.match(prompts[1] ?? "", /policy-compliant OpenAI image prompt/i);
+    assert.match(prompts[0] ?? "", /Allowed visual goal/i);
+    assert.doesNotMatch(
+      prompts[0] ?? "",
+      /provocative|Safety recovery|policy-compliant OpenAI image prompt/i
+    );
+    assert.match(prompts[1] ?? "", /Allowed visual goal/i);
+    assert.doesNotMatch(
+      prompts[1] ?? "",
+      /provocative|Safety recovery|policy-compliant OpenAI image prompt/i
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

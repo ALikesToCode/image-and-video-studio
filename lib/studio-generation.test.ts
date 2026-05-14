@@ -506,19 +506,34 @@ test("Active chat image tool models honor the shared pipeline order when enabled
   );
 });
 
-test("Non-Flux image prompts are sent without hidden policy or rewrite notes", () => {
+test("OpenAI GPT image prompts reframe risky visual intent before the first request", () => {
+  const prompt =
+    "Mythic final strike in a dark-fantasy battlefield, bloody final blow with body parts everywhere, shockwave tearing through smoke and stone, black-purple energy.";
+
+  const openAi = prepareImagePromptForModel("gpt-image-2", prompt);
+  const gemini = prepareImagePromptForModel("nano-banana-2", prompt);
+
+  assert.match(openAi.prompt, /Mythic final strike/i);
+  assert.match(openAi.prompt, /shockwave tearing through smoke and stone/i);
+  assert.match(openAi.prompt, /symbolism, fashion, environment, expression, lighting, texture, composition/i);
+  assert.match(openAi.prompt, /no graphic injury/i);
+  assert.doesNotMatch(openAi.prompt, /bloody|body parts|gore|dismember/i);
+  assert.equal(gemini.prompt, prompt);
+});
+
+test("OpenAI adult-themed image prompts keep art direction without explicit body focus", () => {
   const prompt =
     "modern anime illustration, high detail, cinematic wide-to-medium shot. Tense erotic standoff atmosphere, shattered pride, desperate longing masked as rage, looming confrontation. Sharp focus, clean anatomy, clear silhouette, no text, no watermark.";
 
   const openAi = prepareImagePromptForModel("gpt-image-2", prompt);
   const gemini = prepareImagePromptForModel("nano-banana-2", prompt);
 
-  assert.equal(openAi.prompt, prompt);
+  assert.match(openAi.prompt, /modern anime illustration/i);
+  assert.match(openAi.prompt, /cinematic wide-to-medium shot/i);
+  assert.match(openAi.prompt, /dramatic editorial tension/i);
+  assert.match(openAi.prompt, /non-explicit styling/i);
+  assert.doesNotMatch(openAi.prompt, /erotic|sexual focus|Safety preflight|OpenAI GPT Image rewrite|Policy guardrails/i);
   assert.equal(gemini.prompt, prompt);
-  assert.doesNotMatch(
-    openAi.prompt,
-    /Safety preflight|OpenAI GPT Image rewrite|Policy guardrails/i
-  );
   assert.doesNotMatch(
     gemini.prompt,
     /Safety preflight|Gemini Nano Banana rewrite|Policy guardrails/i
@@ -539,7 +554,7 @@ test("Flagged OpenAI and Gemini image models get model-scoped safer retry prompt
     "Create a provocative nightclub editorial portrait."
   );
 
-  assert.match(openAiPrompt, /policy-compliant OpenAI image prompt/i);
+  assert.match(openAiPrompt, /allowed visual goal/i);
   assert.match(openAiPrompt, /clearly adult/i);
   assert.match(geminiPrompt, /policy-compliant Gemini image prompt/i);
   assert.match(geminiPrompt, /child-safety/i);
@@ -588,7 +603,7 @@ test("Prompt recovery uses a stable Navy rewrite model before GPT-5 chat models"
   );
 });
 
-test("Policy-sensitive OpenAI and Gemini prompts remain unchanged before the first request", () => {
+test("Policy-sensitive OpenAI prompts become safe visual goals before the first request", () => {
   const prompt = `Create a high-detail modern anime illustration.
 Main character: a 29-year-old adult woman with massive heavy J-cup breasts straining against her top and impossibly wide hips.
 Outfit: skin-tight pink sports crop top with a darkened patch at the crotch.
@@ -599,14 +614,22 @@ Lighting: shadows emphasize hard nipples faintly outlined through her top.`;
   const gemini = prepareImagePromptForModel("nano-banana-2", prompt).prompt;
   const flux = prepareImagePromptForModel("flux.2-pro", prompt).prompt;
 
-  assert.equal(openAi, prompt);
+  assert.match(openAi, /high-detail modern anime illustration/i);
+  assert.match(openAi, /clearly adult/i);
+  assert.match(openAi, /fitted activewear/i);
+  assert.match(openAi, /holding a small gym bag close/i);
+  assert.match(openAi, /allowed visual goal/i);
+  assert.match(openAi, /non-explicit styling/i);
+  assert.doesNotMatch(
+    openAi,
+    /J-cup|hard nipples|crotch|heaving chest|pleading eyes|masked man|Safety preflight|Policy guardrails/i
+  );
   assert.equal(gemini, prompt);
-  assert.doesNotMatch(openAi, /Safety preflight|rewrite|Policy guardrails/i);
   assert.doesNotMatch(gemini, /Safety preflight|rewrite|Policy guardrails/i);
   assert.match(flux, /J-cup|hard nipples|crotch/i);
 });
 
-test("Selected image models preserve non-Flux prompts and only prepare Flux prompts", () => {
+test("Selected image models apply OpenAI-safe prompt shaping and only prepare Flux structurally", () => {
   const prompt =
     "Create a high-detail anime portrait of an adult woman with a very large bust, hard nipples faintly outlined through her top, and nervous tension in a tidy bedroom.";
   const requests = prepareImageModelRequests({
@@ -619,7 +642,11 @@ test("Selected image models preserve non-Flux prompts and only prepare Flux prom
   const nanoPrompt = byModel.get("nano-banana-2") ?? "";
   const fluxPrompt = byModel.get("flux.2-pro") ?? "";
 
-  assert.equal(gptPrompt, prompt);
+  assert.match(gptPrompt, /high-detail anime portrait/i);
+  assert.match(gptPrompt, /athletic curvy figure|curvy upper body/i);
+  assert.match(gptPrompt, /subtle fabric texture/i);
+  assert.match(gptPrompt, /non-explicit styling/i);
+  assert.doesNotMatch(gptPrompt, /very large bust|hard nipples/i);
   assert.equal(nanoPrompt, prompt);
   assert.doesNotMatch(gptPrompt, /OpenAI GPT Image rewrite|Safety preflight|Policy guardrails/i);
   assert.doesNotMatch(nanoPrompt, /Gemini Nano Banana rewrite|Safety preflight|Policy guardrails/i);
@@ -628,7 +655,7 @@ test("Selected image models preserve non-Flux prompts and only prepare Flux prom
   assert.match(fluxPrompt, /Desired qualities/i);
 });
 
-test("GPT image prompts preserve borderline wording before first request", () => {
+test("GPT image prompts normalize age-ambiguous and school-coded wording before first request", () => {
   const requests = prepareImageModelRequests({
     models: ["gpt-image-2", "grok-imagine"],
     baseBody: {},
@@ -644,19 +671,29 @@ Main character (focus): Alya, apparent age 18, slim yet curvy build, porcelain-f
 Background/setting: A spacious student council room in late afternoon.
 Main character (focus): Alya, apparent age 18, slim yet curvy build, porcelain-fair skin, icy blue eyes rendered glassy and vacant with dilated pupils.`;
 
-  assert.equal(gptPrompt, expected);
+  assert.match(gptPrompt, /spacious university council room/i);
+  assert.match(gptPrompt, /clearly adult/i);
+  assert.match(gptPrompt, /slim, balanced build/i);
+  assert.match(gptPrompt, /bright and reflective/i);
+  assert.match(gptPrompt, /soft blue eyes/i);
+  assert.match(gptPrompt, /allowed visual goal/i);
+  assert.doesNotMatch(gptPrompt, /apparent age 18|student council|glassy|vacant|dilated|Policy guardrails/i);
   assert.equal(grokPrompt, expected);
   assert.doesNotMatch(gptPrompt, /OpenAI GPT Image rewrite|Safety preflight|Policy guardrails/i);
 });
 
-test("Threat-framed OpenAI and Gemini prompts remain unchanged before the first request", () => {
+test("Threat-framed OpenAI prompts keep tension without coercive staging", () => {
   const prompt =
     "Create an anime scene with a nervous adult woman looking up with pleading eyes at a masked man in a dark doorway.";
 
   const openAi = prepareImagePromptForModel("gpt-image-2", prompt).prompt;
   const gemini = prepareImagePromptForModel("nano-banana-2", prompt).prompt;
 
-  assert.equal(openAi, prompt);
+  assert.match(openAi, /anime scene/i);
+  assert.match(openAi, /wide expressive eyes/i);
+  assert.match(openAi, /mysterious figure/i);
+  assert.match(openAi, /consensual\/non-threatening staging/i);
+  assert.doesNotMatch(openAi, /pleading eyes|masked man|Policy guardrails/i);
   assert.equal(gemini, prompt);
   assert.doesNotMatch(openAi, /Safety preflight|rewrite|Policy guardrails/i);
   assert.doesNotMatch(gemini, /Safety preflight|rewrite|Policy guardrails/i);
@@ -691,6 +728,8 @@ test("Chat provider policy hint only appears when selected image models need it"
   assert.match(hint, /Keep only details that can be shown visually/i);
   assert.match(hint, /Do not render long paragraphs of text inside the image/i);
   assert.match(hint, /translate it into a strong visual metaphor/i);
+  assert.match(hint, /translate risky intent into a safe visual language/i);
+  assert.match(hint, /Preserve the theme through symbolism/i);
   assert.match(hint, /Do not try to bypass provider moderation/i);
   assert.equal(hint.includes("exception to AI"), false);
   assert.equal(hint.includes("violent act"), false);
