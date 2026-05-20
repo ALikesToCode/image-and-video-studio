@@ -6,6 +6,10 @@ import {
   GET as navyImageGet,
   POST as navyImagePost,
 } from "../../app/api/navy/image/route.ts";
+import {
+  GET as navyVideoGet,
+  POST as navyVideoPost,
+} from "../../app/api/navy/video/route.ts";
 import { POST as navyVideoDownload } from "../../app/api/navy/video/download/route.ts";
 
 test("Gemini video download route rejects untrusted media hosts before fetch", async () => {
@@ -526,6 +530,112 @@ test("Navy image route returns upstream failed job messages", async () => {
       payload.error,
       "No image data received, did the output get flagged as NSFW?"
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy video route forwards documented generation parameters", async () => {
+  const originalFetch = globalThis.fetch;
+  const forwardedBodies: Record<string, unknown>[] = [];
+  globalThis.fetch = async (_input, init) => {
+    if (typeof init?.body === "string") {
+      forwardedBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    }
+    return Response.json({ id: "job_video", status: "queued" });
+  };
+
+  try {
+    const response = await navyVideoPost(
+      new Request("https://studio.test/api/navy/video", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "veo-3.1",
+          prompt: "A coastal city at sunrise",
+          imageUrl: "data:image/png;base64,AQID",
+          size: "16:9",
+          seconds: 6,
+          seed: 42,
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, { id: "job_video" });
+    const forwarded = forwardedBodies[0] ?? {};
+    assert.equal(forwarded.model, "veo-3.1");
+    assert.equal(forwarded.image_url, "data:image/png;base64,AQID");
+    assert.equal(forwarded.size, "16:9");
+    assert.equal(forwarded.seconds, 6);
+    assert.equal(forwarded.seed, 42);
+    assert.equal(forwarded.sync, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy video route treats poll rate limits as pending jobs", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json(
+      { error: { message: "Too many requests" } },
+      {
+        status: 429,
+        headers: { "retry-after": "7" },
+      }
+    );
+
+  try {
+    const response = await navyVideoGet(
+      new Request("https://studio.test/api/navy/video?id=job_rate_limited", {
+        headers: {
+          "x-user-api-key": "navy-secret",
+        },
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, {
+      done: false,
+      status: "rate_limited",
+      retryAfterMs: 7000,
+    });
+    assert.equal(response.headers.get("retry-after"), "7");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy video route returns upstream failed job messages", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      id: "job_failed",
+      status: "failed",
+      error: {
+        code: "job_failed",
+        message: "Provider returned an unrecoverable error",
+      },
+    });
+
+  try {
+    const response = await navyVideoGet(
+      new Request("https://studio.test/api/navy/video?id=job_failed", {
+        headers: {
+          "x-user-api-key": "navy-secret",
+        },
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.equal(payload.error, "Provider returned an unrecoverable error");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -13,6 +13,7 @@ import { IMAGE_MIME_TYPES, parseDataUrl } from "@/lib/studio-validation";
 import {
   buildSaferImagePromptForModel,
   buildNavyImageGenerationPayload,
+  isNavyGenerationFailed,
   isLikelyImagePolicyError,
   isNavyGenerationPending,
   supportsSaferImagePromptRetry,
@@ -388,10 +389,6 @@ const imageJobFailure = (req: Request, data: unknown) =>
     { status: 502 }
   );
 
-const isFailedNavyGenerationStatus = (status: unknown) =>
-  typeof status === "string" &&
-  /^(failed|failure|error|errored|cancelled|canceled)$/i.test(status.trim());
-
 export async function OPTIONS(req: Request) {
   return janitorAiOptionsResponse(req);
 }
@@ -494,7 +491,7 @@ export async function POST(req: Request) {
 
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-  if (isFailedNavyGenerationStatus(dataRecord.status)) {
+  if (isNavyGenerationFailed(dataRecord.status)) {
     return imageJobFailure(req, data);
   }
   const mediaKind = nonImageMediaKindFromNavyRecord(dataRecord);
@@ -576,7 +573,7 @@ export async function GET(req: Request) {
 
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-  if (isFailedNavyGenerationStatus(dataRecord.status)) {
+  if (isNavyGenerationFailed(dataRecord.status)) {
     return imageJobFailure(req, data);
   }
   if (isNavyGenerationPending(typeof dataRecord.status === "string" ? dataRecord.status : null)) {

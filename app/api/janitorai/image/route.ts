@@ -19,7 +19,10 @@ import {
   type Provider,
 } from "@/lib/constants";
 import {
+  NAVY_JOB_POLL_INTERVAL_MS,
+  NAVY_JOB_POLL_MAX_ATTEMPTS,
   prepareImageModelRequests,
+  resolveNavyJobPollDelayMs,
   resolveActiveImageToolModels,
 } from "@/lib/studio-generation";
 import { IMAGE_MIME_TYPES, parseDataUrl } from "@/lib/studio-validation";
@@ -203,8 +206,8 @@ const providerRequest = (
   });
 
 const pollNavyImageJob = async (apiKey: string, id: string) => {
-  let delayMs = 2_000;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
+  for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
     const response = await navyImageGet(
       new Request(
         `https://studio.local/api/navy/image?id=${encodeURIComponent(id)}`,
@@ -220,11 +223,11 @@ const pollNavyImageJob = async (apiKey: string, id: string) => {
     if (payload?.done) {
       return { response, payload };
     }
-    delayMs =
-      typeof payload?.retryAfterMs === "number" &&
-      Number.isFinite(payload.retryAfterMs)
-        ? Math.min(Math.max(payload.retryAfterMs, 1_000), 30_000)
-        : delayMs;
+    delayMs = resolveNavyJobPollDelayMs({
+      payload,
+      responseStatus: response.status,
+      currentDelayMs: delayMs,
+    });
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
   return {

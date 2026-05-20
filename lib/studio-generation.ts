@@ -79,6 +79,37 @@ type NavyChatImageSizing = {
 
 export const DEFAULT_IMAGE_RETRY_ATTEMPTS = 4;
 export const MAX_IMAGE_RETRY_ATTEMPTS = 8;
+export const NAVY_JOB_POLL_INTERVAL_MS = 5000;
+export const NAVY_JOB_POLL_MAX_ATTEMPTS = 120;
+const NAVY_JOB_POLL_MAX_DELAY_MS = 30000;
+
+const clampNavyPollDelayMs = (value: number) =>
+  Math.min(Math.max(Math.round(value), 1000), NAVY_JOB_POLL_MAX_DELAY_MS);
+
+export const resolveNavyJobPollDelayMs = ({
+  payload,
+  responseStatus,
+  currentDelayMs,
+}: {
+  payload: unknown;
+  responseStatus: number;
+  currentDelayMs: number;
+}) => {
+  const record =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+  if (
+    typeof record.retryAfterMs === "number" &&
+    Number.isFinite(record.retryAfterMs)
+  ) {
+    return clampNavyPollDelayMs(record.retryAfterMs);
+  }
+  if (responseStatus === 429 || record.status === "rate_limited") {
+    return clampNavyPollDelayMs(currentDelayMs * 2);
+  }
+  return NAVY_JOB_POLL_INTERVAL_MS;
+};
 
 export const normalizeImageRetryAttempts = (
   value: unknown,
@@ -1527,6 +1558,10 @@ export const isNavyGenerationPending = (status?: string | null) => {
     "in_progress",
   ].includes(normalized);
 };
+
+export const isNavyGenerationFailed = (status: unknown) =>
+  typeof status === "string" &&
+  /^(failed|failure|error|errored|cancelled|canceled)$/i.test(status.trim());
 
 export const buildChutesChatSystemPrompt = ({
   toolImageModel,

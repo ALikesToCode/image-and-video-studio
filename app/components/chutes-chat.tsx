@@ -109,9 +109,12 @@ import {
   buildImagePolicyRecoveryPrompt,
   isLikelyImagePolicyError,
   isFluxModel,
+  NAVY_JOB_POLL_INTERVAL_MS,
+  NAVY_JOB_POLL_MAX_ATTEMPTS,
   normalizeImageRetryAttempts,
   prepareImageModelRequests,
   resolveImagePromptRecoveryChatModels,
+  resolveNavyJobPollDelayMs,
   resolveNavyChatImageSizing,
   summarizeImageModelPrompts,
 } from "@/lib/studio-generation";
@@ -2169,9 +2172,9 @@ ${defaultPrompt}`;
         }
 
         if (provider === "navy" && typeof payload?.id === "string" && payload.id) {
-          const maxAttempts = 60;
-          let delayMs = 3000;
-          for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
+          let didComplete = false;
+          for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !didComplete; attempt += 1) {
             const pollResponse = await fetch(
               `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
               {
@@ -2189,16 +2192,18 @@ ${defaultPrompt}`;
                 throw new Error(`Async image job failed: ${pollPayload.error}`);
               }
               payload = pollPayload;
+              didComplete = true;
               break;
             }
-            delayMs =
-              typeof pollPayload?.retryAfterMs === "number" &&
-              Number.isFinite(pollPayload.retryAfterMs)
-                ? Math.min(Math.max(pollPayload.retryAfterMs, 1000), 30_000)
-                : pollResponse.status === 429
-                  ? Math.min(delayMs * 2, 30_000)
-                  : 3000;
+            delayMs = resolveNavyJobPollDelayMs({
+              payload: pollPayload,
+              responseStatus: pollResponse.status,
+              currentDelayMs: delayMs,
+            });
             await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          if (!didComplete) {
+            throw new Error("Timed out waiting for the Navy image job.");
           }
         }
 
@@ -2415,8 +2420,7 @@ ${defaultPrompt}`;
       }
 
       let videoUrl = "";
-      const maxAttempts = 120;
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
         const pollResponse = await fetch(
           `/api/navy/video?id=${encodeURIComponent(jobId)}`,
           {
@@ -2432,7 +2436,9 @@ ${defaultPrompt}`;
           );
         }
         if (!pollPayload?.done) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          await new Promise((resolve) =>
+            setTimeout(resolve, NAVY_JOB_POLL_INTERVAL_MS)
+          );
           continue;
         }
         if (typeof pollPayload?.error === "string" && pollPayload.error.length) {

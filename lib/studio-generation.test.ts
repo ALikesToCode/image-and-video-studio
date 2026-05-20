@@ -10,6 +10,8 @@ import {
   buildGeminiVideoPayload,
   buildImagePolicyRecoveryPrompt,
   buildNavyImageGenerationPayload,
+  NAVY_JOB_POLL_INTERVAL_MS,
+  NAVY_JOB_POLL_MAX_ATTEMPTS,
   buildOpenRouterImagePayload,
   extractImagePolicyViolationCategories,
   buildChutesChatSystemPrompt,
@@ -18,6 +20,7 @@ import {
   getQueuedJobsToStart,
   mergeGeneratedImagesInDisplayOrder,
   normalizeNavyImageUrlPayload,
+  resolveNavyJobPollDelayMs,
   normalizeImageModelOrder,
   normalizeImageRetryAttempts,
   prepareImageModelRequests,
@@ -807,6 +810,38 @@ test("Navy pending statuses are recognized consistently", () => {
   assert.equal(isNavyGenerationPending("processing"), true);
   assert.equal(isNavyGenerationPending("completed"), false);
   assert.equal(isNavyGenerationPending("succeeded"), false);
+});
+
+test("Navy job polling covers the documented ten minute retention window", () => {
+  assert.equal(NAVY_JOB_POLL_INTERVAL_MS, 5000);
+  assert.equal(NAVY_JOB_POLL_MAX_ATTEMPTS, 120);
+});
+
+test("Navy poll delay honors retry-after payloads and rate-limit backoff", () => {
+  assert.equal(
+    resolveNavyJobPollDelayMs({
+      payload: { retryAfterMs: 7000 },
+      responseStatus: 200,
+      currentDelayMs: 5000,
+    }),
+    7000
+  );
+  assert.equal(
+    resolveNavyJobPollDelayMs({
+      payload: {},
+      responseStatus: 429,
+      currentDelayMs: 20000,
+    }),
+    30000
+  );
+  assert.equal(
+    resolveNavyJobPollDelayMs({
+      payload: {},
+      responseStatus: 200,
+      currentDelayMs: 12000,
+    }),
+    NAVY_JOB_POLL_INTERVAL_MS
+  );
 });
 
 test("Auto image sizing omits aspect and size fields for providers that support model-defined sizing", () => {
