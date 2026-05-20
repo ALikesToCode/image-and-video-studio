@@ -65,6 +65,7 @@ export type PersistedGenerationJob = {
     remoteJobId?: string;
     remoteOperationName?: string;
     remoteStatus?: string;
+    saveToGallery?: boolean;
 };
 
 export type NavyUsageResponse = {

@@ -45,6 +45,9 @@ import {
     mergeGeneratedImagesInDisplayOrder,
     normalizeImageModelOrder,
     normalizeImageRetryAttempts,
+    NAVY_JOB_POLL_INTERVAL_MS,
+    NAVY_JOB_POLL_MAX_ATTEMPTS,
+    resolveNavyJobPollDelayMs,
     resolveImageSizingOptions,
     resolveImageGenerationModelPipeline,
     retryAsyncOperation,
@@ -53,6 +56,10 @@ import {
     isValidNavyImagePixelSize,
     DEFAULT_IMAGE_RETRY_ATTEMPTS,
 } from "@/lib/studio-generation";
+import {
+    restorePersistedGenerationJob,
+    shouldPersistRemoteGenerationJob,
+} from "@/lib/generation-job-persistence";
 import { normalizeVeoDuration } from "@/lib/studio-validation";
 import {
     clearGalleryStore,
@@ -549,6 +556,7 @@ const toPersistedJob = (job: GenerationJob): PersistedGenerationJob => ({
     remoteJobId: job.remoteJobId,
     remoteOperationName: job.remoteOperationName,
     remoteStatus: job.remoteStatus,
+    saveToGallery: job.saveToGallery,
 });
 
 // --- Context Interface ---
@@ -1293,10 +1301,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                                 remoteStatus:
                                     typeof payload?.status === "string" ? payload.status : undefined,
                             });
-                            let delayMs = 5000;
-                            for (let pollAttempt = 0; pollAttempt < 60; pollAttempt += 1) {
+                            let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
+                            let didComplete = Boolean(navyPayload?.done);
+                            for (let pollAttempt = 0; pollAttempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !didComplete; pollAttempt += 1) {
                                 updateJob(job.id, {
-                                    progress: `Waiting for Navy image render${attemptLabel} (${pollAttempt + 1}/60)...`,
+                                    progress: `Waiting for Navy image render${attemptLabel} (${pollAttempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
                                 });
                                 await sleep(delayMs);
                                 const pollResponse = await fetch(
@@ -1311,29 +1320,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                                 if (!pollResponse.ok && pollResponse.status !== 429) {
                                     throw new Error(errorMessageFromPayload(navyPayload, "Unable to poll Navy image job."));
                                 }
-                                if (
-                                    typeof navyPayload?.retryAfterMs === "number" &&
-                                    Number.isFinite(navyPayload.retryAfterMs)
-                                ) {
-                                    delayMs = Math.min(Math.max(navyPayload.retryAfterMs, 1000), 30000);
+                                didComplete = Boolean(navyPayload?.done);
+                                delayMs = resolveNavyJobPollDelayMs({
+                                    payload: navyPayload,
+                                    responseStatus: pollResponse.status,
+                                    currentDelayMs: delayMs,
+                                });
+                                if (!didComplete && (pollResponse.status === 429 || navyPayload?.status === "rate_limited")) {
                                     updateJob(job.id, {
                                         remoteStatus: "rate_limited",
                                         progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
                                     });
-                                    continue;
                                 }
-                                if (pollResponse.status === 429) {
-                                    delayMs = Math.min(delayMs * 2, 30000);
-                                    updateJob(job.id, {
-                                        remoteStatus: "rate_limited",
-                                        progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
-                                    });
-                                    continue;
-                                }
-                                if (navyPayload?.done) {
-                                    break;
-                                }
-                                delayMs = 5000;
+                            }
+                            if (!didComplete) {
+                                throw new Error("Timed out waiting for the Navy image job.");
                             }
                         }
 
@@ -1573,11 +1574,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 }
 
                 if (!remoteVideoUrl) {
-                    for (let attempt = 0; attempt < 60; attempt += 1) {
+                    for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
                         updateJob(job.id, {
-                            progress: `Waiting for Navy render (${attempt + 1}/60)...`,
+                            progress: `Waiting for Navy render (${attempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
                         });
-                        await sleep(5000);
+                        await sleep(NAVY_JOB_POLL_INTERVAL_MS);
                         const pollResponse = await fetch(
                             `/api/navy/video?id=${encodeURIComponent(generationId)}`,
                             {
@@ -2406,19 +2407,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (!idbAvailable) return;
             try {
                 const persistedJobs = await listPersistedJobRecords<PersistedGenerationJob>();
-                const restorable = persistedJobs
-                    .filter(
-                        (job) =>
-                            (job.status === "queued" || job.status === "running") &&
-                            (job.remoteJobId || job.remoteOperationName)
-                    )
-                    .map<GenerationJob>((job) => ({
-                        ...job,
-                        status: "queued",
-                        apiKey: storedKeys[job.provider] ?? "",
-                        saveToGallery: true,
-                        progress: job.progress ?? "Restoring remote job polling...",
-                    }));
+                const restorable: GenerationJob[] = [];
+                for (const job of persistedJobs) {
+                    const restored = restorePersistedGenerationJob(
+                        job,
+                        storedKeys[job.provider]
+                    );
+                    if (restored) {
+                        restorable.push(restored as GenerationJob);
+                    }
+                }
                 if (restorable.length) {
                     setJobs((prev) => [...prev, ...restorable]);
                 }
@@ -2607,8 +2605,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!hydrated || !idbAvailable) return;
         for (const job of jobs) {
-            const hasRemoteHandle = Boolean(job.remoteJobId || job.remoteOperationName);
-            if (hasRemoteHandle && (job.status === "queued" || job.status === "running")) {
+            if (shouldPersistRemoteGenerationJob(job)) {
                 void putPersistedJobRecord(toPersistedJob(job));
             }
             if (job.status === "success" || job.status === "error") {
