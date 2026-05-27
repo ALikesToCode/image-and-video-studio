@@ -192,7 +192,7 @@ export function ImgGenSettings({
     const isChutesKokoro = provider === "chutes" && normalizedModel === "kokoro";
     const isChutesCsm = provider === "chutes" && normalizedModel === "csm-1b";
 
-    const showImageCount = provider === "navy" || isImagenModel;
+    const showImageCount = isImagenModel;
     const showImageSize =
         provider === "gemini"
             ? model.includes("gemini-3-pro") || isImagenModel

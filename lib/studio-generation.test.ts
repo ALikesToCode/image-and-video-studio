@@ -96,8 +96,10 @@ test("Navy capability grouping preserves new catalog metadata and buckets", () =
   assert.equal(grouped.chat[1]?.tokenMultiplier, 3);
 });
 
-test("Static Navy fallbacks include recently announced models", () => {
-  assert.equal(NAVY_IMAGE_MODELS.some((model) => model.id === "image-1"), true);
+test("Static Navy image fallbacks omit models missing from the current catalog", () => {
+  assert.equal(NAVY_IMAGE_MODELS.some((model) => model.id === "image-1"), false);
+  assert.equal(NAVY_IMAGE_MODELS.some((model) => model.id === "dall-e-3"), false);
+  assert.equal(NAVY_IMAGE_MODELS.some((model) => model.id === "gpt-image-2"), true);
   assert.equal(
     NAVY_CHAT_MODELS.find((model) => model.id === "gpt-5.5")?.tokenMultiplier,
     12
@@ -271,7 +273,7 @@ test("Only queued and running jobs count as active work", () => {
   );
 });
 
-test("Navy image payload maps OpenAI-compatible fields to Navy API fields", () => {
+test("Navy image payload maps supported fields to Navy API fields", () => {
   const payload = buildNavyImageGenerationPayload({
     model: "flux",
     prompt: "A naval command room at dusk",
@@ -288,7 +290,7 @@ test("Navy image payload maps OpenAI-compatible fields to Navy API fields", () =
   });
 
   assert.equal(payload.model, "flux");
-  assert.equal(payload.n, 2);
+  assert.equal("n" in payload, false);
   assert.equal(payload.quality, "medium");
   assert.equal(payload.image_url, "https://example.com/ref.png");
   assert.equal(payload.seed, 42);

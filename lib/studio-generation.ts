@@ -1495,7 +1495,6 @@ export const buildNavyImageGenerationPayload = ({
   model,
   prompt,
   size,
-  numberOfImages,
   quality,
   style,
   imageUrl,
@@ -1530,9 +1529,6 @@ export const buildNavyImageGenerationPayload = ({
     model,
     prompt: promptWithNegativeGuidance,
     ...(normalizedSize ? { size: normalizedSize } : {}),
-    ...(typeof numberOfImages === "number" && numberOfImages > 0
-      ? { n: numberOfImages }
-      : {}),
     ...(quality || !isLikelyVideoModel ? { quality: quality ?? "medium" } : {}),
     ...(style ? { style } : {}),
     ...(normalizedImageUrl ? { image_url: normalizedImageUrl } : {}),

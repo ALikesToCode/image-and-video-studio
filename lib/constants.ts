@@ -177,22 +177,6 @@ export const NAVY_IMAGE_MODELS: ModelOption[] = [
         label: "Flux",
     },
     {
-        id: "image-1",
-        label: "Image 1",
-        endpoint: "navy-images-generations",
-        outputModalities: ["image"],
-        supports: {
-            imageGeneration: true,
-            imageEdit: true,
-            referenceImages: true,
-        },
-        maxReferenceImages: 5,
-    },
-    {
-        id: "dall-e-3",
-        label: "DALL-E 3",
-    },
-    {
         id: "gpt-image-2",
         label: "GPT Image 2",
         premium: true,

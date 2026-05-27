@@ -1248,7 +1248,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         body = {
                             ...body,
                             ...imageSizing,
-                            numberOfImages: job.imageCount,
                             quality: job.navyImageQuality,
                             negativePrompt: job.negativePrompt,
                             promptAgentModel: job.promptAgentModel,

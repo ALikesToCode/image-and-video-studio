@@ -195,7 +195,8 @@ const NAVY_IMAGE_GUIDE_PROMPT = `# Prompt Guide for NavyAI Image Generation
 
 Use concise, vivid descriptions with clear subjects, styles, and lighting. Ask for missing details.
 Summarize the final prompt before generating, and prefer sizes like 1024x1024 unless specified.
-When the user provides reference images, pass them through image_url as one URL/data URI or an array of up to 5 references.`;
+When the user provides reference images, pass them through image_url as one URL/data URI or an array of up to 5 references.
+Generate one image per tool call; the Navy image endpoint does not support a multi-image count parameter.`;
 
 const FLUX_CROSS_MODAL_GUIDE = `# Flux Cross-Modal Prompt Protocol
 
@@ -1446,10 +1447,6 @@ export function ChutesChat({
                       description:
                         "Optional reference image URL or data URI, or up to 5 reference images for multi-reference editing.",
                     },
-                    n: {
-                      type: "integer",
-                      description: "Number of images to generate.",
-                    },
                   },
                   required: ["prompt"],
                 },
@@ -2113,7 +2110,6 @@ ${defaultPrompt}`;
     const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
     const baseBody: Record<string, unknown> = {};
     if (provider === "navy") {
-      const numberOfImages = getNumberArg(finalArgs, ["n"]);
       const size = getStringArg(finalArgs, ["size"]);
       const quality = getStringArg(finalArgs, ["quality"]);
       const style = getStringArg(finalArgs, ["style"]);
@@ -2122,9 +2118,6 @@ ${defaultPrompt}`;
       if (quality) baseBody.quality = quality;
       if (style) baseBody.style = style;
       if (imageUrl) baseBody.imageUrl = imageUrl;
-      if (numberOfImages && numberOfImages > 0) {
-        baseBody.numberOfImages = Math.max(1, Math.round(numberOfImages));
-      }
       baseBody.sync = false;
     } else {
       const guidanceScale = getNumberArg(finalArgs, ["guidance_scale"]);
