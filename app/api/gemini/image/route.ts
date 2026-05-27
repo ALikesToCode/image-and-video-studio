@@ -14,6 +14,7 @@ import {
   isLikelyImagePolicyError,
   supportsSaferImagePromptRetry,
 } from "@/lib/studio-generation";
+import { normalizeGeminiImageModelId } from "@/lib/studio-validation";
 
 type ImageRequest = {
   apiKey?: string;
@@ -135,9 +136,17 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+  const geminiModel = normalizeGeminiImageModelId(model);
+  if (!geminiModel) {
+    return janitorAiJsonResponse(
+      req,
+      { error: "Unsupported Gemini image model." },
+      { status: 400 }
+    );
+  }
   const requestImages = async (requestPrompt: string) => {
     const { endpoint, payload } = buildGeminiImagePayload({
-      model,
+      model: geminiModel,
       prompt: requestPrompt,
       aspectRatio,
       imageSize,
@@ -153,7 +162,7 @@ export async function POST(req: Request) {
       body: JSON.stringify(payload),
     });
     const data = (await jsonOrNull(response)) as Record<string, unknown> | null;
-    const images = model.startsWith("imagen-")
+    const images = geminiModel.startsWith("imagen-")
       ? pickImagesFromImagen(data)
       : pickImagesFromGemini(data);
     return { response, data, images };
@@ -167,16 +176,16 @@ export async function POST(req: Request) {
       [userApiKey]
     );
     if (
-      supportsSaferImagePromptRetry(model) &&
+      supportsSaferImagePromptRetry(geminiModel) &&
       isLikelyImagePolicyError(errorMessage)
     ) {
       ({ response, data, images } = await requestImages(
-        buildSaferImagePromptForModel(model, prompt)
+        buildSaferImagePromptForModel(geminiModel, prompt)
       ));
       if (response.ok && images.length) {
         return janitorAiJsonResponse(
           req,
-          imageResponsePayload(images, model, includeUserscriptShape)
+          imageResponsePayload(images, geminiModel, includeUserscriptShape)
         );
       }
       errorMessage = providerErrorMessage(
@@ -194,11 +203,11 @@ export async function POST(req: Request) {
 
   if (
     !images.length &&
-    supportsSaferImagePromptRetry(model) &&
+    supportsSaferImagePromptRetry(geminiModel) &&
     payloadLooksPolicyBlocked(data)
   ) {
     ({ response, data, images } = await requestImages(
-      buildSaferImagePromptForModel(model, prompt)
+      buildSaferImagePromptForModel(geminiModel, prompt)
     ));
     if (!response.ok) {
       const errorMessage = providerErrorMessage(
@@ -224,6 +233,6 @@ export async function POST(req: Request) {
 
   return janitorAiJsonResponse(
     req,
-    imageResponsePayload(images, model, includeUserscriptShape)
+    imageResponsePayload(images, geminiModel, includeUserscriptShape)
   );
 }

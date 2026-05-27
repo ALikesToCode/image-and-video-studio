@@ -9,7 +9,11 @@ import {
   providerErrorMessage,
 } from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
-import { IMAGE_MIME_TYPES, parseDataUrl } from "@/lib/studio-validation";
+import {
+  IMAGE_MIME_TYPES,
+  normalizeNavyJobId,
+  parseDataUrl,
+} from "@/lib/studio-validation";
 import {
   buildSaferImagePromptForModel,
   buildNavyImageGenerationPayload,
@@ -543,12 +547,23 @@ export async function GET(req: Request) {
       { status: 400 }
     );
   }
+  const jobId = normalizeNavyJobId(id);
+  if (!jobId) {
+    return janitorAiJsonResponse(
+      req,
+      { error: "Invalid job id." },
+      { status: 400 }
+    );
+  }
 
-  const response = await fetch(`https://api.navy/v1/images/generations/${id}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
+  const response = await fetch(
+    `https://api.navy/v1/images/generations/${encodeURIComponent(jobId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    }
+  );
 
   const data = await jsonOrNull(response);
   if (response.status === 429) {

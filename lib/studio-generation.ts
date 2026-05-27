@@ -179,8 +179,23 @@ const normalizeWhitespace = (value: string) =>
     .filter(Boolean)
     .join("\n");
 
-const stripPromptEnvelope = (value: string) =>
-  value.trim().replace(/^["']+|["']+$/g, "");
+const stripPromptEnvelope = (value: string) => {
+  const trimmed = value.trim();
+  let start = 0;
+  let end = trimmed.length;
+
+  while (start < end && (trimmed[start] === `"` || trimmed[start] === "'")) {
+    start += 1;
+  }
+  while (
+    end > start &&
+    (trimmed[end - 1] === `"` || trimmed[end - 1] === "'")
+  ) {
+    end -= 1;
+  }
+
+  return trimmed.slice(start, end);
+};
 
 const ensureSentence = (value: string) => {
   const trimmed = value.trim().replace(/\s+/g, " ");

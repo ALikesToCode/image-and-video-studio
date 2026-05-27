@@ -2,6 +2,11 @@ export const runtime = "edge";
 
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 import { buildGeminiVideoPayload } from "@/lib/studio-generation";
+import {
+  geminiOperationStatusUrl,
+  normalizeGeminiOperationName,
+  normalizeGeminiVideoModelId,
+} from "@/lib/studio-validation";
 
 type VideoRequest = {
   apiKey?: string;
@@ -31,7 +36,15 @@ export async function POST(req: Request) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
+  const geminiModel = normalizeGeminiVideoModelId(model);
+  if (!geminiModel) {
+    return Response.json(
+      { error: "Unsupported Gemini video model." },
+      { status: 400 }
+    );
+  }
+
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:predictLongRunning`;
   const payload = buildGeminiVideoPayload({
     prompt,
     aspectRatio,
@@ -85,14 +98,16 @@ export async function GET(req: Request) {
     return Response.json({ error: "Missing operation name or API key." }, { status: 400 });
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/${name}`,
-    {
-      headers: {
-        "x-goog-api-key": apiKey,
-      },
-    }
-  );
+  const operationName = normalizeGeminiOperationName(name);
+  if (!operationName) {
+    return Response.json({ error: "Invalid operation name." }, { status: 400 });
+  }
+
+  const response = await fetch(geminiOperationStatusUrl(operationName), {
+    headers: {
+      "x-goog-api-key": apiKey,
+    },
+  });
   const data = await jsonOrNull(response);
 
   if (!response.ok) {

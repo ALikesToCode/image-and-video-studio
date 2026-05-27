@@ -206,6 +206,14 @@ test("Gemini image payload keeps Imagen separate from Gemini edit payloads witho
   });
 });
 
+test("prompt envelope stripping avoids regex backtracking on quoted input", () => {
+  const prompt = `${'"'.repeat(2000)}Create a clean product photo.${"'".repeat(2000)}`;
+  assert.equal(
+    prepareImagePromptForModel("custom-image-model", prompt).prompt,
+    "Create a clean product photo."
+  );
+});
+
 test("OpenRouter image payload puts text first before image references", () => {
   const payload = buildOpenRouterImagePayload({
     model: "google/gemini-2.5-flash-image-preview",

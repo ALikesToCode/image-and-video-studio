@@ -6,6 +6,7 @@ import {
   isNavyGenerationFailed,
   isNavyGenerationPending,
 } from "@/lib/studio-generation";
+import { normalizeNavyJobId } from "@/lib/studio-validation";
 
 type VideoRequest = {
   apiKey?: string;
@@ -130,8 +131,13 @@ export async function GET(req: Request) {
   if (!id || !apiKey) {
     return Response.json({ error: "Missing job id or API key." }, { status: 400 });
   }
+  const jobId = normalizeNavyJobId(id);
+  if (!jobId) {
+    return Response.json({ error: "Invalid job id." }, { status: 400 });
+  }
 
-  const response = await fetch(`https://api.navy/v1/images/generations/${id}`,
+  const response = await fetch(
+    `https://api.navy/v1/images/generations/${encodeURIComponent(jobId)}`,
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,

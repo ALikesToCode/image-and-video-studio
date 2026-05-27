@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { POST as geminiImagePost } from "../../app/api/gemini/image/route.ts";
+import {
+  GET as geminiVideoGet,
+  POST as geminiVideoPost,
+} from "../../app/api/gemini/video/route.ts";
 import { POST as geminiVideoDownload } from "../../app/api/gemini/video/download/route.ts";
 import {
   GET as navyImageGet,
@@ -67,6 +72,99 @@ test("Gemini video download route sends key only to the trusted Gemini host", as
 
     assert.equal(response.status, 200);
     assert.equal(receivedKey, "gemini-secret");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Gemini image route rejects unsupported model path input before fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return new Response(null);
+  };
+
+  try {
+    const response = await geminiImagePost(
+      new Request("https://studio.test/api/gemini/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "gemini-secret",
+        },
+        body: JSON.stringify({
+          model: "gemini-3.1-flash-image-preview/../../bad",
+          prompt: "Generate an image.",
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error, "Unsupported Gemini image model.");
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Gemini video route rejects unsupported model path input before fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return new Response(null);
+  };
+
+  try {
+    const response = await geminiVideoPost(
+      new Request("https://studio.test/api/gemini/video", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "gemini-secret",
+        },
+        body: JSON.stringify({
+          model: "veo-3.1-generate-preview/../../bad",
+          prompt: "Generate a video.",
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error, "Unsupported Gemini video model.");
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Gemini video route rejects invalid operation names before fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return new Response(null);
+  };
+
+  try {
+    const response = await geminiVideoGet(
+      new Request(
+        "https://studio.test/api/gemini/video?name=models/veo-3.1-generate-preview/operations/../../bad",
+        {
+          headers: {
+            "x-user-api-key": "gemini-secret",
+          },
+        }
+      )
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error, "Invalid operation name.");
+    assert.equal(called, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -503,6 +601,35 @@ test("Navy image route treats poll rate limits as pending jobs", async () => {
   }
 });
 
+test("Navy image route rejects invalid poll job ids before fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return new Response(null);
+  };
+
+  try {
+    const response = await navyImageGet(
+      new Request(
+        "https://studio.test/api/navy/image?id=job_..%2F..%2Fsecret",
+        {
+          headers: {
+            "x-user-api-key": "navy-secret",
+          },
+        }
+      )
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error, "Invalid job id.");
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route returns upstream failed job messages", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
@@ -607,6 +734,35 @@ test("Navy video route treats poll rate limits as pending jobs", async () => {
       retryAfterMs: 7000,
     });
     assert.equal(response.headers.get("retry-after"), "7");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy video route rejects invalid poll job ids before fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return new Response(null);
+  };
+
+  try {
+    const response = await navyVideoGet(
+      new Request(
+        "https://studio.test/api/navy/video?id=job_..%2F..%2Fsecret",
+        {
+          headers: {
+            "x-user-api-key": "navy-secret",
+          },
+        }
+      )
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error, "Invalid job id.");
+    assert.equal(called, false);
   } finally {
     globalThis.fetch = originalFetch;
   }

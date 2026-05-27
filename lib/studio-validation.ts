@@ -23,6 +23,8 @@ export type ParsedDataUrl = {
 };
 
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+const NAVY_JOB_ID_PATTERN = /^job_[A-Za-z0-9_-]{1,128}$/;
+const GEMINI_OPERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$/;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export const normalizeMimeType = (value: unknown) => {
@@ -40,6 +42,72 @@ export const isAllowedMimeType = (
 
 export const isValidModelId = (value: unknown) =>
   typeof value === "string" && MODEL_ID_PATTERN.test(value.trim());
+
+export const normalizeGeminiImageModelId = (value: unknown) => {
+  const model = typeof value === "string" ? value.trim() : "";
+  switch (model) {
+    case "gemini-3.1-flash-image-preview":
+      return "gemini-3.1-flash-image-preview";
+    case "gemini-3-pro-image-preview":
+      return "gemini-3-pro-image-preview";
+    case "gemini-2.5-flash-image":
+      return "gemini-2.5-flash-image";
+    case "imagen-4.0-generate-001":
+      return "imagen-4.0-generate-001";
+    case "imagen-4.0-fast-generate-001":
+      return "imagen-4.0-fast-generate-001";
+    default:
+      return null;
+  }
+};
+
+export const normalizeGeminiVideoModelId = (value: unknown) => {
+  const model = typeof value === "string" ? value.trim() : "";
+  switch (model) {
+    case "veo-3.1-generate-preview":
+      return "veo-3.1-generate-preview";
+    case "veo-3.1-fast-generate-preview":
+      return "veo-3.1-fast-generate-preview";
+    default:
+      return null;
+  }
+};
+
+export const normalizeGeminiOperationName = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const parts = value.trim().split("/");
+  if (
+    parts.length === 2 &&
+    parts[0] === "operations" &&
+    GEMINI_OPERATION_ID_PATTERN.test(parts[1] ?? "")
+  ) {
+    return parts.join("/");
+  }
+  if (
+    parts.length === 4 &&
+    parts[0] === "models" &&
+    normalizeGeminiVideoModelId(parts[1]) &&
+    parts[2] === "operations" &&
+    GEMINI_OPERATION_ID_PATTERN.test(parts[3] ?? "")
+  ) {
+    return parts.join("/");
+  }
+  return null;
+};
+
+export const geminiOperationStatusUrl = (operationName: string) => {
+  const encodedPath = operationName
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `https://generativelanguage.googleapis.com/v1beta/${encodedPath}`;
+};
+
+export const normalizeNavyJobId = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const jobId = value.trim();
+  return NAVY_JOB_ID_PATTERN.test(jobId) ? jobId : null;
+};
 
 export const parseDataUrl = (
   value: unknown,

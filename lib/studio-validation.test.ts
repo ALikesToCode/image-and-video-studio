@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   dataUrlToInlineData,
+  geminiOperationStatusUrl,
   isValidModelId,
+  normalizeGeminiImageModelId,
+  normalizeGeminiOperationName,
+  normalizeGeminiVideoModelId,
+  normalizeNavyJobId,
   normalizeVeoDuration,
   parseDataUrl,
 } from "./studio-validation.ts";
@@ -33,6 +38,36 @@ test("model ID validation blocks whitespace and shell-like characters", () => {
   assert.equal(isValidModelId("black-forest-labs/flux.2-pro"), true);
   assert.equal(isValidModelId("bad model"), false);
   assert.equal(isValidModelId("../secret"), false);
+});
+
+test("provider path inputs are normalized before URL construction", () => {
+  assert.equal(
+    normalizeGeminiImageModelId("gemini-3.1-flash-image-preview"),
+    "gemini-3.1-flash-image-preview"
+  );
+  assert.equal(normalizeGeminiImageModelId("google/gemini-2.5"), null);
+  assert.equal(
+    normalizeGeminiVideoModelId("veo-3.1-generate-preview"),
+    "veo-3.1-generate-preview"
+  );
+  assert.equal(normalizeGeminiVideoModelId("veo-3.1/../../bad"), null);
+  assert.equal(
+    normalizeGeminiOperationName("operations/abc_123-xyz"),
+    "operations/abc_123-xyz"
+  );
+  assert.equal(
+    normalizeGeminiOperationName(
+      "models/veo-3.1-generate-preview/operations/abc_123"
+    ),
+    "models/veo-3.1-generate-preview/operations/abc_123"
+  );
+  assert.equal(normalizeGeminiOperationName("../operations/abc"), null);
+  assert.equal(normalizeNavyJobId("job_abc-123_DEF"), "job_abc-123_DEF");
+  assert.equal(normalizeNavyJobId("job_../../secret"), null);
+  assert.equal(
+    geminiOperationStatusUrl("operations/abc_123-xyz"),
+    "https://generativelanguage.googleapis.com/v1beta/operations/abc_123-xyz"
+  );
 });
 
 test("Veo duration is forced to 8 seconds for constrained workflows", () => {
