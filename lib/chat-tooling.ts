@@ -31,6 +31,15 @@ export type ChatMediaAsset = {
   model?: string;
 };
 
+export type ChatMediaPreview = {
+  imageUrl: string;
+  prompt: string;
+  model: string;
+  provider: string;
+  kind: ChatMediaAsset["kind"];
+  mimeType: string | null;
+};
+
 export type ChatAttachmentAsset = {
   id: string;
   kind: "image" | "pdf" | "text";
@@ -119,6 +128,23 @@ export const isDeepSeekV4Model = (model: string) => {
   const normalized = model.trim().toLowerCase();
   return normalized === "deepseek-v4-pro" || normalized === "deepseek-v4-flash";
 };
+
+export const buildChatMediaPreview = ({
+  item,
+  prompt,
+  provider,
+}: {
+  item: ChatMediaAsset;
+  prompt?: string | null;
+  provider?: string | null;
+}): ChatMediaPreview => ({
+  imageUrl: item.dataUrl,
+  prompt: prompt?.trim() ?? "",
+  model: item.model ?? "",
+  provider: provider?.trim() ?? "",
+  kind: item.kind,
+  mimeType: item.mimeType || null,
+});
 
 export const normalizeDeepSeekThinkingType = (value: unknown) =>
   value === "disabled" ? "disabled" : "enabled";

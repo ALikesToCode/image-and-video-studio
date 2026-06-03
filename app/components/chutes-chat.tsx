@@ -87,7 +87,9 @@ import {
 import {
   type ChatAttachmentAsset,
   type ChatImageAsset,
+  type ChatMediaPreview,
   type ChatMediaAsset,
+  buildChatMediaPreview,
   buildAssistantToolContextContent,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
@@ -119,6 +121,7 @@ import {
   summarizeImageModelPrompts,
 } from "@/lib/studio-generation";
 import { extractPdfTextFromFile, isSupportedPdfFile } from "@/lib/client/pdf-text";
+import { ImageViewer } from "./image-viewer";
 
 type ToolCall = {
   id: string;
@@ -926,6 +929,7 @@ export function ChutesChat({
   const [attachmentLoading, setAttachmentLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [activeMediaPreview, setActiveMediaPreview] = useState<ChatMediaPreview | null>(null);
   const [embedDialogOpen, setEmbedDialogOpen] = useState(false);
   const [embedOrigin, setEmbedOrigin] = useState("");
   const [chatError, setChatError] = useState<string | null>(null);
@@ -2781,6 +2785,41 @@ ${defaultPrompt}`;
     }
   };
 
+  const openMediaPreview = useCallback(
+    (item: ChatMediaAsset, prompt: string) => {
+      setActiveMediaPreview(
+        buildChatMediaPreview({
+          item,
+          prompt,
+          provider: providerLabel,
+        })
+      );
+    },
+    [providerLabel]
+  );
+
+  const openAttachmentPreview = useCallback(
+    (attachment: ChatAttachmentAsset, prompt: string) => {
+      if (attachment.kind !== "image" || !attachment.dataUrl) return;
+      openMediaPreview(
+        {
+          id: attachment.id,
+          kind: "image",
+          dataUrl: attachment.dataUrl,
+          mimeType: attachment.mimeType,
+        },
+        prompt
+      );
+    },
+    [openMediaPreview]
+  );
+
+  const closeMediaPreview = useCallback((open: boolean) => {
+    if (!open) {
+      setActiveMediaPreview(null);
+    }
+  }, []);
+
   const handleToolCalls = async (
     toolCalls: ToolCall[],
     onProgress?: (message: ChatMessage) => void,
@@ -3206,6 +3245,7 @@ ${defaultPrompt}`;
   ].join("\n");
 
   return (
+    <>
     <div
       className={cn(
         "flex flex-col bg-background/50 isolate",
@@ -3885,11 +3925,22 @@ ${defaultPrompt}`;
                                 className="flex min-w-0 items-center gap-2 rounded-lg border border-border/50 bg-background/45 p-2"
                               >
                                 {attachment.kind === "image" && attachment.dataUrl ? (
-                                  <img
-                                    src={attachment.dataUrl}
-                                    alt=""
-                                    className="h-12 w-12 rounded-md object-cover"
-                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => openAttachmentPreview(attachment, displayContent)}
+                                    className="group/attachment-image relative h-12 w-12 flex-none overflow-hidden rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    title="Open fullscreen preview"
+                                    aria-label={`Open ${attachment.name} fullscreen preview`}
+                                  >
+                                    <img
+                                      src={attachment.dataUrl}
+                                      alt=""
+                                      className="h-full w-full object-cover"
+                                    />
+                                    <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/attachment-image:opacity-100">
+                                      <Maximize2 className="h-4 w-4 text-white" />
+                                    </span>
+                                  </button>
                                 ) : (
                                   <div className="flex h-12 w-12 items-center justify-center rounded-md bg-secondary/70 text-muted-foreground">
                                     <FileText className="h-5 w-5" />
@@ -3994,8 +4045,15 @@ ${defaultPrompt}`;
                                       </div>
                                     ) : null}
                                     <div className="absolute inset-0 bg-black/50 opacity-100 sm:opacity-0 sm:group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                      <Button size="icon" variant="secondary" className="h-8 w-8 rounded-full" onClick={() => window.open(item.dataUrl, "_blank")}>
-                                        <ChevronDown className="h-4 w-4" />
+                                      <Button
+                                        size="icon"
+                                        variant="secondary"
+                                        className="h-8 w-8 rounded-full"
+                                        onClick={() => openMediaPreview(item, message.promptUsed ?? displayContent)}
+                                        title="Open fullscreen preview"
+                                        aria-label="Open fullscreen preview"
+                                      >
+                                        <Maximize2 className="h-4 w-4" />
                                       </Button>
                                     </div>
                                   </div>
@@ -4206,5 +4264,16 @@ ${defaultPrompt}`;
         </div>
       </footer>
     </div>
+    <ImageViewer
+      open={!!activeMediaPreview}
+      onOpenChange={closeMediaPreview}
+      imageUrl={activeMediaPreview?.imageUrl ?? null}
+      prompt={activeMediaPreview?.prompt ?? ""}
+      model={activeMediaPreview?.model ?? ""}
+      provider={activeMediaPreview?.provider ?? ""}
+      kind={activeMediaPreview?.kind}
+      mimeType={activeMediaPreview?.mimeType ?? null}
+    />
+    </>
   );
 }

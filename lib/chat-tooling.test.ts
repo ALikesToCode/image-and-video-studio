@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildChatCompletionPayload,
   buildChatCompletionRecoveryPayloads,
+  buildChatMediaPreview,
   buildAssistantToolContextContent,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
@@ -24,6 +25,29 @@ import {
   stripHeavyMediaFromMessagesForStorage,
   toChatCompletionMessages,
 } from "./chat-tooling.ts";
+
+test("Chat media preview keeps generated image metadata for fullscreen viewer", () => {
+  const preview = buildChatMediaPreview({
+    item: {
+      id: "image-1",
+      kind: "image",
+      dataUrl: "data:image/png;base64,abc123",
+      mimeType: "image/png",
+      model: "flux-schnell",
+    },
+    prompt: "Render a cinematic mountain lake.",
+    provider: "NavyAI",
+  });
+
+  assert.deepEqual(preview, {
+    imageUrl: "data:image/png;base64,abc123",
+    prompt: "Render a cinematic mountain lake.",
+    model: "flux-schnell",
+    provider: "NavyAI",
+    kind: "image",
+    mimeType: "image/png",
+  });
+});
 
 test("Forced tool detection recognizes explicit audio requests", () => {
   assert.equal(
