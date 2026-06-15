@@ -93,7 +93,7 @@ export function ImageViewer({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-none w-[96vw] h-[92dvh] p-0 overflow-hidden">
+            <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-none gap-0 p-0 h-[calc(100dvh-1rem)] overflow-hidden sm:h-[92dvh] sm:max-h-[92dvh] sm:w-[96vw]">
                 <DialogHeader className="sr-only">
                     <DialogTitle>
                         {resolvedKind === "video"
@@ -106,13 +106,13 @@ export function ImageViewer({
                         Full screen {resolvedKind === "audio" ? "audio" : resolvedKind} preview.
                     </DialogDescription>
                 </DialogHeader>
-                <div className="flex h-full flex-col lg:flex-row">
-                    <div className="flex-1 bg-black/90 flex items-center justify-center p-3 sm:p-4">
+                <div className="flex h-full min-h-0 flex-col lg:flex-row">
+                    <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-black p-2 sm:p-3">
                         {resolvedKind === "video" ? (
                             <video
                                 src={imageUrl}
                                 controls
-                                className="max-h-full max-w-full object-contain rounded-md"
+                                className="h-full w-full object-contain rounded-md"
                             />
                         ) : resolvedKind === "audio" ? (
                             <div className="w-full max-w-xl rounded-xl border border-border/50 bg-background/70 p-6">
@@ -126,11 +126,11 @@ export function ImageViewer({
                             <img
                                 src={imageUrl}
                                 alt={prompt || "Generated image"}
-                                className="max-h-full max-w-full object-contain"
+                                className="h-full w-full object-contain"
                             />
                         )}
                     </div>
-                    <div className="w-full lg:w-[360px] border-t lg:border-t-0 lg:border-l border-border/50 bg-background/80 backdrop-blur-xl p-4 sm:p-6 overflow-y-auto">
+                    <div className="max-h-[40dvh] w-full flex-none overflow-y-auto border-t border-border/50 bg-background/80 p-4 backdrop-blur-xl sm:p-6 lg:h-full lg:max-h-none lg:w-[360px] lg:border-l lg:border-t-0">
                         <div className="space-y-4">
                             <div>
                                 <div className="flex items-center justify-between gap-2">
