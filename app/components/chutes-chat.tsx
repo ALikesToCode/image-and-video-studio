@@ -57,12 +57,14 @@ import {
   CHUTES_LLM_MODELS as STATIC_CHUTES_LLM_MODELS,
   CHUTES_TTS_MODELS as STATIC_CHUTES_TTS_MODELS,
   CHUTES_VIDEO_MODELS as STATIC_CHUTES_VIDEO_MODELS,
+  NANOGPT_IMAGE_MODELS as STATIC_NANOGPT_IMAGE_MODELS,
   NAVY_CHAT_MODELS as STATIC_NAVY_CHAT_MODELS,
   NAVY_IMAGE_MODELS as STATIC_NAVY_IMAGE_MODELS,
   NAVY_TTS_MODELS as STATIC_NAVY_TTS_MODELS,
   NAVY_VIDEO_MODELS as STATIC_NAVY_VIDEO_MODELS,
   type ModelOption,
   type ChatProvider,
+  type Provider,
 } from "@/lib/constants";
 import type { NavyUsageResponse } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl, cn } from "@/lib/utils";
@@ -161,6 +163,7 @@ type ChutesChatProps = {
   model: string;
   setModel: (value: string) => void;
   imageModels: ModelOption[];
+  imageApiKeys?: Partial<Record<Provider, string>>;
   videoModels: ModelOption[];
   audioModels: ModelOption[];
   toolImageModel: string;
@@ -330,20 +333,38 @@ const fileToDataUrl = async (file: File) =>
 
 const idsFor = (models: ModelOption[]) => new Set(models.map((model) => model.id));
 
+const idsForGroups = (groups: ModelOption[][]) =>
+  new Set(groups.flatMap((models) => models.map((model) => model.id)));
+
 const STATIC_MODEL_IDS = {
   chutes: {
     chat: idsFor(STATIC_CHUTES_LLM_MODELS),
-    image: idsFor(STATIC_CHUTES_IMAGE_MODELS),
+    image: idsForGroups([STATIC_CHUTES_IMAGE_MODELS, STATIC_NANOGPT_IMAGE_MODELS]),
     video: idsFor(STATIC_CHUTES_VIDEO_MODELS),
     audio: idsFor(STATIC_CHUTES_TTS_MODELS),
   },
   navy: {
     chat: idsFor(STATIC_NAVY_CHAT_MODELS),
-    image: idsFor(STATIC_NAVY_IMAGE_MODELS),
+    image: idsForGroups([STATIC_NAVY_IMAGE_MODELS, STATIC_NANOGPT_IMAGE_MODELS]),
     video: idsFor(STATIC_NAVY_VIDEO_MODELS),
     audio: idsFor(STATIC_NAVY_TTS_MODELS),
   },
 } satisfies Record<ChatProvider, Record<"chat" | "image" | "video" | "audio", Set<string>>>;
+
+const isImageToolProvider = (value: unknown): value is Provider =>
+  value === "chutes" || value === "navy" || value === "nanogpt";
+
+const imageEndpointForProvider = (provider: Provider) => {
+  if (provider === "navy") return "/api/navy/image";
+  if (provider === "nanogpt") return "/api/nanogpt/image";
+  return "/api/chutes/image";
+};
+
+const imageProviderLabel = (provider: Provider) => {
+  if (provider === "navy") return "NavyAI";
+  if (provider === "nanogpt") return "NanoGPT";
+  return "Chutes";
+};
 
 const modelSupportsReasoning = (
   provider: ChatProvider,
@@ -888,6 +909,7 @@ export function ChutesChat({
   model,
   setModel,
   imageModels,
+  imageApiKeys,
   videoModels,
   audioModels,
   toolImageModel,
@@ -1057,6 +1079,21 @@ export function ChutesChat({
   const availableImageModelIds = useMemo(
     () => new Set(imageModels.map((item) => item.id)),
     [imageModels]
+  );
+  const imageProviderByModelId = useMemo(() => {
+    const entries = new Map<string, Provider>();
+    for (const item of imageModels) {
+      entries.set(
+        item.id,
+        isImageToolProvider(item.provider) ? item.provider : provider
+      );
+    }
+    return entries;
+  }, [imageModels, provider]);
+  const imageApiKeyForProvider = useCallback(
+    (targetProvider: Provider) =>
+      (imageApiKeys?.[targetProvider] ?? (targetProvider === provider ? apiKey : "")).trim(),
+    [apiKey, imageApiKeys, provider]
   );
   const orderedToolImageModels = useMemo(
     () => imageModelOrder.filter((entry) => availableImageModelIds.has(entry)),
@@ -2085,9 +2122,6 @@ ${defaultPrompt}`;
       error?: string;
     }) => void
   ) => {
-    if (!apiKey.trim()) {
-      throw new Error("Missing API key for image tool.");
-    }
     const rawRequestedModel = getStringArg(args, ["model"]);
     const requestedModel = normalizeImageToolModelRequest({
       requestedModel: rawRequestedModel,
@@ -2111,7 +2145,6 @@ ${defaultPrompt}`;
       throw new Error("Tool call missing prompt.");
     }
     const negativePrompt = getStringArg(finalArgs, ["negative_prompt"]);
-    const endpoint = provider === "navy" ? "/api/navy/image" : "/api/chutes/image";
     const baseBody: Record<string, unknown> = {};
     if (provider === "navy") {
       const size = getStringArg(finalArgs, ["size"]);
@@ -2124,6 +2157,7 @@ ${defaultPrompt}`;
       if (imageUrl) baseBody.imageUrl = imageUrl;
       baseBody.sync = false;
     } else {
+      const imageUrl = getStringOrStringArrayArg(finalArgs, ["image_url", "image"]);
       const guidanceScale = getNumberArg(finalArgs, ["guidance_scale"]);
       const width = getNumberArg(finalArgs, ["width"]);
       const height = getNumberArg(finalArgs, ["height"]);
@@ -2136,6 +2170,7 @@ ${defaultPrompt}`;
       baseBody.resolution = resolution || undefined;
       baseBody.numInferenceSteps = steps ? Math.round(steps) : undefined;
       baseBody.seed = seed !== null ? Math.round(seed) : null;
+      if (imageUrl) baseBody.imageUrl = imageUrl;
     }
     const imageRequests = prepareImageModelRequests({
       models: modelsToRun,
@@ -2154,12 +2189,18 @@ ${defaultPrompt}`;
       if (!request) {
         throw new Error(`Image model ${targetModel} is not prepared.`);
       }
+      const targetProvider = imageProviderByModelId.get(targetModel) ?? provider;
+      const endpoint = imageEndpointForProvider(targetProvider);
+      const imageApiKey = imageApiKeyForProvider(targetProvider);
+      if (!imageApiKey) {
+        throw new Error(`Missing ${imageProviderLabel(targetProvider)} API key for image tool.`);
+      }
       const executeRequest = async () => {
         const response = await fetch(endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-user-api-key": apiKey,
+            "x-user-api-key": imageApiKey,
           },
           body: JSON.stringify(request.body),
         });
@@ -2168,7 +2209,7 @@ ${defaultPrompt}`;
           throw new Error(payload?.error ?? "Image tool failed.");
         }
 
-        if (provider === "navy" && typeof payload?.id === "string" && payload.id) {
+        if (targetProvider === "navy" && typeof payload?.id === "string" && payload.id) {
           let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
           let didComplete = false;
           for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !didComplete; attempt += 1) {
@@ -2176,7 +2217,7 @@ ${defaultPrompt}`;
               `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
               {
                 headers: {
-                  "x-user-api-key": apiKey,
+                  "x-user-api-key": imageApiKey,
                 },
               }
             );

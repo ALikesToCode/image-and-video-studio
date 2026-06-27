@@ -8,13 +8,14 @@ const SECRET_PATTERNS = [
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 
-type ImageProvider = "gemini" | "navy" | "chutes" | "openrouter";
+type ImageProvider = "gemini" | "navy" | "chutes" | "openrouter" | "nanogpt";
 
 const PROVIDER_ENV_KEYS: Record<ImageProvider, string[]> = {
   gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
   navy: ["NAVY_API_KEY", "NAVYAI_API_KEY", "NAVY_API"],
   chutes: ["CHUTES_API_KEY"],
   openrouter: ["OPENROUTER_API_KEY"],
+  nanogpt: ["NANOGPT_API_KEY", "NANO_GPT_API_KEY"],
 };
 
 const CORS_ALLOWED_SUFFIXES = ["janitorai.com"];

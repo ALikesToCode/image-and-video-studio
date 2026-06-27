@@ -2,6 +2,7 @@ export const runtime = "edge";
 
 import { POST as chutesImagePost } from "@/app/api/chutes/image/route";
 import { POST as geminiImagePost } from "@/app/api/gemini/image/route";
+import { POST as nanoGptImagePost } from "@/app/api/nanogpt/image/route";
 import { GET as navyImageGet, POST as navyImagePost } from "@/app/api/navy/image/route";
 import { POST as openRouterImagePost } from "@/app/api/openrouter/image/route";
 import {
@@ -14,6 +15,7 @@ import {
   CHUTES_IMAGE_MODELS,
   DEFAULT_MODELS,
   GEMINI_IMAGE_MODELS,
+  NANOGPT_IMAGE_MODELS,
   NAVY_IMAGE_MODELS,
   OPENROUTER_IMAGE_MODELS,
   type Provider,
@@ -60,6 +62,7 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   navy: NAVY_IMAGE_MODELS.map((model) => model.id),
   chutes: CHUTES_IMAGE_MODELS.map((model) => model.id),
   openrouter: OPENROUTER_IMAGE_MODELS.map((model) => model.id),
+  nanogpt: NANOGPT_IMAGE_MODELS.map((model) => model.id),
 };
 
 const PROVIDER_HANDLERS: Record<Provider, ProviderHandler> = {
@@ -67,6 +70,7 @@ const PROVIDER_HANDLERS: Record<Provider, ProviderHandler> = {
   navy: navyImagePost,
   chutes: chutesImagePost,
   openrouter: openRouterImagePost,
+  nanogpt: nanoGptImagePost,
 };
 
 const normalizedString = (value: unknown) =>
@@ -94,6 +98,7 @@ const providerForModel = (model: string): Provider => {
   if (PROVIDER_MODELS.navy.includes(model)) return "navy";
   if (PROVIDER_MODELS.openrouter.includes(model)) return "openrouter";
   if (PROVIDER_MODELS.chutes.includes(model)) return "chutes";
+  if (PROVIDER_MODELS.nanogpt.includes(model)) return "nanogpt";
   if (model.startsWith("imagen-") || model.startsWith("gemini-")) return "gemini";
   if (model.includes("/")) return "openrouter";
   if (/^(?:flux|dall-e|gpt-image|nano-banana)/i.test(model)) return "navy";
@@ -129,6 +134,13 @@ const buildBaseBody = (
       seed,
       responseFormat: normalizedString(body.responseFormat) || undefined,
       sync: false,
+    };
+  }
+
+  if (provider === "nanogpt") {
+    return {
+      size: width && height ? `${width}x${height}` : undefined,
+      seed,
     };
   }
 

@@ -1,10 +1,28 @@
 import { useEffect, useMemo } from "react";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ChutesChat } from "../chutes-chat";
-import { CHUTES_IMAGE_MODELS, CHUTES_TTS_MODELS, CHUTES_VIDEO_MODELS } from "@/lib/constants";
+import {
+    CHUTES_IMAGE_MODELS,
+    CHUTES_TTS_MODELS,
+    CHUTES_VIDEO_MODELS,
+    NANOGPT_IMAGE_MODELS,
+    type ModelOption,
+} from "@/lib/constants";
 
 type ChatViewProps = {
     initialInput?: string | null;
+};
+
+const appendUniqueModels = (primary: ModelOption[], extra: ModelOption[]) => {
+    const seen = new Set(primary.map((model) => model.id));
+    return [
+        ...primary,
+        ...extra.filter((model) => {
+            if (seen.has(model.id)) return false;
+            seen.add(model.id);
+            return true;
+        }),
+    ];
 };
 
 export function ChatView({ initialInput }: ChatViewProps) {
@@ -67,7 +85,15 @@ export function ChatView({ initialInput }: ChatViewProps) {
     const chatModels = isNavyChat ? resolvedNavyChatModels : chutesChatModels;
     const chatModel = isNavyChat ? navyChatModel : chutesChatModel;
     const setChatModel = isNavyChat ? setNavyChatModel : setChutesChatModel;
-    const imageModels = isNavyChat ? navyImageModels : CHUTES_IMAGE_MODELS;
+    const chutesImageToolModels = useMemo(
+        () => appendUniqueModels(CHUTES_IMAGE_MODELS, NANOGPT_IMAGE_MODELS),
+        []
+    );
+    const navyImageToolModels = useMemo(
+        () => appendUniqueModels(navyImageModels, NANOGPT_IMAGE_MODELS),
+        [navyImageModels]
+    );
+    const imageModels = isNavyChat ? navyImageToolModels : chutesImageToolModels;
     const videoModels = isNavyChat ? navyVideoModels : CHUTES_VIDEO_MODELS;
     const audioModels = isNavyChat ? navyTtsModels : CHUTES_TTS_MODELS;
     const toolImageModel = isNavyChat ? navyToolImageModel : chutesToolImageModel;
@@ -110,6 +136,7 @@ export function ChatView({ initialInput }: ChatViewProps) {
                 model={chatModel}
                 setModel={setChatModel}
                 imageModels={imageModels}
+                imageApiKeys={apiKeys}
                 videoModels={videoModels}
                 audioModels={audioModels}
                 toolImageModel={toolImageModel}

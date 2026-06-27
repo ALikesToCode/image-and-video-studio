@@ -10,6 +10,7 @@ import {
     CHUTES_LLM_MODELS,
     CHUTES_VIDEO_MODELS,
     CHUTES_TTS_MODELS,
+    NANOGPT_IMAGE_MODELS,
     OPENROUTER_IMAGE_MODELS,
     NAVY_IMAGE_MODELS,
     NAVY_IMAGE_QUALITIES,
@@ -762,6 +763,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         navy: "",
         chutes: "",
         openrouter: "",
+        nanogpt: "",
     });
     const [keyStorageMode, setKeyStorageMode] = useState<KeyStorageMode>("session");
     const [legacyProviderKeys, setLegacyProviderKeys] = useState<LegacyProviderKey[]>([]);
@@ -896,6 +898,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             navy: "",
             chutes: "",
             openrouter: "",
+            nanogpt: "",
         });
         setLegacyProviderKeys([]);
     }, []);
@@ -970,6 +973,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
         if (provider === "openrouter") {
             return openRouterImageModels;
+        }
+        if (provider === "nanogpt") {
+            return NANOGPT_IMAGE_MODELS;
         }
         if (mode === "video") return navyVideoModels;
         if (mode === "tts") return navyTtsModels;
@@ -1253,6 +1259,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             promptAgentModel: job.promptAgentModel,
                             imageUrl,
                             sync: false,
+                        };
+                    } else if (job.provider === "nanogpt") {
+                        const imageUrl = buildNavyImageUrlPayload(referenceImages);
+                        body = {
+                            ...body,
+                            size:
+                                job.imageSize && job.imageSize !== AUTO_IMAGE_OPTION
+                                    ? job.imageSize
+                                    : job.chutesResolution,
+                            numberOfImages: job.imageCount,
+                            imageUrl,
+                            seed: Number(job.chutesSeed) || null,
                         };
                     } else {
                         url = "/api/chutes/image";

@@ -12,7 +12,7 @@ export type LegacyProviderKey = {
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-const PROVIDERS: Provider[] = ["gemini", "navy", "chutes", "openrouter"];
+const PROVIDERS: Provider[] = ["gemini", "navy", "chutes", "openrouter", "nanogpt"];
 
 export const KEY_STORAGE_MODE_KEY = "studio_key_storage_mode";
 export const LEGACY_KEY_MIGRATION_DISMISSED_KEY =
@@ -23,6 +23,7 @@ export const LEGACY_PROVIDER_KEY_STORAGE: Record<Provider, string> = {
   navy: "studio_api_key_navy",
   chutes: "studio_api_key_chutes",
   openrouter: "studio_api_key_openrouter",
+  nanogpt: "studio_api_key_nanogpt",
 };
 
 const SESSION_KEY_PREFIX = "studio_session_api_key_";
@@ -33,6 +34,7 @@ const emptyProviderKeys = (): ProviderKeys => ({
   navy: "",
   chutes: "",
   openrouter: "",
+  nanogpt: "",
 });
 
 const getSessionStorage = () =>

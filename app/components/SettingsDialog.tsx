@@ -162,7 +162,7 @@ export function SettingsDialog() {
                             Provider
                         </Label>
                         <div className="sm:col-span-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                            {(["gemini", "navy", "openrouter", "chutes"] as const).map(
+                            {(["gemini", "navy", "openrouter", "chutes", "nanogpt"] as const).map(
                                 (entry) => (
                                     <Button
                                         key={entry}
@@ -255,6 +255,26 @@ export function SettingsDialog() {
                                 spellCheck={false}
                             />
                             <Button type="button" variant="outline" onClick={() => forgetProviderKey("chutes")}>
+                                Forget
+                            </Button>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+                        <Label htmlFor="apiKeyNanoGpt" className="sm:text-right">
+                            NanoGPT Key
+                        </Label>
+                        <div className="flex gap-2 sm:col-span-3">
+                            <Input
+                                id="apiKeyNanoGpt"
+                                type="password"
+                                value={apiKeys.nanogpt}
+                                onChange={handleKeyChange("nanogpt")}
+                                className="font-mono text-sm"
+                                placeholder="NanoGPT API key"
+                                autoComplete="off"
+                                spellCheck={false}
+                            />
+                            <Button type="button" variant="outline" onClick={() => forgetProviderKey("nanogpt")}>
                                 Forget
                             </Button>
                         </div>

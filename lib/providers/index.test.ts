@@ -30,6 +30,24 @@ test("capability filtering hides models that do not support the requested mode",
   assert.ok(navyAudioModels.every((model) => model.modes.includes("audio")));
 });
 
+test("static capability registry exposes NanoGPT image models", () => {
+  const nanoGptImageModels = filterModelCapabilities(STATIC_MODEL_CAPABILITIES, {
+    provider: "nanogpt",
+    mode: "image",
+    outputModality: "image",
+  });
+
+  assert.deepEqual(
+    nanoGptImageModels.map((model) => model.id),
+    ["hidream", "chroma", "z-image-turbo", "qwen-image", "step-image-edit-2"]
+  );
+  assert.equal(
+    nanoGptImageModels.find((model) => model.id === "step-image-edit-2")
+      ?.supportsImageInput,
+    true
+  );
+});
+
 test("dynamic capability merge overrides static capability metadata", () => {
   const dynamic: ModelCapability = {
     provider: "openrouter",

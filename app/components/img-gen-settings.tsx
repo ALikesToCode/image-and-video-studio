@@ -298,6 +298,7 @@ export function ImgGenSettings({
                             <SelectItem value="gemini">Google Gemini</SelectItem>
                             <SelectItem value="navy">NavyAI</SelectItem>
                             <SelectItem value="openrouter">OpenRouter</SelectItem>
+                            <SelectItem value="nanogpt">NanoGPT</SelectItem>
                             <SelectItem value="chutes">Chutes</SelectItem>
                         </SelectContent>
                     </Select>
@@ -596,32 +597,36 @@ export function ImgGenSettings({
                     </div>
                 )}
 
-                {mode === "image" && provider === "chutes" && (
+                {mode === "image" && (provider === "chutes" || provider === "nanogpt") && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label>Guidance Scale</Label>
-                            <Input
-                                type="number"
-                                min="0"
-                                step="0.1"
-                                value={chutesGuidanceScale}
-                                onChange={(e) => setChutesGuidanceScale(e.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Steps</Label>
-                            <Input
-                                type="number"
-                                min="1"
-                                step="1"
-                                value={chutesSteps}
-                                onChange={(e) => setChutesSteps(e.target.value)}
-                            />
-                        </div>
-                        {isChutesHiDream ? (
+                        {provider === "chutes" ? (
                             <>
                                 <div className="space-y-2">
-                                    <Label>Resolution</Label>
+                                    <Label>Guidance Scale</Label>
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        value={chutesGuidanceScale}
+                                        onChange={(e) => setChutesGuidanceScale(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Steps</Label>
+                                    <Input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        value={chutesSteps}
+                                        onChange={(e) => setChutesSteps(e.target.value)}
+                                    />
+                                </div>
+                            </>
+                        ) : null}
+                        {isChutesHiDream || provider === "nanogpt" ? (
+                            <>
+                                <div className="space-y-2">
+                                    <Label>{provider === "nanogpt" ? "Size" : "Resolution"}</Label>
                                     <Input
                                         value={chutesResolution}
                                         onChange={(e) => setChutesResolution(e.target.value)}

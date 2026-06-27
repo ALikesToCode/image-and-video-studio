@@ -31,6 +31,7 @@ const keys = (overrides: Partial<ProviderKeys> = {}): ProviderKeys => ({
   navy: "",
   chutes: "",
   openrouter: "",
+  nanogpt: "",
   ...overrides,
 });
 

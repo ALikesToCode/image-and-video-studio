@@ -30,6 +30,12 @@ The capability foundation lives in `lib/providers`. Static fallbacks are built f
 - Model-specific settings must be validated before request submission.
 - Generated image URL downloads are bounded through safe media fetching.
 
+## NanoGPT
+
+- NanoGPT image generation uses the deployed OpenAI-compatible `/v1/images/generations` endpoint.
+- Static image options include HiDream, Chroma, Z Image Turbo, Qwen Image, and Step Image Edit 2.
+- Chat image tools can route NanoGPT image models through the NanoGPT key while keeping Chutes or NavyAI as the chat provider.
+
 ## FAL
 
 FAL currently remains partial. It should either be promoted into the provider registry with routes, UI selectors, pricing, and tests, or hidden from visible product flows until that is complete.

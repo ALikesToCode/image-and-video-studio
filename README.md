@@ -18,6 +18,7 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
 - Chat attachments for advertised image/file-capable models, plus iframe embedding for chat and generation views.
 - OpenRouter image-capable chat completion models with output modality discovery.
 - Chutes image, video, audio, and chat support with provider-specific settings isolated.
+- NanoGPT image generation/editing support for HiDream, Chroma, Z Image Turbo, Qwen Image, and Step Image Edit 2.
 - Local reference strip for source images, style, character, product/object, first-frame, and last-frame references.
 - Local asset library with search, media filters, sorting, delete, clear, prompt copy, download, and JSON export.
 - Local storage status panel with quota estimate and persistent-storage request.
@@ -47,6 +48,7 @@ Open Settings in the app and add keys for the providers you want to use:
 - NavyAI API key
 - OpenRouter API key
 - Chutes API key
+- NanoGPT API key
 
 Keys are sent to app API routes with `x-user-api-key` where practical. Route handlers also keep backward-compatible body-key fallback for older local state, sanitize provider errors, and avoid logging keys. Old `studio_api_key_*` localStorage keys are detected in Settings and must be explicitly migrated or discarded.
 

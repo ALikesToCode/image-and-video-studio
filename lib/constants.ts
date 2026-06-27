@@ -1,4 +1,4 @@
-export type Provider = "gemini" | "navy" | "chutes" | "openrouter";
+export type Provider = "gemini" | "navy" | "chutes" | "openrouter" | "nanogpt";
 export type Mode = "image" | "video" | "tts";
 export type ChatProvider = "chutes" | "navy";
 export type ModelEndpoint =
@@ -9,6 +9,7 @@ export type ModelEndpoint =
     | "navy-chat-completions"
     | "navy-images-generations"
     | "navy-audio-speech"
+    | "nanogpt-images-generations"
     | "chutes-image"
     | "chutes-video"
     | "chutes-audio"
@@ -274,6 +275,80 @@ export const CHUTES_IMAGE_MODELS: ModelOption[] = [
     {
         id: "Qwen-Image-2512",
         label: "Qwen Image 2512",
+    },
+];
+
+export const NANOGPT_IMAGE_MODELS: ModelOption[] = [
+    {
+        id: "hidream",
+        label: "NanoGPT HiDream",
+        provider: "nanogpt",
+        endpoint: "nanogpt-images-generations",
+        inputModalities: ["text"],
+        outputModalities: ["image"],
+        supports: {
+            imageGeneration: true,
+            size: true,
+            seed: true,
+        },
+    },
+    {
+        id: "chroma",
+        label: "NanoGPT Chroma",
+        provider: "nanogpt",
+        endpoint: "nanogpt-images-generations",
+        inputModalities: ["text"],
+        outputModalities: ["image"],
+        supports: {
+            imageGeneration: true,
+            size: true,
+            seed: true,
+        },
+    },
+    {
+        id: "z-image-turbo",
+        label: "NanoGPT Z Image Turbo",
+        provider: "nanogpt",
+        endpoint: "nanogpt-images-generations",
+        inputModalities: ["text"],
+        outputModalities: ["image"],
+        supports: {
+            imageGeneration: true,
+            size: true,
+            seed: true,
+        },
+    },
+    {
+        id: "qwen-image",
+        label: "NanoGPT Qwen Image",
+        provider: "nanogpt",
+        endpoint: "nanogpt-images-generations",
+        inputModalities: ["text", "image"],
+        outputModalities: ["image"],
+        supports: {
+            imageGeneration: true,
+            imageEdit: true,
+            referenceImages: true,
+            size: true,
+            seed: true,
+        },
+        maxReferenceImages: 4,
+    },
+    {
+        id: "step-image-edit-2",
+        label: "NanoGPT Step Image Edit 2",
+        provider: "nanogpt",
+        endpoint: "nanogpt-images-generations",
+        inputModalities: ["text", "image"],
+        outputModalities: ["image"],
+        supports: {
+            imageGeneration: true,
+            imageEdit: true,
+            referenceImages: true,
+            size: true,
+            seed: true,
+        },
+        maxReferenceImages: 4,
     },
 ];
 
@@ -646,5 +721,10 @@ export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
         image: OPENROUTER_IMAGE_MODELS[0].id,
         video: OPENROUTER_IMAGE_MODELS[0].id,
         tts: OPENROUTER_IMAGE_MODELS[0].id,
+    },
+    nanogpt: {
+        image: NANOGPT_IMAGE_MODELS[0].id,
+        video: NANOGPT_IMAGE_MODELS[0].id,
+        tts: NANOGPT_IMAGE_MODELS[0].id,
     },
 };
