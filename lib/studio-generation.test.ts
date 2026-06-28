@@ -288,6 +288,7 @@ test("Navy image payload maps supported fields to Navy API fields", () => {
     size: "1024x1024",
     numberOfImages: 2,
     quality: "medium",
+    style: "cinematic",
     imageUrl: "https://example.com/ref.png",
     negativePrompt: "text artifacts",
     seed: 42,
@@ -300,6 +301,7 @@ test("Navy image payload maps supported fields to Navy API fields", () => {
   assert.equal(payload.model, "flux");
   assert.equal("n" in payload, false);
   assert.equal(payload.quality, "medium");
+  assert.equal(payload.style, "cinematic");
   assert.equal(payload.image_url, "https://example.com/ref.png");
   assert.equal(payload.seed, 42);
   assert.equal(payload.seconds, 6);
@@ -311,6 +313,32 @@ test("Navy image payload maps supported fields to Navy API fields", () => {
   assert.match(payload.prompt, /^Artwork direction: A naval command room at dusk\./);
   assert.match(payload.prompt, /artifact-free rendering/i);
   assert.match(payload.prompt, /clean surfaces without embedded typography or branding/i);
+});
+
+test("Navy GPT image payload omits unsupported style parameter", () => {
+  const payload = buildNavyImageGenerationPayload({
+    model: "gpt-image-2",
+    prompt: "A naval command room at dusk",
+    quality: "high",
+    style: "vivid",
+  });
+
+  assert.equal(payload.model, "gpt-image-2");
+  assert.equal(payload.quality, "high");
+  assert.equal("style" in payload, false);
+});
+
+test("Prepared GPT image requests strip unsupported style without mutating other models", () => {
+  const requests = prepareImageModelRequests({
+    models: ["gpt-image-2", "flux"],
+    baseBody: { quality: "high", style: "vivid" },
+    prompt: "A naval command room at dusk",
+  });
+  const byModel = new Map(requests.map((request) => [request.model, request.body]));
+
+  assert.equal("style" in (byModel.get("gpt-image-2") ?? {}), false);
+  assert.equal(byModel.get("gpt-image-2")?.quality, "high");
+  assert.equal(byModel.get("flux")?.style, "vivid");
 });
 
 test("Navy image payload uses aspect ratio when no explicit size is set", () => {

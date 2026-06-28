@@ -313,6 +313,31 @@ export const isImagenModel = (model: string) => model.startsWith("imagen-");
 const isOpenAiImageModel = (model: string) =>
   /\b(gpt-image-|dall-e-)/i.test(model);
 
+const isOpenAiGptImageModel = (model: string) =>
+  /\bgpt-image-/i.test(model.trim());
+
+const isOpenAiDallEImageModel = (model: string) =>
+  /\bdall-e-/i.test(model.trim());
+
+const isDallE3ImageModel = (model: string) =>
+  /(?:^|[/:])dall-e-3$/i.test(model.trim());
+
+const supportsImageStyleParameter = (model: string) => {
+  if (isOpenAiGptImageModel(model)) return false;
+  if (isOpenAiDallEImageModel(model)) return isDallE3ImageModel(model);
+  return true;
+};
+
+const sanitizeImageRequestBodyForModel = <T extends Record<string, unknown>>(
+  model: string,
+  body: T,
+): T => {
+  if (supportsImageStyleParameter(model)) return body;
+  const sanitized = { ...body };
+  delete sanitized.style;
+  return sanitized;
+};
+
 const isGeminiNativeImageModel = (model: string) => {
   const normalized = model.toLowerCase();
   return (
@@ -733,14 +758,14 @@ export const prepareImageModelRequests = ({
     return {
       model,
       prompt: prepared.prompt,
-      body: {
+      body: sanitizeImageRequestBodyForModel(model, {
         ...baseBody,
         model,
         prompt: prepared.prompt,
         ...(includeNegativePrompt && prepared.negativePrompt
           ? { negativePrompt: prepared.negativePrompt }
           : {}),
-      },
+      }),
     };
   });
 
@@ -1540,7 +1565,7 @@ export const buildNavyImageGenerationPayload = ({
   const normalizedSize =
     typeof size === "string" ? size.trim().toLowerCase() : "";
 
-  return {
+  return sanitizeImageRequestBodyForModel(model, {
     model,
     prompt: promptWithNegativeGuidance,
     ...(normalizedSize ? { size: normalizedSize } : {}),
@@ -1554,7 +1579,7 @@ export const buildNavyImageGenerationPayload = ({
     ...(!normalizedSize && shouldPreferAspectRatio
       ? { aspect_ratio: aspectRatio }
       : {}),
-  };
+  });
 };
 
 export const isNavyGenerationPending = (status?: string | null) => {
