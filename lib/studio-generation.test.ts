@@ -642,13 +642,13 @@ test("Policy rejection recovery prompt preserves medium while targeting flagged 
   assert.match(recoveryPrompt, /do not mention.*safety/i);
 });
 
-test("Prompt recovery uses a stable Navy rewrite model before GPT-5 chat models", () => {
+test("Prompt recovery uses the selected Navy chat model", () => {
   assert.deepEqual(
     resolveImagePromptRecoveryChatModels({
       provider: "navy",
-      activeModel: "gpt-5",
+      activeModel: "gpt-5.4-mini",
     }),
-    ["gpt-4o", "deepseek-v4-flash", "glm-5.1-venice", "gpt-5"]
+    ["gpt-5.4-mini"]
   );
   assert.deepEqual(
     resolveImagePromptRecoveryChatModels({

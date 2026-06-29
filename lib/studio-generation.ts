@@ -605,16 +605,12 @@ ${saferPrompt}`;
 };
 
 export const resolveImagePromptRecoveryChatModels = ({
-  provider,
   activeModel,
 }: {
   provider: string;
   activeModel: string;
 }) => {
-  const candidates =
-    provider === "navy"
-      ? ["gpt-4o", "deepseek-v4-flash", "glm-5.1-venice", activeModel]
-      : [activeModel];
+  const candidates = [activeModel];
   const seen = new Set<string>();
   return candidates
     .map((candidate) => candidate.trim())
