@@ -30,6 +30,7 @@ import {
     type Mode,
     type ChatProvider,
     type ModelOption,
+    type ModelParameterValue,
 } from "@/lib/constants";
 import {
     type GeneratedImage,
@@ -59,6 +60,11 @@ import {
     isValidNavyImagePixelSize,
     DEFAULT_IMAGE_RETRY_ATTEMPTS,
 } from "@/lib/studio-generation";
+import {
+    buildModelParameterPayload,
+    resolveModelParameterValues,
+    type ModelParameterValues,
+} from "@/lib/model-capability-settings";
 import {
     restorePersistedGenerationJob,
     shouldPersistRemoteGenerationJob,
@@ -142,6 +148,7 @@ export type GenerationJob = {
     ttsSpeed?: string;
     chutesVideoFps?: string;
     chutesVideoGuidanceScale?: string;
+    modelParameters?: ModelParameterValues;
     videoImage?: string;
     saveToGallery: boolean;
     // Chutes TTS params
@@ -220,6 +227,7 @@ type StoredSettings = Partial<{
     chutesTtsSpeed: string;
     chutesTtsSpeaker: string;
     chutesTtsMaxDuration: string;
+    modelParameterValuesByModel: Record<string, ModelParameterValues>;
 }>;
 
 type GenerateOptions = {
@@ -562,6 +570,29 @@ const sanitizeModelSelections = (value: unknown): Record<string, string> => {
     }, {});
 };
 
+const sanitizeStoredModelParameterValues = (
+    value: unknown
+): Record<string, ModelParameterValues> => {
+    if (!isRecord(value)) return {};
+    const result: Record<string, ModelParameterValues> = {};
+    for (const [modelId, rawValues] of Object.entries(value).slice(0, MAX_CACHED_MODELS)) {
+        if (!modelId.trim() || !isRecord(rawValues)) continue;
+        const values: ModelParameterValues = {};
+        for (const [key, rawValue] of Object.entries(rawValues).slice(0, 64)) {
+            if (
+                rawValue === null ||
+                typeof rawValue === "string" ||
+                typeof rawValue === "boolean" ||
+                (typeof rawValue === "number" && Number.isFinite(rawValue))
+            ) {
+                values[key] = rawValue;
+            }
+        }
+        if (Object.keys(values).length) result[modelId] = values;
+    }
+    return result;
+};
+
 const buildGeneratedImages = (payload: unknown): GeneratedImage[] => {
     const record = isRecord(payload) ? payload : {};
     const rawImages = Array.isArray(record.images) ? record.images : [];
@@ -589,7 +620,7 @@ const errorMessageFromPayload = (payload: unknown, fallback: string) => {
 
 const generationMetadataFromPayload = (payload: unknown) => {
     const root = isRecord(payload) ? payload : {};
-    const rawBilling = isRecord(root.billing) ? root.billing : {};
+    const rawBilling = isRecord(root.billing) ? root.billing : root;
     const billing: GenerationBilling = {};
     if (typeof rawBilling.cost === "number" && Number.isFinite(rawBilling.cost)) {
         billing.cost = rawBilling.cost;
@@ -708,6 +739,8 @@ interface StudioContextType {
     setTtsSpeed: (s: string) => void;
     saveToGallery: boolean;
     setSaveToGallery: (b: boolean) => void;
+    modelParameterValues: ModelParameterValues;
+    setModelParameterValue: (key: string, value: ModelParameterValue) => void;
 
     // Chutes TTS
     chutesTtsSpeed: string;
@@ -884,6 +917,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [ttsFormat, setTtsFormat] = useState(TTS_FORMATS[0]);
     const [ttsSpeed, setTtsSpeed] = useState("1");
     const [saveToGallery, setSaveToGallery] = useState(true);
+    const [modelParameterValuesByModel, setModelParameterValuesByModel] = useState<
+        Record<string, ModelParameterValues>
+    >({});
 
     // --- Chat Helper State ---
     const [chatProvider, setChatProvider] = useState<ChatProvider>("chutes");
@@ -1084,6 +1120,58 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         navyTtsModels,
         nanoGptImageModels,
         nanoGptVideoModels,
+    ]);
+    const selectedModelOption = useMemo(
+        () => modelSuggestions.find((entry) => entry.id === model),
+        [modelSuggestions, model]
+    );
+    const modelParameterValues = useMemo(
+        () =>
+            resolveModelParameterValues(
+                selectedModelOption,
+                modelParameterValuesByModel[model]
+            ),
+        [selectedModelOption, modelParameterValuesByModel, model]
+    );
+    const setModelParameterValue = useCallback(
+        (key: string, value: ModelParameterValue) => {
+            setModelParameterValuesByModel((previous) => ({
+                ...previous,
+                [model]: resolveModelParameterValues(selectedModelOption, {
+                    ...previous[model],
+                    [key]: value,
+                }),
+            }));
+        },
+        [model, selectedModelOption]
+    );
+
+    useEffect(() => {
+        if (provider !== "nanogpt" || mode !== "image" || !selectedModelOption) {
+            return;
+        }
+        const fixedCount = selectedModelOption.fixedOutputImages;
+        const maxCount = selectedModelOption.maxOutputImages;
+        if (typeof fixedCount === "number" && fixedCount > 0 && imageCount !== fixedCount) {
+            setImageCount(fixedCount);
+        } else if (
+            typeof maxCount === "number" &&
+            maxCount > 0 &&
+            imageCount > maxCount
+        ) {
+            setImageCount(maxCount);
+        }
+
+        const resolutions = selectedModelOption.supportedResolutions ?? [];
+        if (resolutions.length && !resolutions.includes(chutesResolution)) {
+            setChutesResolution(resolutions[0]);
+        }
+    }, [
+        provider,
+        mode,
+        selectedModelOption,
+        imageCount,
+        chutesResolution,
     ]);
 
     const runningJobs = jobs.filter((job) => job.status === "running");
@@ -1370,15 +1458,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         const selectedNanoGptModel = nanoGptImageModels.find(
                             (entry) => entry.id === job.model
                         );
+                        const catalogParameters = job.modelParameters ?? {};
                         const supportsReferenceImages =
                             selectedNanoGptModel?.supports?.referenceImages === true;
                         const maxReferenceImages = supportsReferenceImages
                             ? selectedNanoGptModel?.maxReferenceImages ?? 1
                             : 0;
+                        const catalogResolution =
+                            typeof catalogParameters.resolution === "string"
+                                ? catalogParameters.resolution
+                                : "";
                         const requestedResolution =
-                            job.imageSize && job.imageSize !== AUTO_IMAGE_OPTION
+                            catalogResolution ||
+                            (job.imageSize && job.imageSize !== AUTO_IMAGE_OPTION
                                 ? job.imageSize
-                                : job.chutesResolution ?? "";
+                                : job.chutesResolution ?? "");
                         const supportedResolutions =
                             selectedNanoGptModel?.supportedResolutions ?? [];
                         const resolution =
@@ -1390,13 +1484,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                                     : supportedResolutions[0];
                         body = {
                             ...body,
+                            parameters: catalogParameters,
                             resolution,
                             numberOfImages: job.imageCount,
                             input_references: referenceImages
                                 .slice(0, maxReferenceImages)
                                 .map((reference) => reference.dataUrl),
                             seed: selectedNanoGptModel?.supports?.seed
-                                ? Number(job.chutesSeed) || null
+                                ? typeof catalogParameters.seed === "number"
+                                    ? catalogParameters.seed
+                                    : Number(job.chutesSeed) || null
                                 : null,
                             modelCapabilities: {
                                 supportedResolutions,
@@ -2104,6 +2201,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 chutesSeed,
                 chutesVideoFps,
                 chutesVideoGuidanceScale,
+                modelParameters: buildModelParameterPayload(
+                    selectedModel,
+                    resolveModelParameterValues(
+                        selectedModel,
+                        modelParameterValuesByModel[jobModel]
+                    )
+                ),
                 videoImage: videoImage || undefined,
                 referenceIds: selectedReferenceIds,
                 videoAspect,
@@ -2398,6 +2502,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (storedNavyToolImageModel) setNavyToolImageModel(storedNavyToolImageModel);
 
         if (isRecord(storedSettings)) {
+            setModelParameterValuesByModel(
+                sanitizeStoredModelParameterValues(
+                    storedSettings.modelParameterValuesByModel
+                )
+            );
             const storedPrompt = getString(storedSettings.prompt);
             if (storedPrompt) setPrompt(storedPrompt);
             const storedNegativePrompt = getString(storedSettings.negativePrompt);
@@ -2725,6 +2834,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             chutesTtsSpeed,
             chutesTtsSpeaker,
             chutesTtsMaxDuration,
+            modelParameterValuesByModel,
         };
         const handle = window.setTimeout(() => {
             try {
@@ -2761,6 +2871,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         chutesTtsSpeed,
         chutesTtsSpeaker,
         chutesTtsMaxDuration,
+        modelParameterValuesByModel,
         hydrated,
     ]);
 
@@ -2984,6 +3095,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         ttsFormat, setTtsFormat,
         ttsSpeed, setTtsSpeed,
         saveToGallery, setSaveToGallery,
+        modelParameterValues, setModelParameterValue,
         chatProvider, setChatProvider,
         chutesChatModels,
         chutesChatModel, setChutesChatModel,

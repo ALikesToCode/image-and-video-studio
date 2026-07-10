@@ -27,11 +27,20 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/app/components/ui/dialog";
+import {
+    getModelReferenceLimit,
+    modelAcceptsImageReferences,
+} from "@/lib/model-media-capabilities";
 
 export function ImageGenView() {
     const context = useStudio();
     const { mode, setMode, generatedImages, setGeneratedImages } = context;
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const selectedModel = context.modelSuggestions.find(
+        (entry) => entry.id === context.model
+    );
+    const acceptsReferences = modelAcceptsImageReferences(selectedModel);
+    const referenceLimit = getModelReferenceLimit(selectedModel);
 
     // Force mode to image when entering this view
     useEffect(() => {
@@ -95,6 +104,8 @@ export function ImageGenView() {
                             model={context.model}
                             setModel={context.setModel}
                             modelSuggestions={context.modelSuggestions}
+                            modelParameterValues={context.modelParameterValues}
+                            setModelParameterValue={context.setModelParameterValue}
                             modelsLoading={context.modelsLoading}
                             modelsError={context.modelsError}
                             onRefreshModels={context.refreshModels}
@@ -167,6 +178,8 @@ export function ImageGenView() {
                             model={context.model}
                             setModel={context.setModel}
                             modelSuggestions={context.modelSuggestions}
+                            modelParameterValues={context.modelParameterValues}
+                            setModelParameterValue={context.setModelParameterValue}
                             modelsLoading={context.modelsLoading}
                             modelsError={context.modelsError}
                             onRefreshModels={context.refreshModels}
@@ -230,15 +243,28 @@ export function ImageGenView() {
                     >
                         <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                         <div className="relative mb-4">
-                            <ReferenceStrip
-                                references={context.references}
-                                selectedReferenceIds={context.selectedReferenceIds}
-                                onAddReference={context.addReferenceFile}
-                                onToggleReference={context.toggleReferenceSelection}
-                                onRemoveReference={context.removeReference}
-                                onClearSelected={context.clearSelectedReferences}
-                                compact
-                            />
+                            {acceptsReferences ? (
+                                <>
+                                    <ReferenceStrip
+                                        references={context.references}
+                                        selectedReferenceIds={context.selectedReferenceIds}
+                                        onAddReference={context.addReferenceFile}
+                                        onToggleReference={context.toggleReferenceSelection}
+                                        onRemoveReference={context.removeReference}
+                                        onClearSelected={context.clearSelectedReferences}
+                                        compact
+                                    />
+                                    {typeof referenceLimit === "number" && referenceLimit > 0 ? (
+                                        <p className="mt-2 text-xs text-muted-foreground">
+                                            {selectedModel?.label ?? "This model"} accepts up to {referenceLimit} reference image{referenceLimit === 1 ? "" : "s"}; extra selections are not sent.
+                                        </p>
+                                    ) : null}
+                                </>
+                            ) : (
+                                <div className="rounded-xl border border-border/60 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                                    {selectedModel?.label ?? "This model"} is text-to-image only. Saved references remain in your library but are not sent.
+                                </div>
+                            )}
                         </div>
                         <PromptInput
                             prompt={context.prompt}
