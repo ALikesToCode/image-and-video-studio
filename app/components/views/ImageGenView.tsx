@@ -156,6 +156,11 @@ export function ImageGenView() {
                             navyUsageLoading={context.navyUsageLoading}
                             navyUsageUpdatedAt={context.navyUsageUpdatedAt}
                             onRefreshUsage={context.refreshNavyUsage}
+                            navyModelHealth={context.navyModelHealth}
+                            navyModelHealthError={context.navyModelHealthError}
+                            navyModelHealthLoading={context.navyModelHealthLoading}
+                            navyModelHealthUpdatedAt={context.navyModelHealthUpdatedAt}
+                            refreshNavyModelHealth={context.refreshNavyModelHealth}
                         />
                     </DialogContent>
                 </Dialog>
@@ -230,6 +235,11 @@ export function ImageGenView() {
                             navyUsageLoading={context.navyUsageLoading}
                             navyUsageUpdatedAt={context.navyUsageUpdatedAt}
                             onRefreshUsage={context.refreshNavyUsage}
+                            navyModelHealth={context.navyModelHealth}
+                            navyModelHealthError={context.navyModelHealthError}
+                            navyModelHealthLoading={context.navyModelHealthLoading}
+                            navyModelHealthUpdatedAt={context.navyModelHealthUpdatedAt}
+                            refreshNavyModelHealth={context.refreshNavyModelHealth}
                         />
                 </motion.div>
 

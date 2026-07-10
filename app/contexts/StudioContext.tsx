@@ -35,6 +35,8 @@ import {
 import {
     type GeneratedImage,
     type GenerationBilling,
+    type NanoGptAccountResponse,
+    type NavyModelHealth,
     type NavyUsageResponse,
     type PersistedGenerationJob,
     type ReferenceRole,
@@ -65,6 +67,10 @@ import {
     resolveModelParameterValues,
     type ModelParameterValues,
 } from "@/lib/model-capability-settings";
+import {
+    parseNavyModelHealthResponse,
+    selectLiveCatalogBucket,
+} from "@/lib/navy-model-health";
 import {
     restorePersistedGenerationJob,
     shouldPersistRemoteGenerationJob,
@@ -792,6 +798,20 @@ interface StudioContextType {
     navyUsageUpdatedAt: string | null;
     refreshNavyUsage: () => Promise<void>;
 
+    // Navy Model Health
+    navyModelHealth: NavyModelHealth | null;
+    navyModelHealthError: string | null;
+    navyModelHealthLoading: boolean;
+    navyModelHealthUpdatedAt: string | null;
+    refreshNavyModelHealth: () => Promise<void>;
+
+    // NanoGPT Account
+    nanoGptAccount: NanoGptAccountResponse | null;
+    nanoGptAccountError: string | null;
+    nanoGptAccountLoading: boolean;
+    nanoGptAccountUpdatedAt: string | null;
+    refreshNanoGptAccount: () => Promise<void>;
+
     // Storage
     storageSnapshot: StorageSnapshot | null;
     storageError: string | null;
@@ -958,11 +978,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [navyUsageError, setNavyUsageError] = useState<string | null>(null);
     const [navyUsageLoading, setNavyUsageLoading] = useState(false);
     const [navyUsageUpdatedAt, setNavyUsageUpdatedAt] = useState<string | null>(null);
+    const [navyModelHealth, setNavyModelHealth] = useState<NavyModelHealth | null>(null);
+    const [navyModelHealthError, setNavyModelHealthError] = useState<string | null>(null);
+    const [navyModelHealthLoading, setNavyModelHealthLoading] = useState(false);
+    const [navyModelHealthUpdatedAt, setNavyModelHealthUpdatedAt] = useState<string | null>(null);
+    const [nanoGptAccount, setNanoGptAccount] = useState<NanoGptAccountResponse | null>(null);
+    const [nanoGptAccountError, setNanoGptAccountError] = useState<string | null>(null);
+    const [nanoGptAccountLoading, setNanoGptAccountLoading] = useState(false);
+    const [nanoGptAccountUpdatedAt, setNanoGptAccountUpdatedAt] = useState<string | null>(null);
     const [queueTick, setQueueTick] = useState(0);
 
     // --- Refs ---
     const galleryUrlsRef = useRef(new Map<string, string>());
     const navyUsageLoadingRef = useRef(false);
+    const navyModelHealthRequestRef = useRef(0);
+    const nanoGptAccountRequestRef = useRef(0);
     const processingRef = useRef(new Set<string>());
     const lastProviderModeRef = useRef(`${provider}:${mode}`);
 
@@ -1041,32 +1071,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             chatModels.length > 0;
 
         if (hasBucketedPayload) {
-            setNavyImageModels(
-                imageModels.length
-                    ? mergeModelOptions(NAVY_IMAGE_MODELS, imageModels)
-                    : NAVY_IMAGE_MODELS
-            );
-            setNavyVideoModels(
-                videoModels.length
-                    ? mergeModelOptions(NAVY_VIDEO_MODELS, videoModels)
-                    : NAVY_VIDEO_MODELS
-            );
-            setNavyTtsModels(
-                audioModels.length
-                    ? mergeModelOptions(NAVY_TTS_MODELS, audioModels)
-                    : NAVY_TTS_MODELS
-            );
-            setNavyChatModels(
-                chatModels.length
-                    ? mergeModelOptions(NAVY_CHAT_MODELS, chatModels)
-                    : NAVY_CHAT_MODELS
-            );
+            setNavyImageModels(selectLiveCatalogBucket(imageModels, NAVY_IMAGE_MODELS));
+            setNavyVideoModels(selectLiveCatalogBucket(videoModels, NAVY_VIDEO_MODELS));
+            setNavyTtsModels(selectLiveCatalogBucket(audioModels, NAVY_TTS_MODELS));
+            setNavyChatModels(selectLiveCatalogBucket(chatModels, NAVY_CHAT_MODELS));
             return;
         }
 
         // Fallback for unexpected unbucketed responses.
         if (rawModels.length) {
-            setNavyChatModels(mergeModelOptions(NAVY_CHAT_MODELS, rawModels));
+            setNavyChatModels(rawModels);
             return;
         }
 
@@ -2471,6 +2485,94 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     }, [apiKeys.navy]);
 
+    const refreshNavyModelHealth = useCallback(async () => {
+        const selectedModelId = model.trim();
+        const requestId = ++navyModelHealthRequestRef.current;
+        if (provider !== "navy" || !selectedModelId) {
+            setNavyModelHealth(null);
+            setNavyModelHealthError(null);
+            setNavyModelHealthUpdatedAt(null);
+            setNavyModelHealthLoading(false);
+            return;
+        }
+
+        setNavyModelHealthLoading(true);
+        setNavyModelHealthError(null);
+        try {
+            const response = await fetch(
+                `/api/navy/model-status?ids=${encodeURIComponent(selectedModelId)}`,
+            );
+            const payload: unknown = await response.json();
+            if (!response.ok) {
+                throw new Error(
+                    errorMessageFromPayload(payload, "Unable to fetch Navy model health."),
+                );
+            }
+            const parsed = parseNavyModelHealthResponse(payload, selectedModelId);
+            if (!parsed) {
+                throw new Error("Navy has no live health result for the selected model.");
+            }
+            if (requestId !== navyModelHealthRequestRef.current) return;
+            setNavyModelHealth(parsed.model);
+            setNavyModelHealthError(null);
+            setNavyModelHealthUpdatedAt(parsed.lastUpdated ?? new Date().toISOString());
+        } catch (error) {
+            if (requestId !== navyModelHealthRequestRef.current) return;
+            setNavyModelHealth(null);
+            setNavyModelHealthError(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to fetch Navy model health.",
+            );
+        } finally {
+            if (requestId === navyModelHealthRequestRef.current) {
+                setNavyModelHealthLoading(false);
+            }
+        }
+    }, [model, provider]);
+
+    const refreshNanoGptAccount = useCallback(async () => {
+        const trimmedKey = apiKeys.nanogpt.trim();
+        const requestId = ++nanoGptAccountRequestRef.current;
+        if (!trimmedKey) {
+            setNanoGptAccount(null);
+            setNanoGptAccountError(null);
+            setNanoGptAccountUpdatedAt(null);
+            setNanoGptAccountLoading(false);
+            return;
+        }
+
+        setNanoGptAccountLoading(true);
+        setNanoGptAccountError(null);
+        try {
+            const response = await fetch("/api/nanogpt/account", {
+                headers: { "x-user-api-key": trimmedKey },
+                cache: "no-store",
+            });
+            const payload: unknown = await response.json();
+            if (!response.ok) {
+                throw new Error(
+                    errorMessageFromPayload(payload, "Unable to fetch NanoGPT account details.")
+                );
+            }
+            if (requestId !== nanoGptAccountRequestRef.current) return;
+            setNanoGptAccount(payload as NanoGptAccountResponse);
+            setNanoGptAccountError(null);
+            setNanoGptAccountUpdatedAt(new Date().toISOString());
+        } catch (error) {
+            if (requestId !== nanoGptAccountRequestRef.current) return;
+            setNanoGptAccountError(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to fetch NanoGPT account details."
+            );
+        } finally {
+            if (requestId === nanoGptAccountRequestRef.current) {
+                setNanoGptAccountLoading(false);
+            }
+        }
+    }, [apiKeys.nanogpt]);
+
     const refreshModels = useCallback(async () => {
         if (provider !== "openrouter" && provider !== "navy" && provider !== "nanogpt") return;
         if (provider === "openrouter" && !apiKey.trim()) {
@@ -2588,15 +2690,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (storedOpenRouterModels.length) setOpenRouterImageModels(sanitizeModelOptions(storedOpenRouterModels));
         const storedNavyImageModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyImageModels, []);
         if (storedNavyImageModels.length) {
-            setNavyImageModels(mergeModelOptions(NAVY_IMAGE_MODELS, sanitizeModelOptions(storedNavyImageModels)));
+            setNavyImageModels(sanitizeModelOptions(storedNavyImageModels));
         }
         const storedNavyVideoModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyVideoModels, []);
         if (storedNavyVideoModels.length) {
-            setNavyVideoModels(mergeModelOptions(NAVY_VIDEO_MODELS, sanitizeModelOptions(storedNavyVideoModels)));
+            setNavyVideoModels(sanitizeModelOptions(storedNavyVideoModels));
         }
         const storedNavyTtsModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyTtsModels, []);
         if (storedNavyTtsModels.length) {
-            setNavyTtsModels(mergeModelOptions(NAVY_TTS_MODELS, sanitizeModelOptions(storedNavyTtsModels)));
+            setNavyTtsModels(sanitizeModelOptions(storedNavyTtsModels));
         }
         const storedNanoGptImageModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.nanoGptImageModels, []);
         if (storedNanoGptImageModels.length) {
@@ -2617,9 +2719,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (storedToolImageModel) setChutesToolImageModel(storedToolImageModel);
         const storedNavyChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyChatModels, []);
         if (storedNavyChatModels.length) {
-            setNavyChatModels(
-                mergeModelOptions(NAVY_CHAT_MODELS, sanitizeModelOptions(storedNavyChatModels))
-            );
+            setNavyChatModels(sanitizeModelOptions(storedNavyChatModels));
         }
         const storedNavyChatModel = readLocalStorage<string>(STORAGE_KEYS.navyChatModel, "");
         if (storedNavyChatModel) setNavyChatModel(storedNavyChatModel);
@@ -2868,8 +2968,31 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
-        void refreshNavyCatalog();
+        void refreshNavyCatalog().catch(() => {
+            // Preserve the cached or static catalog when the live catalog is unavailable.
+        });
     }, [apiKeys.navy, hydrated, refreshNavyCatalog]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        navyModelHealthRequestRef.current += 1;
+        if (provider !== "navy" || !model.trim()) {
+            setNavyModelHealth(null);
+            setNavyModelHealthError(null);
+            setNavyModelHealthUpdatedAt(null);
+            setNavyModelHealthLoading(false);
+            return;
+        }
+
+        setNavyModelHealth(null);
+        setNavyModelHealthError(null);
+        setNavyModelHealthUpdatedAt(null);
+        setNavyModelHealthLoading(true);
+        const handle = window.setTimeout(() => {
+            void refreshNavyModelHealth();
+        }, 150);
+        return () => window.clearTimeout(handle);
+    }, [hydrated, provider, model, refreshNavyModelHealth]);
 
     useEffect(() => {
         if (!hydrated || provider !== "nanogpt") return;
@@ -3117,6 +3240,32 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
+
+        nanoGptAccountRequestRef.current += 1;
+        if (!apiKeys.nanogpt.trim()) {
+            setNanoGptAccount(null);
+            setNanoGptAccountError(null);
+            setNanoGptAccountUpdatedAt(null);
+            setNanoGptAccountLoading(false);
+            return;
+        }
+        if (provider !== "nanogpt") {
+            setNanoGptAccountLoading(false);
+            return;
+        }
+
+        setNanoGptAccount(null);
+        setNanoGptAccountError(null);
+        setNanoGptAccountUpdatedAt(null);
+
+        const handle = window.setTimeout(() => {
+            void refreshNanoGptAccount();
+        }, 500);
+        return () => window.clearTimeout(handle);
+    }, [provider, apiKeys.nanogpt, hydrated, refreshNanoGptAccount]);
+
+    useEffect(() => {
+        if (!hydrated) return;
         try {
             const storedMedia: StoredMediaRecord[] = savedMedia.map((item) => ({
                 id: item.id,
@@ -3243,6 +3392,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         errorMessage, setErrorMessage,
         modelsLoading, modelsError,
         navyUsage, navyUsageError, navyUsageLoading, navyUsageUpdatedAt, refreshNavyUsage,
+        navyModelHealth, navyModelHealthError, navyModelHealthLoading,
+        navyModelHealthUpdatedAt, refreshNavyModelHealth,
+        nanoGptAccount, nanoGptAccountError, nanoGptAccountLoading,
+        nanoGptAccountUpdatedAt, refreshNanoGptAccount,
         storageSnapshot, storageError, refreshStorageEstimate, requestPersistentStorage,
         references,
         selectedReferenceIds,

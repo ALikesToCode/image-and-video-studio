@@ -20,10 +20,37 @@ import {
     SelectValue,
 } from "@/app/components/ui/select";
 import { useStudio } from "@/app/contexts/StudioContext";
-import { AlertTriangle, HardDrive, Settings, ShieldCheck, Trash2 } from "lucide-react";
+import {
+    AlertTriangle,
+    HardDrive,
+    RefreshCw,
+    Settings,
+    ShieldCheck,
+    Trash2,
+    WalletCards,
+} from "lucide-react";
 import { useState, type ChangeEvent } from "react";
-import { Provider } from "@/lib/constants";
+import type { Provider } from "@/lib/constants";
 import type { KeyStorageMode } from "@/lib/client/key-storage";
+
+const formatUsd = (value: number | string) => {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(parsed)) return String(value);
+    return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 4,
+    }).format(parsed);
+};
+
+const formatCount = (value: number | string) => {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(parsed)) return String(value);
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(parsed);
+};
+
+const subscriptionPercent = (value: number) =>
+    Math.min(100, Math.max(0, value * 100));
 
 export function SettingsDialog() {
     const {
@@ -42,6 +69,11 @@ export function SettingsDialog() {
         migrateLegacyProviderKeys,
         discardLegacyProviderKeys,
         clearAllKeys,
+        nanoGptAccount,
+        nanoGptAccountError,
+        nanoGptAccountLoading,
+        nanoGptAccountUpdatedAt,
+        refreshNanoGptAccount,
     } = useStudio();
 
     const [isOpen, setIsOpen] = useState(false);
@@ -68,7 +100,7 @@ export function SettingsDialog() {
                 <DialogHeader>
                     <DialogTitle>Settings</DialogTitle>
                     <DialogDescription>
-                        Configure your API keys. These are stored locally in your browser.
+                        Configure API keys and review provider account status. Keys are stored locally in your browser.
                     </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -279,6 +311,133 @@ export function SettingsDialog() {
                             </Button>
                         </div>
                     </div>
+                    {provider === "nanogpt" ? (
+                        <section
+                            aria-labelledby="nanogpt-account-heading"
+                            className="rounded-xl border border-border/60 bg-secondary/20 p-4 text-sm"
+                        >
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 className="flex items-center gap-2 font-semibold" id="nanogpt-account-heading">
+                                        <WalletCards className="h-4 w-4 text-primary" aria-hidden="true" />
+                                        NanoGPT account
+                                    </h3>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Balance and current billing-period usage.
+                                    </p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => void refreshNanoGptAccount()}
+                                    disabled={!apiKeys.nanogpt.trim() || nanoGptAccountLoading}
+                                    aria-label="Refresh NanoGPT account details"
+                                >
+                                    <RefreshCw
+                                        className={`h-4 w-4 ${nanoGptAccountLoading ? "animate-spin" : ""}`}
+                                        aria-hidden="true"
+                                    />
+                                    Refresh
+                                </Button>
+                            </div>
+
+                            <div className="mt-4" aria-live="polite">
+                                {nanoGptAccountError ? (
+                                    <p className="text-xs text-destructive" role="alert">
+                                        {nanoGptAccountError}
+                                    </p>
+                                ) : nanoGptAccount ? (
+                                    <div className="space-y-3">
+                                        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                            <div className="rounded-lg border border-border/40 bg-background/60 p-2.5">
+                                                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">USD balance</dt>
+                                                <dd className="mt-1 font-semibold tabular-nums">
+                                                    {formatUsd(nanoGptAccount.balance.usdBalance)}
+                                                </dd>
+                                            </div>
+                                            <div className="rounded-lg border border-border/40 bg-background/60 p-2.5">
+                                                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">NANO balance</dt>
+                                                <dd className="mt-1 font-semibold tabular-nums">
+                                                    {formatCount(nanoGptAccount.balance.nanoBalance)}
+                                                </dd>
+                                            </div>
+                                            <div className="rounded-lg border border-border/40 bg-background/60 p-2.5">
+                                                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Net spend</dt>
+                                                <dd className="mt-1 font-semibold tabular-nums">
+                                                    {formatUsd(nanoGptAccount.usage.totals.netCostUsd)}
+                                                </dd>
+                                            </div>
+                                            <div className="rounded-lg border border-border/40 bg-background/60 p-2.5">
+                                                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Requests</dt>
+                                                <dd className="mt-1 font-semibold tabular-nums">
+                                                    {formatCount(nanoGptAccount.usage.totals.requests)}
+                                                </dd>
+                                            </div>
+                                        </dl>
+
+                                        {nanoGptAccount.subscription ? (
+                                            <div className="rounded-lg border border-border/40 bg-background/40 p-3">
+                                                <div className="flex items-center justify-between gap-3 text-xs">
+                                                    <span className="font-medium">Daily subscription usage</span>
+                                                    <span className="tabular-nums text-muted-foreground">
+                                                        {formatCount(nanoGptAccount.subscription.daily.remaining)} remaining
+                                                    </span>
+                                                </div>
+                                                <div
+                                                    className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary"
+                                                    role="progressbar"
+                                                    aria-label="NanoGPT daily subscription usage"
+                                                    aria-valuemin={0}
+                                                    aria-valuemax={100}
+                                                    aria-valuenow={subscriptionPercent(
+                                                        nanoGptAccount.subscription.daily.percentUsed
+                                                    )}
+                                                >
+                                                    <div
+                                                        className="h-full rounded-full bg-primary transition-[width]"
+                                                        style={{
+                                                            width: `${subscriptionPercent(
+                                                                nanoGptAccount.subscription.daily.percentUsed
+                                                            )}%`,
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs text-muted-foreground">
+                                                No active subscription usage was returned; balance usage is still available.
+                                            </p>
+                                        )}
+
+                                        {nanoGptAccount.warnings?.map((warning) => (
+                                            <p
+                                                key={`${warning.section}:${warning.status}:${warning.code ?? "warning"}`}
+                                                className="text-xs text-amber-700 dark:text-amber-300"
+                                                role="status"
+                                            >
+                                                {warning.error}
+                                            </p>
+                                        ))}
+                                        <p className="text-right text-[10px] text-muted-foreground">
+                                            Usage {nanoGptAccount.usage.from}–{nanoGptAccount.usage.to} UTC
+                                            {nanoGptAccountUpdatedAt
+                                                ? ` · Updated ${new Date(nanoGptAccountUpdatedAt).toLocaleTimeString()}`
+                                                : ""}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-muted-foreground">
+                                        {apiKeys.nanogpt.trim()
+                                            ? nanoGptAccountLoading
+                                                ? "Loading NanoGPT account details…"
+                                                : "Refresh to check this account."
+                                            : "Add a NanoGPT API key to check balance and usage."}
+                                    </p>
+                                )}
+                            </div>
+                        </section>
+                    ) : null}
                 </div>
                 <DialogFooter>
                     <Button onClick={() => setIsOpen(false)}>Done</Button>

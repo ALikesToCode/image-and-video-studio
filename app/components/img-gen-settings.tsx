@@ -33,7 +33,9 @@ import {
     VIDEO_RESOLUTIONS,
 } from "@/lib/constants";
 import { NavyUsageResponse } from "@/lib/types";
+import type { NavyModelHealth } from "@/lib/types";
 import { ModelParameterSettings } from "@/app/components/model-parameter-settings";
+import { NavyModelHealthSummary } from "@/app/components/navy-model-health";
 import type { ModelParameterValue } from "@/lib/constants";
 import type { ModelParameterValues } from "@/lib/model-capability-settings";
 import { useState } from "react";
@@ -98,6 +100,11 @@ interface ImgGenSettingsProps {
     navyUsageError?: string | null;
     navyUsageLoading?: boolean;
     navyUsageUpdatedAt?: string | null;
+    navyModelHealth?: NavyModelHealth | null;
+    navyModelHealthError?: string | null;
+    navyModelHealthLoading?: boolean;
+    navyModelHealthUpdatedAt?: string | null;
+    refreshNavyModelHealth?: () => void;
     navyImageSize?: string;
     setNavyImageSize?: (s: string) => void;
     navyImageQuality?: string;
@@ -177,6 +184,11 @@ export function ImgGenSettings({
     navyUsageError,
     navyUsageLoading,
     navyUsageUpdatedAt,
+    navyModelHealth = null,
+    navyModelHealthError = null,
+    navyModelHealthLoading = false,
+    navyModelHealthUpdatedAt = null,
+    refreshNavyModelHealth,
 
     onRefreshUsage,
     chutesTtsSpeed,
@@ -960,15 +972,25 @@ export function ImgGenSettings({
                                     className="h-6 px-2 hover:bg-background/50"
                                     onClick={onRefreshUsage}
                                     disabled={navyUsageLoading}
+                                    aria-label="Refresh Navy usage"
                                 >
                                     {navyUsageLoading ? "..." : "Refresh"}
                                 </Button>
                             )}
                         </div>
+                        <NavyModelHealthSummary
+                            model={selectedModel}
+                            health={navyModelHealth}
+                            error={navyModelHealthError}
+                            loading={navyModelHealthLoading}
+                            updatedAt={navyModelHealthUpdatedAt}
+                            currentPlan={navyUsage?.plan}
+                            onRefresh={refreshNavyModelHealth}
+                        />
                         {navyUsageError ? (
                             <p className="mt-2 text-destructive">{navyUsageError}</p>
                         ) : navyUsage ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-2 text-muted-foreground">
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-2 text-muted-foreground">
                                 <div>
                                     <div className="text-[10px] uppercase tracking-wide opacity-70">Plan</div>
                                     <div className="text-foreground font-medium">{navyUsage.plan}</div>
@@ -1014,7 +1036,7 @@ export function ImgGenSettings({
                                 ) : null}
                             </div>
                         ) : (
-                            <p className="mt-2 text-muted-foreground">
+                            <p className="mt-3 text-muted-foreground">
                                 Add a NavyAI API key to see usage stats.
                             </p>
                         )}

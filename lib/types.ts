@@ -99,3 +99,83 @@ export type NavyUsageResponse = {
     };
     server_time_utc: string;
 };
+
+export type NavyModelHealth = {
+    id: string;
+    endpoint: string | null;
+    status: string | null;
+    lastChecked: string | null;
+    inProgress: boolean | null;
+    uptimePercent: number | null;
+    checksCount: number | null;
+    okCount: number | null;
+    avgTtft: number | null;
+    avgTotal: number | null;
+    error?: string;
+};
+
+export type NavyModelHealthSelection = {
+    lastUpdated: string | null;
+    model: NavyModelHealth;
+};
+
+export type NanoGptUsageCounters = {
+    requests: number;
+    costUsd: number;
+    refundedUsd: number;
+    netCostUsd: number;
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens: number;
+    totalTokens: number;
+};
+
+export type NanoGptAccountResponse = {
+    balance: {
+        usdBalance: string;
+        nanoBalance: string;
+        depositAddress: string;
+    };
+    usage: {
+        from: string;
+        to: string;
+        timezone: "UTC";
+        groupBy: "day" | "model" | "day,model";
+        asOf: string;
+        totals: NanoGptUsageCounters;
+        byDay?: Array<NanoGptUsageCounters & { date: string }>;
+        byModel?: Array<NanoGptUsageCounters & { model: string }>;
+        byDayModel?: Array<
+            NanoGptUsageCounters & { date: string; model: string }
+        >;
+    };
+    subscription: {
+        active: boolean;
+        state: "active" | "grace" | "inactive";
+        enforceDailyLimit: boolean;
+        limits: {
+            daily: number;
+            monthly: number;
+        };
+        daily: {
+            used: number;
+            remaining: number;
+            percentUsed: number;
+            resetAt: number;
+        };
+        monthly: {
+            used: number;
+            remaining: number;
+            percentUsed: number;
+            resetAt: number;
+        };
+        currentPeriodEnd: string | null;
+        graceUntil: string | null;
+    } | null;
+    warnings?: Array<{
+        section: "subscription";
+        status: number;
+        error: string;
+        code?: string;
+    }>;
+};
