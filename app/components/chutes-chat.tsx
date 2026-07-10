@@ -96,6 +96,7 @@ import {
   type ChatMediaAsset,
   buildChatMediaPreview,
   buildAssistantToolContextContent,
+  buildCancelledToolResults,
   buildNanoGptImageToolRequest,
   buildNanoGptVideoToolRequest,
   createSyntheticFallbackToolCall,
@@ -251,9 +252,9 @@ const CHAT_TEXT_ATTACHMENT_MAX_CHARS = 18_000;
 const CHAT_TEXT_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
 const CHAT_IMAGE_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
 
-const isAbortLikeError = (error: unknown) =>
-  (error instanceof Error && error.name === "AbortError") ||
-  (error instanceof Error && /\babort(?:ed|ing)?\b/i.test(error.message));
+const isAbortLikeError = (error: unknown, signal?: AbortSignal) =>
+  signal?.aborted === true ||
+  (error instanceof Error && error.name === "AbortError");
 
 const abortableDelay = (delayMs: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -1794,7 +1795,7 @@ ${defaultPrompt}`;
         );
         if (recoveredPrompt) return recoveredPrompt;
       } catch (error) {
-        if (isAbortLikeError(error)) throw error;
+        if (isAbortLikeError(error, signal)) throw error;
         // Try the next recovery model before falling back to the local rewrite.
       }
     }
@@ -2951,7 +2952,22 @@ ${defaultPrompt}`;
           name: toolName || undefined,
         });
       } catch (error) {
-        if (isAbortLikeError(error)) throw error;
+        if (isAbortLikeError(error, signal)) {
+          const completedToolCallIds = toolMessages
+            .map((message) => message.toolCallId)
+            .filter((id): id is string => Boolean(id));
+          toolMessages.push(
+            ...buildCancelledToolResults(
+              orderedToolCalls,
+              completedToolCallIds
+            ).map((result) => ({
+              id: createId(),
+              role: "tool" as const,
+              ...result,
+            }))
+          );
+          return toolMessages;
+        }
         toolMessages.push({
           id: createId(),
           role: "tool",
@@ -3154,7 +3170,7 @@ ${defaultPrompt}`;
         toolRounds += 1;
       }
     } catch (error) {
-      if (!isAbortLikeError(error)) {
+      if (!isAbortLikeError(error, abortController.signal)) {
         setChatError(
           error instanceof Error ? error.message : "Unable to run chat."
         );

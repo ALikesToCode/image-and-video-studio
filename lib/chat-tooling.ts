@@ -63,6 +63,30 @@ export type ChatAttachmentAsset = {
   truncated?: boolean;
 };
 
+type ToolCallIdentity = {
+  id?: string;
+  function?: { name?: string };
+};
+
+export const buildCancelledToolResults = (
+  toolCalls: ToolCallIdentity[],
+  completedToolCallIds: Iterable<string> = [],
+) => {
+  const completed = new Set(completedToolCallIds);
+  return toolCalls
+    .filter(
+      (toolCall): toolCall is ToolCallIdentity & { id: string } =>
+        typeof toolCall.id === "string" &&
+        Boolean(toolCall.id) &&
+        !completed.has(toolCall.id),
+    )
+    .map((toolCall) => ({
+      toolCallId: toolCall.id,
+      ...(toolCall.function?.name ? { name: toolCall.function.name } : {}),
+      content: "Tool error: Cancelled by the user.",
+    }));
+};
+
 const toolStringArgument = (
   args: Record<string, unknown>,
   keys: string[],

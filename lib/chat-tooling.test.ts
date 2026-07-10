@@ -7,6 +7,7 @@ import {
   buildChatCompletionPayload,
   buildChatCompletionRecoveryPayloads,
   buildChatMediaPreview,
+  buildCancelledToolResults,
   buildAssistantToolContextContent,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
@@ -29,6 +30,25 @@ import {
   stripHeavyMediaFromMessagesForStorage,
   toChatCompletionMessages,
 } from "./chat-tooling.ts";
+
+test("aborted tool batches receive one result for every unresolved call", () => {
+  assert.deepEqual(
+    buildCancelledToolResults(
+      [
+        { id: "image-1", function: { name: "generate_image" } },
+        { id: "video-1", function: { name: "generate_video" } },
+      ],
+      ["image-1"]
+    ),
+    [
+      {
+        toolCallId: "video-1",
+        name: "generate_video",
+        content: "Tool error: Cancelled by the user.",
+      },
+    ]
+  );
+});
 
 test("NanoGPT chat image requests honor discovered model capabilities", () => {
   assert.deepEqual(
