@@ -1,7 +1,9 @@
 import {
+  asSchema,
   dynamicTool,
   jsonSchema,
   type ModelMessage,
+  type ToolCallRepairFunction,
   type ToolSet,
   type UIMessage,
 } from "ai";
@@ -25,9 +27,15 @@ export type AIChatToolName = (typeof AI_CHAT_TOOL_NAMES)[number];
 export type AIChatToolCall = {
   id: string;
   type: "function";
+  input_error?: string;
   function: {
     name: string;
     arguments: string;
+  };
+  extra_content?: {
+    google?: {
+      thought_signature?: string;
+    };
   };
 };
 
@@ -136,7 +144,10 @@ const AUDIO_TOOL_SCHEMA = {
     speaker: { type: "integer", minimum: 0 },
     max_duration_ms: { type: "integer", minimum: 100, maximum: 600000 },
   },
-  anyOf: [{ required: ["input"] }, { required: ["text"] }],
+  anyOf: [
+    { type: "object", required: ["input"] },
+    { type: "object", required: ["text"] },
+  ],
 } as const;
 
 const TOOL_DEFINITIONS = {
@@ -168,18 +179,174 @@ export const normalizeEnabledAIChatTools = (value: unknown): AIChatToolName[] =>
   return AI_CHAT_TOOL_NAMES.filter((name) => requested.has(name));
 };
 
+type JSONSchemaRecord = Record<string, unknown>;
+
+const schemaRecord = (value: unknown): JSONSchemaRecord | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JSONSchemaRecord)
+    : null;
+
+const validateSchemaValue = (
+  schemaValue: unknown,
+  value: unknown,
+  path = "$"
+): string[] => {
+  const schema = schemaRecord(schemaValue);
+  if (!schema) return [`${path} has an invalid schema.`];
+
+  if (Array.isArray(schema.oneOf)) {
+    const matches = schema.oneOf.filter(
+      (candidate) => validateSchemaValue(candidate, value, path).length === 0
+    ).length;
+    if (matches !== 1) return [`${path} must match exactly one allowed shape.`];
+  }
+  if (Array.isArray(schema.anyOf)) {
+    const matches = schema.anyOf.some(
+      (candidate) => validateSchemaValue(candidate, value, path).length === 0
+    );
+    if (!matches) return [`${path} must match an allowed shape.`];
+  }
+
+  const type = schema.type;
+  if (type === "object") {
+    const record = schemaRecord(value);
+    if (!record) return [`${path} must be an object.`];
+    const properties = schemaRecord(schema.properties) ?? {};
+    const required = Array.isArray(schema.required)
+      ? schema.required.filter((item): item is string => typeof item === "string")
+      : [];
+    const errors = required
+      .filter((key) => !(key in record))
+      .map((key) => `${path}.${key} is required.`);
+    if (schema.additionalProperties === false) {
+      errors.push(
+        ...Object.keys(record)
+          .filter((key) => !(key in properties))
+          .map((key) => `${path}.${key} is not allowed.`)
+      );
+    }
+    for (const [key, childValue] of Object.entries(record)) {
+      if (key in properties) {
+        errors.push(
+          ...validateSchemaValue(properties[key], childValue, `${path}.${key}`)
+        );
+      }
+    }
+    return errors;
+  }
+
+  if (type === "array") {
+    if (!Array.isArray(value)) return [`${path} must be an array.`];
+    const errors: string[] = [];
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+      errors.push(`${path} must contain at least ${schema.minItems} item(s).`);
+    }
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      errors.push(`${path} must contain at most ${schema.maxItems} item(s).`);
+    }
+    if (schema.items) {
+      value.forEach((item, index) => {
+        errors.push(
+          ...validateSchemaValue(schema.items, item, `${path}[${index}]`)
+        );
+      });
+    }
+    return errors;
+  }
+
+  if (type === "string") {
+    if (typeof value !== "string") return [`${path} must be a string.`];
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) {
+      return [`${path} must contain at least ${schema.minLength} character(s).`];
+    }
+  } else if (type === "integer") {
+    if (typeof value !== "number" || !Number.isInteger(value)) {
+      return [`${path} must be an integer.`];
+    }
+  } else if (type === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return [`${path} must be a finite number.`];
+    }
+  } else if (type === "boolean" && typeof value !== "boolean") {
+    return [`${path} must be a boolean.`];
+  }
+
+  const errors: string[] = [];
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    errors.push(`${path} must use an allowed value.`);
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      errors.push(`${path} must be at least ${schema.minimum}.`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      errors.push(`${path} must be at most ${schema.maximum}.`);
+    }
+  }
+  return errors;
+};
+
+const validatedJSONSchema = (schema: JSONSchemaRecord) =>
+  jsonSchema<Record<string, unknown>>(
+    schema as Parameters<typeof jsonSchema>[0],
+    {
+      validate: (value) => {
+        const errors = validateSchemaValue(schema, value);
+        return errors.length
+          ? { success: false as const, error: new Error(errors.join(" ")) }
+          : {
+              success: true as const,
+              value: value as Record<string, unknown>,
+            };
+      },
+    }
+  );
+
 export const buildAIChatTools = (enabledTools: unknown): ToolSet => {
   const tools: ToolSet = {};
   for (const name of normalizeEnabledAIChatTools(enabledTools)) {
     const definition = TOOL_DEFINITIONS[name];
     tools[name] = dynamicTool({
       description: definition.description,
-      inputSchema: jsonSchema<Record<string, unknown>>(
-        definition.schema as unknown as Parameters<typeof jsonSchema>[0]
+      inputSchema: validatedJSONSchema(
+        definition.schema as unknown as JSONSchemaRecord
       ),
     });
   }
   return tools;
+};
+
+export const repairAIChatToolCall: ToolCallRepairFunction<ToolSet> = async ({
+  toolCall,
+  tools,
+}) => {
+  if (!isAIChatToolName(toolCall.toolName)) return null;
+  const tool = tools[toolCall.toolName];
+  if (!tool || !("inputSchema" in tool)) return null;
+
+  let encodedInput: unknown;
+  try {
+    encodedInput = JSON.parse(toolCall.input) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof encodedInput !== "string") return null;
+
+  let decodedInput: unknown;
+  try {
+    decodedInput = JSON.parse(encodedInput) as unknown;
+  } catch {
+    return null;
+  }
+  const schema = asSchema(tool.inputSchema);
+  if (!schema.validate) return null;
+  const validation = await schema.validate(decodedInput);
+  if (!validation.success) return null;
+
+  return {
+    ...toolCall,
+    input: JSON.stringify(validation.value),
+  };
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -217,7 +384,7 @@ const toUserContent = (content: unknown) => {
 
   const parts: Array<
     | { type: "text"; text: string }
-    | { type: "image"; image: URL; mediaType?: string }
+    | { type: "file"; data: URL; mediaType: string }
   > = [];
   for (const part of content) {
     const record = asRecord(part);
@@ -234,9 +401,9 @@ const toUserContent = (content: unknown) => {
       ? /^data:([^;,]+)/i.exec(url.href)?.[1]
       : undefined;
     parts.push({
-      type: "image",
-      image: url,
-      ...(mediaType ? { mediaType } : {}),
+      type: "file",
+      data: url,
+      mediaType: mediaType ?? "image",
     });
   }
   return parts.length ? parts : messageText(content);
@@ -250,6 +417,27 @@ const parseToolInput = (value: unknown) => {
   } catch {
     return {};
   }
+};
+
+const thoughtSignatureFromMetadata = (value: unknown) => {
+  const metadata = asRecord(value);
+  if (!metadata) return null;
+  for (const key of ["google", "navy", "chutes", "openaiCompatible"]) {
+    const options = asRecord(metadata[key]);
+    if (typeof options?.thoughtSignature === "string") {
+      return options.thoughtSignature;
+    }
+  }
+  return null;
+};
+
+const thoughtSignatureFromToolCall = (value: Record<string, unknown>) => {
+  const extraContent = asRecord(value.extra_content);
+  const google = asRecord(extraContent?.google);
+  if (typeof google?.thought_signature === "string") {
+    return google.thought_signature;
+  }
+  return thoughtSignatureFromMetadata(value.callProviderMetadata);
 };
 
 export const toAIModelMessages = (
@@ -282,6 +470,9 @@ export const toAIModelMessages = (
             toolCallId: string;
             toolName: string;
             input: unknown;
+            providerOptions?: {
+              google: { thoughtSignature: string };
+            };
           }
       > = [];
       const content = messageText(message.content);
@@ -297,17 +488,26 @@ export const toAIModelMessages = (
       if (Array.isArray(message.tool_calls)) {
         for (const rawToolCall of message.tool_calls) {
           const toolCall = asRecord(rawToolCall);
-          const fn = asRecord(toolCall?.function);
+          if (!toolCall) continue;
+          const fn = asRecord(toolCall.function);
           const toolCallId =
-            typeof toolCall?.id === "string" ? toolCall.id.trim() : "";
+            typeof toolCall.id === "string" ? toolCall.id.trim() : "";
           const toolName = typeof fn?.name === "string" ? fn.name.trim() : "";
           if (!toolCallId || !toolName) continue;
+          const thoughtSignature = thoughtSignatureFromToolCall(toolCall);
           toolNames.set(toolCallId, toolName);
           parts.push({
             type: "tool-call",
             toolCallId,
             toolName,
             input: parseToolInput(fn?.arguments),
+            ...(thoughtSignature !== null
+              ? {
+                  providerOptions: {
+                    google: { thoughtSignature },
+                  },
+                }
+              : {}),
           });
         }
       }
@@ -434,12 +634,32 @@ export const extractAIChatStreamState = (message: UIMessage) => {
     }
     if (part.type !== "dynamic-tool") continue;
     if (part.state === "output-error") {
-      toolErrors.push(
-        part.errorText || `Invalid arguments for ${part.toolName}.`
+      const thoughtSignature = thoughtSignatureFromMetadata(
+        part.callProviderMetadata
       );
+      toolCalls.push({
+        id: part.toolCallId,
+        type: "function",
+        input_error:
+          part.errorText || `Invalid arguments for ${part.toolName}.`,
+        function: {
+          name: part.toolName,
+          arguments: JSON.stringify(part.input ?? {}),
+        },
+        ...(thoughtSignature !== null
+          ? {
+              extra_content: {
+                google: { thought_signature: thoughtSignature },
+              },
+            }
+          : {}),
+      });
       continue;
     }
     if (part.state !== "input-available") continue;
+    const thoughtSignature = thoughtSignatureFromMetadata(
+      part.callProviderMetadata
+    );
     toolCalls.push({
       id: part.toolCallId,
       type: "function",
@@ -447,6 +667,13 @@ export const extractAIChatStreamState = (message: UIMessage) => {
         name: part.toolName,
         arguments: JSON.stringify(part.input ?? {}),
       },
+      ...(thoughtSignature !== null
+        ? {
+            extra_content: {
+              google: { thought_signature: thoughtSignature },
+            },
+          }
+        : {}),
     });
   }
 

@@ -8,6 +8,7 @@ import {
   normalizeAIChatRequestBody,
   toAIModelMessages,
 } from "./ai-sdk-chat.ts";
+import { asSchema } from "ai";
 
 test("AI SDK chat messages preserve reasoning, tool calls, and matching results", () => {
   const messages = toAIModelMessages([
@@ -81,10 +82,10 @@ test("AI SDK chat messages preserve OpenAI-compatible image attachments", () => 
   assert.ok(Array.isArray(messages[0]?.content));
   const content = messages[0]?.content;
   assert.equal(Array.isArray(content) ? content[0]?.type : null, "text");
-  assert.equal(Array.isArray(content) ? content[1]?.type : null, "image");
+  assert.equal(Array.isArray(content) ? content[1]?.type : null, "file");
   assert.equal(
-    Array.isArray(content) && content[1]?.type === "image"
-      ? String(content[1].image)
+    Array.isArray(content) && content[1]?.type === "file"
+      ? String(content[1].data)
       : "",
     "data:image/png;base64,YWJj"
   );
@@ -189,6 +190,95 @@ test("AI SDK stream state exposes every completed parallel tool call", () => {
       },
     },
   ]);
+});
+
+test("AI SDK stream state turns invalid tool input into a resolvable tool call", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-invalid-tool",
+    role: "assistant",
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolCallId: "call_invalid_image",
+        toolName: "generate_image",
+        state: "output-error",
+        input: { width: "huge" },
+        errorText: "Invalid input: prompt is required.",
+      },
+    ],
+  });
+
+  assert.deepEqual(state.toolCalls, [
+    {
+      id: "call_invalid_image",
+      type: "function",
+      input_error: "Invalid input: prompt is required.",
+      function: {
+        name: "generate_image",
+        arguments: '{"width":"huge"}',
+      },
+    },
+  ]);
+  assert.deepEqual(state.toolErrors, []);
+});
+
+test("AI SDK chat round-trips Gemini thought signatures through client history", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-1",
+    role: "assistant",
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolCallId: "call_image",
+        toolName: "generate_image",
+        state: "input-available",
+        input: { prompt: "a lighthouse" },
+        callProviderMetadata: {
+          navy: { thoughtSignature: "opaque-signature==" },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(state.toolCalls[0]?.extra_content, {
+    google: { thought_signature: "opaque-signature==" },
+  });
+
+  const messages = toAIModelMessages([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: state.toolCalls,
+    },
+  ]);
+  assert.equal(messages[0]?.role, "assistant");
+  const content = messages[0]?.content;
+  assert.ok(Array.isArray(content));
+  assert.deepEqual(
+    Array.isArray(content) && content[0]?.type === "tool-call"
+      ? content[0].providerOptions
+      : undefined,
+    { google: { thoughtSignature: "opaque-signature==" } }
+  );
+});
+
+test("AI SDK JSON schemas validate tool inputs at runtime", async () => {
+  const tools = buildAIChatTools(["generate_image"]);
+  const schema = asSchema(tools.generate_image.inputSchema);
+  assert.ok(schema.validate);
+
+  const valid = await schema.validate({
+    prompt: "a moonlit harbor",
+    width: 1024,
+  });
+  assert.equal(valid.success, true);
+
+  const invalid = await schema.validate({
+    prompt: "",
+    width: 8,
+    unexpected: true,
+  });
+  assert.equal(invalid.success, false);
 });
 
 test("Chat tools are disabled only when model metadata explicitly rejects them", () => {

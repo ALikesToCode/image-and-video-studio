@@ -725,7 +725,7 @@ const extractTextFragment = (value: unknown): string => {
   return "";
 };
 
-const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
+export const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
   if (!Array.isArray(value)) return [];
   return value
     .map((item) => {
@@ -749,27 +749,47 @@ const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
 
       if (Array.isArray(record.toolCalls)) {
         const toolCalls = record.toolCalls
-          .map((tc) => {
+          .map((tc): ToolCall | null => {
             if (!tc || typeof tc !== "object") return null;
             const tcRecord = tc as Record<string, unknown>;
             const tcId = typeof tcRecord.id === "string" ? tcRecord.id : "";
-            const tcType = typeof tcRecord.type === "string" ? tcRecord.type : "function";
             const fn = tcRecord.function;
             if (!fn || typeof fn !== "object") return null;
             const fnRecord = fn as Record<string, unknown>;
             const fnName = typeof fnRecord.name === "string" ? fnRecord.name : "";
             const fnArgs = typeof fnRecord.arguments === "string" ? fnRecord.arguments : "";
+            const extraContent =
+              tcRecord.extra_content && typeof tcRecord.extra_content === "object"
+                ? (tcRecord.extra_content as Record<string, unknown>)
+                : null;
+            const google =
+              extraContent?.google && typeof extraContent.google === "object"
+                ? (extraContent.google as Record<string, unknown>)
+                : null;
+            const thoughtSignature =
+              typeof google?.thought_signature === "string" &&
+              google.thought_signature.length > 0 &&
+              google.thought_signature.length <= 65_536
+                ? google.thought_signature
+                : null;
             if (!tcId || !fnName) return null;
             return {
               id: tcId,
-              type: tcType,
+              type: "function" as const,
               function: {
                 name: fnName,
                 arguments: fnArgs,
               },
+              ...(thoughtSignature
+                ? {
+                    extra_content: {
+                      google: { thought_signature: thoughtSignature },
+                    },
+                  }
+                : {}),
             };
           })
-          .filter((entry): entry is ToolCall => !!entry);
+          .filter((entry): entry is ToolCall => entry !== null);
         if (toolCalls.length) message.toolCalls = toolCalls;
       }
 
@@ -2790,6 +2810,17 @@ ${defaultPrompt}`;
     for (const toolCall of orderedToolCalls) {
       const toolName = toolCall.function?.name ?? "";
       let args: Record<string, unknown> = {};
+
+      if (toolCall.input_error) {
+        toolMessages.push({
+          id: createId(),
+          role: "tool",
+          content: `Tool error: Invalid tool arguments. ${toolCall.input_error}`,
+          toolCallId: toolCall.id,
+          name: toolName || undefined,
+        });
+        continue;
+      }
 
       try {
         args = resolveToolArguments({

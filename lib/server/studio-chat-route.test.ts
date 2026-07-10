@@ -1,5 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  parseJsonEventStream,
+  readUIMessageStream,
+  uiMessageChunkSchema,
+  type UIMessage,
+} from "ai";
 
 import { POST as studioChatPost } from "../../app/api/studio/chat/route.ts";
 
@@ -26,6 +32,30 @@ const readUIChunks = async (response: Response) =>
     .split("\n")
     .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
     .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>);
+
+const readFinalUIMessage = async (response: Response) => {
+  assert.ok(response.body);
+  const chunks = parseJsonEventStream({
+    stream: response.body,
+    schema: uiMessageChunkSchema,
+  }).pipeThrough(
+    new TransformStream({
+      transform(chunk, controller) {
+        if (!chunk.success) throw chunk.error;
+        controller.enqueue(chunk.value);
+      },
+    })
+  );
+  let finalMessage: UIMessage | undefined;
+  for await (const message of readUIMessageStream({
+    stream: chunks,
+    terminateOnError: true,
+  })) {
+    finalMessage = message;
+  }
+  assert.ok(finalMessage);
+  return finalMessage;
+};
 
 test("Studio chat uses AI SDK tool streaming and provider defaults", async () => {
   const originalFetch = globalThis.fetch;
@@ -284,6 +314,334 @@ test("Studio chat emits redacted AI SDK stream errors", async () => {
     assert.ok(errorChunk);
     assert.match(String(errorChunk.errorText), /\[redacted\]/i);
     assert.doesNotMatch(String(errorChunk.errorText), /navy-super-secret/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio chat forwards remote image URLs without fetching them server-side", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  let upstreamBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    requestedUrls.push(url);
+    if (url === "https://attacker.test/private.png") {
+      return new Response(new Uint8Array([137, 80, 78, 71]), {
+        headers: { "content-type": "image/png" },
+      });
+    }
+    upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return upstreamStream([
+      completionChunk({ role: "assistant", content: "I see it." }, "stop"),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "secret",
+        },
+        body: JSON.stringify({
+          provider: "chutes",
+          model: "vision-model",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Describe this image." },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: "https://attacker.test/private.png",
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      })
+    );
+    await response.text();
+
+    assert.deepEqual(requestedUrls, [
+      "https://llm.chutes.ai/v1/chat/completions",
+    ]);
+    const messages = upstreamBody.messages as Array<Record<string, unknown>>;
+    const content = messages[0]?.content as Array<Record<string, unknown>>;
+    assert.deepEqual(content[1], {
+      type: "image_url",
+      image_url: { url: "https://attacker.test/private.png" },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio chat preserves Gemini thought signatures in provider history", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return upstreamStream([
+      completionChunk({ role: "assistant", content: "Done." }, "stop"),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "secret",
+        },
+        body: JSON.stringify({
+          provider: "navy",
+          model: "google/gemini-3-flash",
+          messages: [
+            { role: "user", content: "Generate an image." },
+            {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    name: "generate_image",
+                    arguments: '{"prompt":"a lighthouse"}',
+                  },
+                  extra_content: {
+                    google: {
+                      thought_signature: "opaque-signature==",
+                    },
+                  },
+                },
+              ],
+            },
+            {
+              role: "tool",
+              name: "generate_image",
+              tool_call_id: "call_1",
+              content: "Generated 1 image.",
+            },
+          ],
+          enabledTools: ["generate_image"],
+        }),
+      })
+    );
+    await response.text();
+
+    const messages = upstreamBody.messages as Array<Record<string, unknown>>;
+    const toolCalls = messages[1]?.tool_calls as Array<Record<string, unknown>>;
+    assert.deepEqual(toolCalls[0]?.extra_content, {
+      google: { thought_signature: "opaque-signature==" },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio chat streams Gemini thought signatures into UI tool metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    upstreamStream([
+      completionChunk(
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              index: 0,
+              id: "call_signed",
+              type: "function",
+              function: {
+                name: "generate_image",
+                arguments: '{"prompt":"a lighthouse"}',
+              },
+              extra_content: {
+                google: { thought_signature: "opaque-signature==" },
+              },
+            },
+          ],
+        },
+        "tool_calls"
+      ),
+    ]);
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "secret",
+        },
+        body: JSON.stringify({
+          provider: "navy",
+          model: "google/gemini-3-flash",
+          messages: [{ role: "user", content: "Generate an image." }],
+          enabledTools: ["generate_image"],
+        }),
+      })
+    );
+    const message = await readFinalUIMessage(response);
+    const toolPart = message.parts.find(
+      (part) =>
+        part.type === "dynamic-tool" && part.toolCallId === "call_signed"
+    );
+
+    assert.ok(toolPart?.type === "dynamic-tool");
+    assert.equal(toolPart.state, "input-available");
+    assert.deepEqual(toolPart.callProviderMetadata, {
+      navy: { thoughtSignature: "opaque-signature==" },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio chat rejects schema-invalid tool input", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    upstreamStream([
+      completionChunk({
+        role: "assistant",
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_invalid",
+            type: "function",
+            function: {
+              name: "generate_image",
+              arguments: '{"prompt":"","width":8,"unexpected":true}',
+            },
+          },
+        ],
+      }, "tool_calls"),
+    ]);
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "secret",
+        },
+        body: JSON.stringify({
+          provider: "chutes",
+          model: "model",
+          messages: [{ role: "user", content: "Generate an image." }],
+          enabledTools: ["generate_image"],
+        }),
+      })
+    );
+    const uiResponse = response.clone();
+    const chunks = await readUIChunks(response);
+    const invalidChunk = chunks.find(
+      (chunk) =>
+        chunk.type === "tool-input-error" &&
+        chunk.toolCallId === "call_invalid"
+    );
+    const message = await readFinalUIMessage(uiResponse);
+    const invalidPart = message.parts.find(
+      (part) =>
+        part.type === "dynamic-tool" && part.toolCallId === "call_invalid"
+    );
+    const outputErrorChunk = chunks.find(
+      (chunk) =>
+        chunk.type === "tool-output-error" &&
+        chunk.toolCallId === "call_invalid"
+    );
+
+    assert.ok(invalidChunk);
+    assert.equal(invalidChunk.toolName, "generate_image");
+    assert.deepEqual(invalidChunk.input, {
+      prompt: "",
+      width: 8,
+      unexpected: true,
+    });
+    assert.match(
+      String(invalidChunk.errorText),
+      /unexpected is not allowed[\s\S]*prompt must contain[\s\S]*width must be at least 64/
+    );
+    assert.deepEqual(outputErrorChunk, {
+      type: "tool-output-error",
+      toolCallId: "call_invalid",
+      errorText: "Chat completion failed.",
+      dynamic: true,
+    });
+    assert.equal(chunks.some((chunk) => chunk.type === "error"), false);
+    assert.ok(invalidPart?.type === "dynamic-tool");
+    assert.equal(invalidPart.state, "output-error");
+    assert.deepEqual(invalidPart.input, {
+      prompt: "",
+      width: 8,
+      unexpected: true,
+    });
+    assert.equal(invalidPart.errorText, "Chat completion failed.");
+    assert.equal(
+      chunks.some(
+        (chunk) =>
+          chunk.type === "tool-input-available" &&
+          chunk.toolCallId === "call_invalid"
+      ),
+      false
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio chat only repairs double-encoded valid tool JSON", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    upstreamStream([
+      completionChunk({
+        role: "assistant",
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_repaired",
+            type: "function",
+            function: {
+              name: "generate_image",
+              arguments: JSON.stringify('{"prompt":"a lighthouse"}'),
+            },
+          },
+        ],
+      }, "tool_calls"),
+    ]);
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "secret",
+        },
+        body: JSON.stringify({
+          provider: "chutes",
+          model: "model",
+          messages: [{ role: "user", content: "Generate an image." }],
+          enabledTools: ["generate_image"],
+        }),
+      })
+    );
+    const chunks = await readUIChunks(response);
+    const repaired = chunks.find(
+      (chunk) =>
+        chunk.type === "tool-input-available" &&
+        chunk.toolCallId === "call_repaired"
+    );
+
+    assert.ok(repaired);
+    assert.deepEqual(repaired.input, { prompt: "a lighthouse" });
   } finally {
     globalThis.fetch = originalFetch;
   }

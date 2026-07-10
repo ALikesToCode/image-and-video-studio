@@ -11,6 +11,7 @@ import {
   normalizeAIChatRequestBody,
   normalizeAIChatToolChoice,
   normalizeEnabledAIChatTools,
+  repairAIChatToolCall,
   toAIModelMessages,
 } from "../ai-sdk-chat.ts";
 import {
@@ -37,6 +38,10 @@ type StudioChatRequest = {
 const PROVIDER_BASE_URLS: Record<StudioChatProvider, string> = {
   navy: "https://api.navy/v1",
   chutes: "https://llm.chutes.ai/v1",
+};
+
+const NATIVE_IMAGE_URLS = {
+  "image/*": [/^https?:\/\//],
 };
 
 const isStudioChatProvider = (value: unknown): value is StudioChatProvider =>
@@ -145,6 +150,7 @@ export async function handleAIStudioChatRequest(request: Request) {
     baseURL: PROVIDER_BASE_URLS[providerId],
     includeUsage: providerId === "navy",
     fetch: providerId === "navy" ? recoveringNavyFetch : undefined,
+    supportedUrls: () => NATIVE_IMAGE_URLS,
     transformRequestBody: (providerBody) =>
       normalizeAIChatRequestBody({
         model,
@@ -163,6 +169,7 @@ export async function handleAIStudioChatRequest(request: Request) {
       toolChoice,
       maxOutputTokens: maxOutputTokens(body.maxTokens),
       reasoning,
+      experimental_repairToolCall: repairAIChatToolCall,
       abortSignal: request.signal,
       onError: () => undefined,
     });
