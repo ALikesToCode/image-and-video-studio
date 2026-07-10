@@ -3,7 +3,7 @@ export const runtime = "edge";
 import {
   getProviderApiKey,
   jsonOrNull,
-  providerErrorMessage,
+  providerErrorDetails,
 } from "@/lib/api-safety";
 
 type UnknownRecord = Record<string, unknown>;
@@ -63,15 +63,6 @@ const finiteNonNegativeNumber = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : null;
-
-const safeErrorCode = (payload: unknown) => {
-  const root = asRecord(payload);
-  const nested = asRecord(root?.error);
-  const value = nested?.type ?? nested?.code ?? root?.code;
-  if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  return /^[A-Za-z0-9._:-]{1,100}$/.test(normalized) ? normalized : null;
-};
 
 const isUtcDate = (value: string) => {
   if (!DATE_PATTERN.test(value)) return false;
@@ -290,7 +281,7 @@ type AccountSection = "usage" | "balance" | "subscription";
 const upstreamFailure = (
   section: AccountSection,
   payload: unknown,
-  status: number,
+  response: Response,
   apiKey: string,
 ) => {
   const labels: Record<AccountSection, string> = {
@@ -298,12 +289,13 @@ const upstreamFailure = (
     balance: "Unable to fetch NanoGPT account balance.",
     subscription: "Unable to fetch NanoGPT subscription usage.",
   };
-  const code = safeErrorCode(payload);
   return {
-    error: providerErrorMessage(payload, labels[section], [apiKey]),
-    ...(code ? { code } : {}),
+    ...providerErrorDetails(payload, labels[section], {
+      knownSecrets: [apiKey],
+      response,
+    }),
     section,
-    status,
+    status: response.status,
   };
 };
 
@@ -371,7 +363,7 @@ export async function GET(req: Request) {
       const failure = upstreamFailure(
         sections[index],
         payloads[index],
-        response.status,
+        response,
         apiKey,
       );
       const { status, ...body } = failure;
@@ -414,7 +406,7 @@ export async function GET(req: Request) {
       upstreamFailure(
         "subscription",
         payloads[2],
-        subscriptionResponse.status,
+        subscriptionResponse,
         apiKey,
       ),
     );

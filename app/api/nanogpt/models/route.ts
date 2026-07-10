@@ -1,5 +1,6 @@
 export const runtime = "edge";
 
+import { providerErrorDetails } from "@/lib/api-safety";
 import {
   normalizeNanoGptImageModels,
   normalizeNanoGptVideoModels,
@@ -16,26 +17,6 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-
-const upstreamError = (payload: unknown) => {
-  const root = asRecord(payload);
-  const nested = asRecord(root?.error);
-  const message =
-    typeof nested?.message === "string"
-      ? nested.message
-      : typeof root?.error === "string"
-        ? root.error
-        : typeof root?.message === "string"
-          ? root.message
-          : "Unable to fetch NanoGPT model catalog.";
-  const code =
-    typeof nested?.code === "string"
-      ? nested.code
-      : typeof root?.code === "string"
-        ? root.code
-        : undefined;
-  return { message, code };
-};
 
 export async function GET(req: Request) {
   const mode = new URL(req.url).searchParams.get("mode");
@@ -61,9 +42,12 @@ export async function GET(req: Request) {
   }
 
   if (!response.ok) {
-    const error = upstreamError(payload);
     return Response.json(
-      { error: error.message, ...(error.code ? { code: error.code } : {}) },
+      providerErrorDetails(
+        payload,
+        "Unable to fetch NanoGPT model catalog.",
+        { response },
+      ),
       { status: response.status },
     );
   }

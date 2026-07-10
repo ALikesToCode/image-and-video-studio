@@ -3,6 +3,7 @@ export const runtime = "edge";
 import {
   getProviderApiKey,
   jsonOrNull,
+  providerErrorDetails,
   providerErrorMessage,
 } from "@/lib/api-safety";
 import {
@@ -339,9 +340,10 @@ export async function POST(req: Request) {
   const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      {
-        error: providerErrorMessage(data, "Video generation failed.", [apiKey]),
-      },
+      providerErrorDetails(data, "Video generation failed.", {
+        knownSecrets: [apiKey],
+        response,
+      }),
       { status: response.status }
     );
   }
@@ -421,13 +423,10 @@ export async function GET(req: Request) {
   }
   if (!response.ok) {
     return Response.json(
-      {
-        error: providerErrorMessage(
-          data,
-          "Unable to fetch NanoGPT video job.",
-          [apiKey]
-        ),
-      },
+      providerErrorDetails(data, "Unable to fetch NanoGPT video job.", {
+        knownSecrets: [apiKey],
+        response,
+      }),
       { status: response.status }
     );
   }
@@ -450,23 +449,39 @@ export async function GET(req: Request) {
     const friendlyError =
       nonEmptyString(statusRecord.userFriendlyError) ??
       nonEmptyString(root.userFriendlyError);
-    const errorPayload = friendlyError
-      ? { error: friendlyError }
-      : statusRecord.error !== undefined
-        ? { error: statusRecord.error }
-        : root;
+    const structuredError =
+      statusRecord.error !== undefined ? statusRecord.error : root.error;
+    const errorPayload = {
+      ...root,
+      ...statusRecord,
+      ...(structuredError !== undefined
+        ? { error: structuredError }
+        : friendlyError
+          ? { error: friendlyError }
+          : {}),
+    };
+    const errorDetails = providerErrorDetails(
+      errorPayload,
+      status === "canceled"
+        ? "Video generation was canceled."
+        : "Video generation failed.",
+      { knownSecrets: [apiKey], response },
+    );
     return Response.json(
       {
         done: true,
         id: jobId,
         status,
-        error: providerErrorMessage(
-          errorPayload,
-          status === "canceled"
-            ? "Video generation was canceled."
-            : "Video generation failed.",
-          [apiKey]
-        ),
+        ...errorDetails,
+        ...(friendlyError
+          ? {
+              error: providerErrorMessage(
+                { error: friendlyError },
+                errorDetails.error,
+                [apiKey],
+              ),
+            }
+          : {}),
         ...metadata,
       },
       { status: 502 }

@@ -1,6 +1,6 @@
 export const runtime = "edge";
 
-import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { getUserApiKey, jsonOrNull, providerErrorDetails } from "@/lib/api-safety";
 import {
   buildNavyImageGenerationPayload,
   isNavyGenerationFailed,
@@ -78,11 +78,10 @@ export async function POST(req: Request) {
   const data = await jsonOrNull(response);
   if (!response.ok) {
     return Response.json(
-      {
-        error: providerErrorMessage(data, "Video generation failed.", [
-          userApiKey,
-        ]),
-      },
+      providerErrorDetails(data, "Video generation failed.", {
+        knownSecrets: [userApiKey],
+        response,
+      }),
       { status: response.status }
     );
   }
@@ -91,7 +90,10 @@ export async function POST(req: Request) {
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   if (isNavyGenerationFailed(dataRecord.status)) {
     return Response.json(
-      { error: providerErrorMessage(data, "Video generation job failed.") },
+      providerErrorDetails(data, "Video generation job failed.", {
+        knownSecrets: [userApiKey],
+        response,
+      }),
       { status: 502 }
     );
   }
@@ -159,7 +161,10 @@ export async function GET(req: Request) {
 
   if (!response.ok) {
     return Response.json(
-      { error: providerErrorMessage(data, "Unable to fetch job.", [apiKey]) },
+      providerErrorDetails(data, "Unable to fetch job.", {
+        knownSecrets: [apiKey],
+        response,
+      }),
       { status: response.status }
     );
   }
@@ -168,7 +173,10 @@ export async function GET(req: Request) {
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   if (isNavyGenerationFailed(dataRecord.status)) {
     return Response.json(
-      { error: providerErrorMessage(data, "Video generation job failed.") },
+      providerErrorDetails(data, "Video generation job failed.", {
+        knownSecrets: [apiKey],
+        response,
+      }),
       { status: 502 }
     );
   }

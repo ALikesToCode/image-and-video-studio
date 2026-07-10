@@ -286,6 +286,11 @@ test("NanoGPT video download preserves actionable redacted terminal errors", asy
           requestId: "vid_failed_123",
           data: {
             status: "FAILED",
+            error: {
+              message: "Content policy violation",
+              code: "content_policy_violation",
+              parameter: "prompt",
+            },
             userFriendlyError:
               "Bearer nano-secret was rejected. Please revise the prompt.",
           },
@@ -295,6 +300,10 @@ test("NanoGPT video download preserves actionable redacted terminal errors", asy
         assert.equal(response.status, 502);
         assert.deepEqual(await response.json(), {
           error: "Bearer [redacted] was rejected. Please revise the prompt.",
+          code: "content_policy_violation",
+          parameter: "prompt",
+          requestId: "vid_failed_123",
+          guidance: "Bearer [redacted] was rejected. Please revise the prompt.",
         });
       }
     );

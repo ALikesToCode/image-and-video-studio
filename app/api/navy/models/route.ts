@@ -1,5 +1,6 @@
 export const runtime = "edge";
 
+import { jsonOrNull, providerErrorDetails } from "@/lib/api-safety";
 import { groupNavyModelsByCapability } from "@/lib/studio-generation";
 
 export async function GET(req: Request) {
@@ -9,26 +10,19 @@ export async function GET(req: Request) {
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
   });
 
-  let data: unknown;
-  try {
-    data = await response.json();
-  } catch {
+  const data = await jsonOrNull(response);
+  if (data === null) {
     return Response.json(
       { error: "Unable to parse models response." },
       { status: 502 }
     );
   }
   if (!response.ok) {
-    const root =
-      data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-    const error =
-      root.error && typeof root.error === "object"
-        ? (root.error as Record<string, unknown>).message
-        : root.error;
     return Response.json(
-      {
-        error: typeof error === "string" ? error : "Unable to fetch models.",
-      },
+      providerErrorDetails(data, "Unable to fetch models.", {
+        knownSecrets: apiKey ? [apiKey] : [],
+        response,
+      }),
       { status: response.status }
     );
   }

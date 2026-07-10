@@ -133,8 +133,21 @@ test("NanoGPT models route preserves safe upstream errors", async () => {
   await withFetch(
     async () =>
       Response.json(
-        { error: { message: "Catalog temporarily unavailable", code: "catalog_down" } },
-        { status: 503 },
+        {
+          error: {
+            message: "Catalog temporarily unavailable",
+            code: "catalog_down",
+            param: "mode",
+            guidance: "Use the cached catalog until recovery.",
+          },
+        },
+        {
+          status: 503,
+          headers: {
+            "x-request-id": "req_nano_catalog_123",
+            "retry-after": "6",
+          },
+        },
       ),
     async () => {
       const response = await nanoGptModelsGet(
@@ -144,6 +157,10 @@ test("NanoGPT models route preserves safe upstream errors", async () => {
       assert.deepEqual(await response.json(), {
         error: "Catalog temporarily unavailable",
         code: "catalog_down",
+        parameter: "mode",
+        requestId: "req_nano_catalog_123",
+        retryAfterMs: 6_000,
+        guidance: "Use the cached catalog until recovery.",
       });
     },
   );

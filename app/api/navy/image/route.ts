@@ -6,6 +6,7 @@ import {
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
   jsonOrNull,
+  providerErrorDetails,
   providerErrorMessage,
 } from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
@@ -385,10 +386,18 @@ const imageDownloadError = (req: Request, error?: unknown) => {
   );
 };
 
-const imageJobFailure = (req: Request, data: unknown) =>
+const imageJobFailure = (
+  req: Request,
+  data: unknown,
+  apiKey: string,
+  response: Response,
+) =>
   janitorAiJsonResponse(
     req,
-    { error: providerErrorMessage(data, "Image generation job failed.") },
+    providerErrorDetails(data, "Image generation job failed.", {
+      knownSecrets: [apiKey],
+      response,
+    }),
     { status: 502 }
   );
 
@@ -483,11 +492,10 @@ export async function POST(req: Request) {
   if (!response.ok) {
     return janitorAiJsonResponse(
       req,
-      {
-        error: providerErrorMessage(data, "Image generation failed.", [
-          userApiKey,
-        ]),
-      },
+      providerErrorDetails(data, "Image generation failed.", {
+        knownSecrets: [userApiKey],
+        response,
+      }),
       { status: response.status }
     );
   }
@@ -495,7 +503,7 @@ export async function POST(req: Request) {
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   if (isNavyGenerationFailed(dataRecord.status)) {
-    return imageJobFailure(req, data);
+    return imageJobFailure(req, data, userApiKey, response);
   }
   const mediaKind = nonImageMediaKindFromNavyRecord(dataRecord);
   if (mediaKind) {
@@ -580,7 +588,10 @@ export async function GET(req: Request) {
   if (!response.ok) {
     return janitorAiJsonResponse(
       req,
-      { error: providerErrorMessage(data, "Unable to fetch job.", [apiKey]) },
+      providerErrorDetails(data, "Unable to fetch job.", {
+        knownSecrets: [apiKey],
+        response,
+      }),
       { status: response.status }
     );
   }
@@ -588,7 +599,7 @@ export async function GET(req: Request) {
   const dataRecord =
     data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   if (isNavyGenerationFailed(dataRecord.status)) {
-    return imageJobFailure(req, data);
+    return imageJobFailure(req, data, apiKey, response);
   }
   if (isNavyGenerationPending(typeof dataRecord.status === "string" ? dataRecord.status : null)) {
     return janitorAiJsonResponse(req, { done: false, status: dataRecord.status });

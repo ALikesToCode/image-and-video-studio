@@ -1,9 +1,22 @@
-const SECRET_PATTERNS = [
-  /Bearer\s+[A-Za-z0-9._~+/=-]+/gi,
-  /Key\s+[A-Za-z0-9._~+/=-]+/gi,
-  /x-goog-api-key["':\s]+[A-Za-z0-9._~+/=-]+/gi,
-  /api[_-]?key["':\s]+[A-Za-z0-9._~+/=-]+/gi,
+const LABELED_SECRET_PATTERNS = [
+  /authorization["']?\s*[:=]\s*["']?(?:(?:[A-Za-z][A-Za-z0-9._-]*)\s+[A-Za-z0-9%._~+/=:-]+|(?![A-Za-z][A-Za-z0-9._-]*\s)[A-Za-z0-9%._~+/=:-]+)/gi,
+  /x-api-key["']?\s*[:=]\s*["']?[A-Za-z0-9%._~+/=:-]+/gi,
+  /(?:access|refresh)[_-]?token["']?\s*[:=]\s*["']?[A-Za-z0-9%._~+/=:-]+/gi,
+  /client[_-]?secret["']?\s*[:=]\s*["']?[A-Za-z0-9%._~+/=:-]+/gi,
+  /password["']?\s*[:=]\s*["']?[^\s,;}"']+/gi,
+  /Bearer\s+[A-Za-z0-9%._~+/=:-]+/gi,
+  /x-goog-api-key["':\s]+[A-Za-z0-9%._~+/=:-]+/gi,
+  /api[_-]?key["':\s]+[A-Za-z0-9%._~+/=:-]+/gi,
 ];
+
+const UNLABELED_SECRET_PATTERNS = [/Key\s+[A-Za-z0-9%._~+/=:-]+/gi];
+
+const MAX_RETRY_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+const SAFE_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
+const SAFE_PARAMETER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._[\]-]{0,159}$/;
+const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+const HTTP_DATE_PATTERN =
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/i;
 
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -126,7 +139,11 @@ export const redactSecrets = (value: unknown, knownSecrets: string[] = []) => {
     text = text.split(secret).join("[redacted]");
   }
 
-  for (const pattern of SECRET_PATTERNS) {
+  for (const pattern of LABELED_SECRET_PATTERNS) {
+    text = text.replace(pattern, "[redacted]");
+  }
+
+  for (const pattern of UNLABELED_SECRET_PATTERNS) {
     text = text.replace(pattern, "[redacted]");
   }
 
@@ -151,6 +168,168 @@ export const providerErrorMessage = (
           : fallback;
   const redacted = redactSecrets(raw, knownSecrets).trim();
   return redacted || fallback;
+};
+
+type ProviderErrorDetailsOptions = {
+  knownSecrets?: string[];
+  response?: Response;
+};
+
+export type ProviderErrorDetails = {
+  error: string;
+  code?: string;
+  parameter?: string;
+  requestId?: string;
+  retryAfterMs?: number;
+  guidance?: string;
+};
+
+const firstString = (...values: unknown[]) =>
+  values.find(
+    (value): value is string => typeof value === "string" && Boolean(value.trim())
+  )?.trim();
+
+const safeStructuredIdentifier = (
+  value: unknown,
+  pattern: RegExp,
+  knownSecrets: string[]
+) => {
+  if (typeof value !== "string") return undefined;
+  const redacted = redactSecrets(value, knownSecrets).trim();
+  return pattern.test(redacted) ? redacted : undefined;
+};
+
+const firstSafeStructuredIdentifier = (
+  values: unknown[],
+  pattern: RegExp,
+  knownSecrets: string[],
+) => {
+  for (const value of values) {
+    const safeValue = safeStructuredIdentifier(value, pattern, knownSecrets);
+    if (safeValue) return safeValue;
+  }
+  return undefined;
+};
+
+const boundedRetryDelay = (value: unknown, multiplier: number) => {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(numeric) || numeric < 0) return undefined;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.ceil(numeric * multiplier));
+};
+
+const firstBoundedRetryDelay = (values: unknown[], multiplier: number) => {
+  for (const value of values) {
+    const delay = boundedRetryDelay(value, multiplier);
+    if (delay !== undefined) return delay;
+  }
+  return undefined;
+};
+
+const retryAfterHeaderMs = (response?: Response) => {
+  const value = response?.headers.get("retry-after")?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return boundedRetryDelay(value, 1_000);
+  if (!HTTP_DATE_PATTERN.test(value)) return undefined;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, timestamp - Date.now()));
+};
+
+const payloadRetryAfterMs = (
+  root: Record<string, unknown> | null,
+  error: Record<string, unknown> | null
+) => {
+  const millisecondsDelay = firstBoundedRetryDelay(
+    [
+      error?.retryAfterMs,
+      error?.retry_after_ms,
+      root?.retryAfterMs,
+      root?.retry_after_ms,
+    ],
+    1,
+  );
+  if (millisecondsDelay !== undefined) return millisecondsDelay;
+  return firstBoundedRetryDelay(
+    [
+      error?.retryAfter,
+      error?.retry_after,
+      root?.retryAfter,
+      root?.retry_after,
+    ],
+    1_000
+  );
+};
+
+export const providerErrorDetails = (
+  payload: unknown,
+  fallback: string,
+  options: ProviderErrorDetailsOptions = {}
+): ProviderErrorDetails => {
+  const knownSecrets = options.knownSecrets ?? [];
+  const root = toRecord(payload);
+  const errorRecord = toRecord(root?.error);
+  const code = firstSafeStructuredIdentifier(
+    [errorRecord?.code, root?.code, errorRecord?.type, root?.type],
+    SAFE_CODE_PATTERN,
+    knownSecrets,
+  );
+  const parameter = firstSafeStructuredIdentifier(
+    [
+      errorRecord?.param,
+      errorRecord?.parameter,
+      root?.param,
+      root?.parameter,
+    ],
+    SAFE_PARAMETER_PATTERN,
+    knownSecrets,
+  );
+  const requestId = firstSafeStructuredIdentifier(
+    [
+      options.response?.headers.get("x-request-id"),
+      options.response?.headers.get("request-id"),
+      errorRecord?.requestId,
+      errorRecord?.request_id,
+      root?.requestId,
+      root?.request_id,
+    ],
+    SAFE_REQUEST_ID_PATTERN,
+    knownSecrets,
+  );
+  const retryAfterMs =
+    retryAfterHeaderMs(options.response) ??
+    payloadRetryAfterMs(root, errorRecord);
+  const rawGuidance = firstString(
+    errorRecord?.userFriendlyError,
+    errorRecord?.guidance,
+    errorRecord?.hint,
+    errorRecord?.suggestion,
+    root?.userFriendlyError,
+    root?.guidance,
+    root?.hint,
+    root?.suggestion,
+    root?.refundMessage
+  );
+  const guidance = rawGuidance
+    ? redactSecrets(rawGuidance, knownSecrets).trim().slice(0, 1_000)
+    : "";
+  const error = providerErrorMessage(payload, fallback, knownSecrets).slice(
+    0,
+    1_000,
+  );
+
+  return {
+    error,
+    ...(code ? { code } : {}),
+    ...(parameter ? { parameter } : {}),
+    ...(requestId ? { requestId } : {}),
+    ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    ...(guidance && guidance !== error ? { guidance } : {}),
+  };
 };
 
 export const safeErrorResponse = (

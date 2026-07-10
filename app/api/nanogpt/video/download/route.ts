@@ -3,6 +3,7 @@ export const runtime = "edge";
 import {
   getProviderApiKey,
   jsonOrNull,
+  providerErrorDetails,
   providerErrorMessage,
 } from "@/lib/api-safety";
 import {
@@ -48,17 +49,39 @@ const isFailedStatus = (status: string) =>
 const statusError = (
   root: UnknownRecord,
   status: UnknownRecord,
-  apiKey: string
+  apiKey: string,
+  response: Response,
 ) => {
   const friendlyError =
     nonEmptyString(status.userFriendlyError) ??
     nonEmptyString(root.userFriendlyError);
-  const payload = friendlyError
-    ? { error: friendlyError }
-    : status.error !== undefined
-      ? { error: status.error }
-      : root;
-  return providerErrorMessage(payload, "Video generation failed.", [apiKey]);
+  const structuredError =
+    status.error !== undefined ? status.error : root.error;
+  const payload = {
+    ...root,
+    ...status,
+    ...(structuredError !== undefined
+      ? { error: structuredError }
+      : friendlyError
+        ? { error: friendlyError }
+        : {}),
+  };
+  const details = providerErrorDetails(payload, "Video generation failed.", {
+    knownSecrets: [apiKey],
+    response,
+  });
+  return {
+    ...details,
+    ...(friendlyError
+      ? {
+          error: providerErrorMessage(
+            { error: friendlyError },
+            details.error,
+            [apiKey],
+          ),
+        }
+      : {}),
+  };
 };
 
 const trustedDownloadUrl = (value: string) => {
@@ -131,13 +154,10 @@ export async function POST(req: Request) {
   if (!statusResponse.ok) {
     const retryAfter = statusResponse.headers.get("retry-after");
     return Response.json(
-      {
-        error: providerErrorMessage(
-          statusPayload,
-          "Unable to fetch NanoGPT video job.",
-          [apiKey]
-        ),
-      },
+      providerErrorDetails(statusPayload, "Unable to fetch NanoGPT video job.", {
+        knownSecrets: [apiKey],
+        response: statusResponse,
+      }),
       {
         status: statusResponse.status,
         ...(retryAfter ? { headers: { "Retry-After": retryAfter } } : {}),
@@ -150,7 +170,7 @@ export async function POST(req: Request) {
   const status = normalizedStatus(statusRecord.status ?? root.status);
   if (isFailedStatus(status)) {
     return Response.json(
-      { error: statusError(root, statusRecord, apiKey) },
+      statusError(root, statusRecord, apiKey, statusResponse),
       { status: 502 }
     );
   }

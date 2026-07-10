@@ -187,8 +187,18 @@ test("NanoGPT video submit redacts provider errors", async () => {
     await withFetch(
       async () =>
         Response.json(
-          { error: { message: "Bearer nano-secret has insufficient balance" } },
-          { status: 402 }
+          {
+            error: {
+              message: "Bearer nano-secret has insufficient balance",
+              code: "insufficient_balance",
+              param: "model",
+            },
+            guidance: "Add credits before retrying with apiKey: nano-secret",
+          },
+          {
+            status: 402,
+            headers: { "x-request-id": "req_nano_video_402" },
+          }
         ),
       async () => {
         const response = await POST(
@@ -201,6 +211,10 @@ test("NanoGPT video submit redacts provider errors", async () => {
         assert.equal(response.status, 402);
         assert.deepEqual(await response.json(), {
           error: "Bearer [redacted] has insufficient balance",
+          code: "insufficient_balance",
+          parameter: "model",
+          requestId: "req_nano_video_402",
+          guidance: "Add credits before retrying with apiKey: [redacted]",
         });
       }
     );
@@ -353,7 +367,11 @@ test("NanoGPT video polling returns actionable redacted terminal errors", async 
           requestId: "vid_failed_123",
           data: {
             status: "FAILED",
-            error: "Content policy violation",
+            error: {
+              message: "Content policy violation",
+              code: "content_policy_violation",
+              param: "prompt",
+            },
             userFriendlyError:
               "Bearer nano-secret was flagged. Please revise the prompt.",
           },
@@ -366,6 +384,10 @@ test("NanoGPT video polling returns actionable redacted terminal errors", async 
           id: "vid_failed_123",
           status: "failed",
           error: "Bearer [redacted] was flagged. Please revise the prompt.",
+          code: "content_policy_violation",
+          parameter: "prompt",
+          requestId: "vid_failed_123",
+          guidance: "Bearer [redacted] was flagged. Please revise the prompt.",
         });
       }
     );
@@ -393,6 +415,7 @@ test("NanoGPT video polling treats canceled jobs as terminal failures", async ()
           id: "vid_canceled_123",
           status: "canceled",
           error: "Generation canceled by the provider.",
+          requestId: "vid_canceled_123",
         });
       }
     );

@@ -602,6 +602,57 @@ test("Navy image route treats poll rate limits as pending jobs", async () => {
   }
 });
 
+test("Navy image route preserves safe structured upstream errors", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json(
+      {
+        error: {
+          message: "Bearer navy-secret rejected the request",
+          code: "invalid_parameter_value",
+          param: "quality",
+          guidance: "Use low or medium; apiKey: navy-secret",
+        },
+      },
+      {
+        status: 422,
+        headers: {
+          "x-request-id": "req_navy_image_422",
+          "retry-after": "3",
+        },
+      },
+    );
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-image-2",
+          prompt: "A naval command room",
+          quality: "ultra",
+        }),
+      }),
+    );
+
+    assert.equal(response.status, 422);
+    assert.deepEqual(await response.json(), {
+      error: "Bearer [redacted] rejected the request",
+      code: "invalid_parameter_value",
+      parameter: "quality",
+      requestId: "req_navy_image_422",
+      retryAfterMs: 3_000,
+      guidance: "Use low or medium; apiKey: [redacted]",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route rejects invalid poll job ids before fetch", async () => {
   const originalFetch = globalThis.fetch;
   let called = false;
@@ -658,6 +709,7 @@ test("Navy image route returns upstream failed job messages", async () => {
       payload.error,
       "No image data received, did the output get flagged as NSFW?"
     );
+    assert.equal(payload.code, "job_failed");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -793,6 +845,7 @@ test("Navy video route returns upstream failed job messages", async () => {
 
     assert.equal(response.status, 502);
     assert.equal(payload.error, "Provider returned an unrecoverable error");
+    assert.equal(payload.code, "job_failed");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1001,6 +1054,7 @@ test("Navy image route returns immediate failed job messages", async () => {
 
     assert.equal(response.status, 502);
     assert.equal(payload.error, "aspect_ratio must be one of the supported values");
+    assert.equal(payload.code, "job_failed");
   } finally {
     globalThis.fetch = originalFetch;
   }

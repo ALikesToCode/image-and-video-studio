@@ -6,7 +6,7 @@ import {
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
   jsonOrNull,
-  providerErrorMessage,
+  providerErrorDetails,
 } from "@/lib/api-safety";
 import { NANOGPT_IMAGE_MODELS } from "@/lib/constants";
 
@@ -420,7 +420,10 @@ export async function POST(req: Request) {
   if (!response.ok) {
     return janitorAiJsonResponse(
       req,
-      { error: providerErrorMessage(data, "Image generation failed.", [apiKey]) },
+      providerErrorDetails(data, "Image generation failed.", {
+        knownSecrets: [apiKey],
+        response,
+      }),
       { status: response.status }
     );
   }

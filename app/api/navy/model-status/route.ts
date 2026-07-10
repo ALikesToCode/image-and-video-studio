@@ -1,6 +1,6 @@
 export const runtime = "edge";
 
-import { providerErrorMessage, redactSecrets } from "@/lib/api-safety";
+import { providerErrorDetails, redactSecrets } from "@/lib/api-safety";
 
 const NAVY_MODEL_STATUS_URL = "https://api.navy/v1/models/status";
 const CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300";
@@ -74,15 +74,6 @@ const isMediaStatus = (value: unknown) => {
   );
 };
 
-const upstreamErrorCode = (payload: unknown) => {
-  const root = asRecord(payload);
-  const error = asRecord(root?.error);
-  const value = error?.code ?? root?.code;
-  return typeof value === "string" && value.trim()
-    ? value.trim().slice(0, 100)
-    : null;
-};
-
 export async function GET(req: Request) {
   const requested = parseRequestedModelIds(req.url);
   if ("error" in requested) {
@@ -112,15 +103,10 @@ export async function GET(req: Request) {
   }
 
   if (!response.ok) {
-    const code = upstreamErrorCode(payload);
     return Response.json(
-      {
-        error: providerErrorMessage(
-          payload,
-          "Unable to fetch Navy model status.",
-        ),
-        ...(code ? { code } : {}),
-      },
+      providerErrorDetails(payload, "Unable to fetch Navy model status.", {
+        response,
+      }),
       { status: response.status },
     );
   }

@@ -308,10 +308,15 @@ test("NanoGPT account route redacts core upstream errors", async () => {
               error: {
                 message: "Bearer nano-secret is invalid",
                 type: "invalid_api_key",
+                param: "api_key",
+                guidance: "Create a new NanoGPT key; apiKey: nano-secret",
                 internal: { authorization: "Bearer nano-secret" },
               },
             },
-            { status: 401 },
+            {
+              status: 401,
+              headers: { "x-request-id": "req_nano_usage_401" },
+            },
           );
         }
         if (url.endsWith("/api/check-balance")) return Response.json(balancePayload);
@@ -325,6 +330,9 @@ test("NanoGPT account route redacts core upstream errors", async () => {
         assert.deepEqual(payload, {
           error: "Bearer [redacted] is invalid",
           code: "invalid_api_key",
+          parameter: "api_key",
+          requestId: "req_nano_usage_401",
+          guidance: "Create a new NanoGPT key; apiKey: [redacted]",
           section: "usage",
         });
         assert.equal(JSON.stringify(payload).includes("nano-secret"), false);

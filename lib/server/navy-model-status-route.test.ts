@@ -175,11 +175,19 @@ test("Navy model status route preserves safe upstream errors", async () => {
           error: {
             message: "Status temporarily unavailable",
             code: "status_unavailable",
+            parameter: "ids",
+            guidance: "Retry after the provider maintenance window.",
             stack: "internal-only",
           },
           request: { authorization: "Bearer secret" },
         },
-        { status: 503 },
+        {
+          status: 503,
+          headers: {
+            "x-request-id": "req_navy_status_123",
+            "retry-after": "5",
+          },
+        },
       ),
     async () => {
       const response = await navyModelStatusGet(
@@ -190,6 +198,10 @@ test("Navy model status route preserves safe upstream errors", async () => {
       assert.deepEqual(await response.json(), {
         error: "Status temporarily unavailable",
         code: "status_unavailable",
+        parameter: "ids",
+        requestId: "req_navy_status_123",
+        retryAfterMs: 5_000,
+        guidance: "Retry after the provider maintenance window.",
       });
     },
   );

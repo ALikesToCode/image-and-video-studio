@@ -274,3 +274,55 @@ test("NanoGPT image route drops references for text-only models", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("NanoGPT image route preserves safe structured upstream errors", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json(
+      {
+        error: {
+          message: "Bearer nano-secret rejected the resolution",
+          code: "invalid_parameter_value",
+          param: "resolution",
+        },
+        userFriendlyError:
+          "Choose one of the model-supported resolutions; apiKey: nano-secret",
+      },
+      {
+        status: 422,
+        headers: {
+          "x-request-id": "req_nano_error_123",
+          "retry-after": "4",
+        },
+      },
+    );
+
+  try {
+    const response = await nanoGptImagePost(
+      new Request("https://studio.test/api/nanogpt/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "nano-secret",
+        },
+        body: JSON.stringify({
+          model: "catalog/image-model",
+          prompt: "A cinematic harbor",
+        }),
+      }),
+    );
+
+    assert.equal(response.status, 422);
+    assert.deepEqual(await response.json(), {
+      error: "Bearer [redacted] rejected the resolution",
+      code: "invalid_parameter_value",
+      parameter: "resolution",
+      requestId: "req_nano_error_123",
+      retryAfterMs: 4_000,
+      guidance:
+        "Choose one of the model-supported resolutions; apiKey: [redacted]",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
