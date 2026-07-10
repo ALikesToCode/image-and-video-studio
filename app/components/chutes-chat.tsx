@@ -258,6 +258,12 @@ const chatTurnIntentLabel = (intent: ChatTurnIntent) => {
   return "Create audio";
 };
 
+const chatTurnIntentCompactLabel = (intent: ChatTurnIntent) => {
+  if (intent === "auto") return "Auto";
+  if (intent === "chat") return "Chat only";
+  return chatTurnIntentLabel(intent);
+};
+
 const isAbortLikeError = (error: unknown, signal?: AbortSignal) =>
   signal?.aborted === true ||
   (error instanceof Error && error.name === "AbortError");
@@ -4029,11 +4035,11 @@ export function ChutesChat({
                     Ask me to generate images, videos, audio, refine prompts, or brainstorm ideas.
                   </p>
                 </div>
-                <div className="grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid w-full max-w-lg grid-cols-2 gap-2 sm:grid-cols-3">
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-11 justify-start"
+                    className="col-span-2 h-11 justify-start sm:col-span-1"
                     onClick={() => setTurnIntent("generate_image")}
                     disabled={!toolAvailability.image}
                   >
@@ -4414,7 +4420,7 @@ export function ChutesChat({
             </div>
           ) : null}
 
-          <div className="mb-2 flex flex-col gap-2 rounded-xl border border-border/60 bg-background/70 p-2.5 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/70 p-2 shadow-sm backdrop-blur sm:p-2.5">
             <div className="flex min-w-0 items-start gap-2">
               <div className="mt-0.5 rounded-lg bg-primary/10 p-1.5 text-primary">
                 {currentTurnDecision.intent === "generate_image" ? (
@@ -4429,9 +4435,12 @@ export function ChutesChat({
               </div>
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-foreground">
-                  Next action · {chatTurnIntentLabel(currentTurnDecision.intent)}
+                  <span className="sm:hidden">Next action</span>
+                  <span className="hidden sm:inline">
+                    Next action · {chatTurnIntentLabel(currentTurnDecision.intent)}
+                  </span>
                 </p>
-                <p aria-live="polite" className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                <p aria-live="polite" className="mt-0.5 hidden text-[11px] leading-relaxed text-muted-foreground sm:block">
                   {currentTurnDecision.reason}
                 </p>
               </div>
@@ -4444,9 +4453,16 @@ export function ChutesChat({
             >
               <SelectTrigger
                 aria-label="Choose action for this chat turn"
-                className="h-11 w-full shrink-0 bg-background sm:w-[190px]"
+                className="h-10 w-[168px] shrink-0 bg-background sm:h-11 sm:w-[190px]"
               >
-                <SelectValue />
+                <span>
+                  <span className="sm:hidden">
+                    {chatTurnIntentCompactLabel(turnIntent)}
+                  </span>
+                  <span className="hidden sm:inline">
+                    {chatTurnIntentLabel(turnIntent)}
+                  </span>
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="auto">Auto · Agent decides</SelectItem>
@@ -4477,7 +4493,7 @@ export function ChutesChat({
                   : "Attach image, PDF, or text file"
               }
               aria-label="Attach file"
-              className="mb-1 h-10 w-10 rounded-full"
+              className="mb-0.5 h-11 w-11 rounded-full"
             >
               {attachmentLoading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
@@ -4509,7 +4525,7 @@ export function ChutesChat({
                 onClick={stopChat}
                 title="Stop current request"
                 aria-label="Stop current request"
-                className="mb-1 h-10 w-10 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                className="mb-0.5 h-11 w-11 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
                 <Square className="h-4 w-4 fill-current" />
               </Button>
@@ -4521,14 +4537,14 @@ export function ChutesChat({
               title={busy ? "Queue request" : "Send request"}
               aria-label={busy ? "Queue request" : "Send request"}
               className={cn(
-                "h-10 w-10 rounded-full mb-1 transition-all duration-300 shadow",
-                input.trim() ? "bg-primary text-primary-foreground hover:scale-105" : "bg-muted text-muted-foreground"
+                "mb-0.5 h-11 w-11 rounded-full shadow transition-colors",
+                input.trim() ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground"
               )}
             >
               {busy && !input.trim() ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </Button>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <div className="mt-2 hidden flex-wrap items-center gap-2 text-[11px] text-muted-foreground sm:flex">
             <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
               Input: {summarizeModalities(selectedChatModel?.inputModalities)}
             </span>
