@@ -81,6 +81,7 @@ import {
     validateModelImageInputs,
 } from "@/lib/model-media-capabilities";
 import {
+    getNavyModelAccessSummary,
     parseNavyModelHealthResponse,
     selectLiveCatalogBucket,
 } from "@/lib/navy-model-health";
@@ -2381,6 +2382,23 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             activeMode === "image" && imagePipelineEnabled
                 ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
                 : [model];
+        if (provider === "navy") {
+            const restrictedModel = modelsToRun
+                .map((modelId) => modelSuggestions.find((entry) => entry.id === modelId))
+                .find(
+                    (candidate) =>
+                        getNavyModelAccessSummary(candidate, navyUsage?.plan).state ===
+                        "restricted"
+                );
+            if (restrictedModel) {
+                const access = getNavyModelAccessSummary(
+                    restrictedModel,
+                    navyUsage?.plan
+                );
+                setErrorMessage(`${restrictedModel.label}: ${access.detail}`);
+                return;
+            }
+        }
         const selectedImageInputs = selectedReferences.map((reference) => ({
             name: reference.label,
             mimeType: reference.mimeType,
