@@ -34,6 +34,7 @@ import {
   Code2,
   ExternalLink,
   Square,
+  Download,
 } from "lucide-react";
 import { DefaultChatTransport, readUIMessageStream } from "ai";
 import { Button } from "@/app/components/ui/button";
@@ -139,6 +140,7 @@ import {
 } from "@/lib/studio-generation";
 import { extractPdfTextFromFile, isSupportedPdfFile } from "@/lib/client/pdf-text";
 import { ImageViewer } from "./image-viewer";
+import { mediaExtensionFromMimeType } from "@/lib/media-files";
 import {
   chatModelToolSupport,
   extractAIChatStreamState,
@@ -2834,6 +2836,18 @@ export function ChutesChat({
     }
   }, []);
 
+  const downloadChatMedia = useCallback((item: ChatMediaAsset) => {
+    const link = document.createElement("a");
+    link.href = item.dataUrl;
+    link.download = `generation-${item.id}.${mediaExtensionFromMimeType(
+      item.mimeType,
+      item.kind
+    )}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, []);
+
   const handleToolCalls = async (
     toolCalls: ToolCall[],
     onProgress?: (message: ChatMessage) => void,
@@ -4245,29 +4259,44 @@ export function ChutesChat({
                                 className="relative rounded-lg overflow-hidden border bg-background/50 group/image p-1.5"
                               >
                                 {item.kind === "image" ? (
-                                  <div className="relative aspect-square rounded-md overflow-hidden">
-                                    <img
-                                      src={item.dataUrl}
-                                      alt="Generated"
-                                      className="w-full h-full object-cover transition-transform duration-500 group-hover/image:scale-110"
-                                    />
-                                    {item.model ? (
-                                      <div className="absolute left-2 top-2 flex flex-wrap gap-2">
-                                        <span className="rounded-full bg-background/85 px-2 py-1 text-[10px] font-semibold text-foreground shadow-sm backdrop-blur">
-                                          {item.model}
-                                        </span>
+                                  <div>
+                                    <button
+                                      type="button"
+                                      onClick={() => openMediaPreview(item, message.promptUsed ?? displayContent)}
+                                      className="block w-full overflow-hidden rounded-md bg-checkered focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                      aria-label="Open generated image preview"
+                                    >
+                                      <img
+                                        src={item.dataUrl}
+                                        alt={message.promptUsed ?? displayContent ?? "Generated image"}
+                                        className="h-auto max-h-96 w-full object-contain"
+                                      />
+                                    </button>
+                                    <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-1 pb-0.5">
+                                      <div className="min-w-0 flex-1">
+                                        {item.model ? (
+                                          <span className="inline-block max-w-full truncate rounded-full bg-secondary px-2 py-1 text-[10px] font-semibold text-secondary-foreground">
+                                            {item.model}
+                                          </span>
+                                        ) : null}
                                       </div>
-                                    ) : null}
-                                    <div className="absolute inset-0 bg-black/50 opacity-100 sm:opacity-0 sm:group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                       <Button
-                                        size="icon"
-                                        variant="secondary"
-                                        className="h-8 w-8 rounded-full"
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-10 px-2.5 text-xs"
                                         onClick={() => openMediaPreview(item, message.promptUsed ?? displayContent)}
-                                        title="Open fullscreen preview"
-                                        aria-label="Open fullscreen preview"
                                       >
-                                        <Maximize2 className="h-4 w-4" />
+                                        <Maximize2 className="mr-1.5 h-4 w-4" />
+                                        Preview
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-10 px-2.5 text-xs"
+                                        onClick={() => downloadChatMedia(item)}
+                                      >
+                                        <Download className="mr-1.5 h-4 w-4" />
+                                        Download
                                       </Button>
                                     </div>
                                   </div>
