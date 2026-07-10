@@ -21,6 +21,8 @@ const PARAMETER_TYPES = new Set<ModelParameterType>([
 ]);
 
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const MAX_PARAMETER_COUNT = 64;
+const MAX_PARAMETER_OPTIONS = 100;
 
 const asRecord = (value: unknown): UnknownRecord | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -143,12 +145,63 @@ const toInputImageConstraints = (
 };
 
 const toParameterOption = (value: unknown): ModelParameterOption | null => {
+  const scalar = toParameterValue(value);
+  if (scalar !== undefined && scalar !== null) {
+    return { value: scalar, label: String(scalar) };
+  }
   const record = asRecord(value);
   if (!record) return null;
   const optionValue = toParameterValue(record.value);
   if (optionValue === undefined || optionValue === null) return null;
   const label = toString(record.label) ?? String(optionValue);
   return { value: optionValue, label };
+};
+
+const toParameterOptions = (value: unknown) => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const options: ModelParameterOption[] = [];
+  for (const entry of value.slice(0, MAX_PARAMETER_OPTIONS)) {
+    const option = toParameterOption(entry);
+    if (!option) continue;
+    const identity = `${typeof option.value}:${String(option.value)}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    options.push(option);
+  }
+  return options;
+};
+
+const validatedParameterValue = (
+  descriptor: ModelParameterDescriptor,
+  value: unknown,
+): ModelParameterValue | undefined => {
+  const candidate = toParameterValue(value);
+  if (candidate === undefined || candidate === null) return undefined;
+
+  if (descriptor.type === "select") {
+    return descriptor.options?.some((option) =>
+      Object.is(option.value, candidate),
+    )
+      ? candidate
+      : undefined;
+  }
+  if (descriptor.type === "switch" || descriptor.type === "boolean") {
+    return typeof candidate === "boolean" ? candidate : undefined;
+  }
+  if (descriptor.type === "number") {
+    if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+      return undefined;
+    }
+    if (descriptor.min !== undefined && candidate < descriptor.min) {
+      return undefined;
+    }
+    if (descriptor.max !== undefined && candidate > descriptor.max) {
+      return undefined;
+    }
+    return candidate;
+  }
+  return typeof candidate === "string" ? candidate : undefined;
 };
 
 const toParameterDescriptor = (
@@ -166,15 +219,10 @@ const toParameterDescriptor = (
   const label = toString(record.label);
   const description = toString(record.description);
   const placeholder = toString(record.placeholder);
-  const defaultValue = toParameterValue(record.default);
   const min = toFiniteNumber(record.min);
   const max = toFiniteNumber(record.max);
   const step = toFiniteNumber(record.step);
-  const options = Array.isArray(record.options)
-    ? record.options
-        .map(toParameterOption)
-        .filter((option): option is ModelParameterOption => !!option)
-    : [];
+  const options = toParameterOptions(record.options);
   const rawShowWhen = asRecord(record.showWhen);
   const showWhen: Record<string, ModelParameterValue> = {};
   if (rawShowWhen) {
@@ -188,30 +236,132 @@ const toParameterDescriptor = (
   if (label) descriptor.label = label;
   if (description) descriptor.description = description;
   if (placeholder) descriptor.placeholder = placeholder;
-  if (defaultValue !== undefined) descriptor.default = defaultValue;
   if (options.length) descriptor.options = options;
-  if (min !== undefined) descriptor.min = min;
-  if (max !== undefined) descriptor.max = max;
-  if (step !== undefined) descriptor.step = step;
+  if (min !== undefined && (max === undefined || min <= max)) {
+    descriptor.min = min;
+  }
+  if (max !== undefined && (min === undefined || min <= max)) {
+    descriptor.max = max;
+  }
+  if (step !== undefined && step > 0) descriptor.step = step;
   if (Object.keys(showWhen).length) descriptor.showWhen = showWhen;
+  if (descriptor.type === "select" && !descriptor.options?.length) return null;
+  const defaultValue = validatedParameterValue(descriptor, record.default);
+  if (defaultValue !== undefined) descriptor.default = defaultValue;
   return descriptor;
 };
 
-const toDynamicParameters = (value: unknown) => {
-  const record = asRecord(value);
+const toDynamicParameters = (...values: unknown[]) => {
   const parameters: Record<string, ModelParameterDescriptor> = {};
-  if (!record) return parameters;
-
-  for (const [key, rawDescriptor] of Object.entries(record)) {
-    if (UNSAFE_KEYS.has(key) || !key.trim()) continue;
-    const descriptor = toParameterDescriptor(rawDescriptor);
-    if (descriptor) parameters[key] = descriptor;
+  for (const value of values) {
+    const record = asRecord(value);
+    if (!record) continue;
+    for (const [key, rawDescriptor] of Object.entries(record).slice(
+      0,
+      MAX_PARAMETER_COUNT,
+    )) {
+      if (UNSAFE_KEYS.has(key) || !key.trim()) continue;
+      const descriptor = toParameterDescriptor(rawDescriptor);
+      if (descriptor) parameters[key] = descriptor;
+    }
   }
   return parameters;
 };
 
+type DocumentedParameter = {
+  type: "enum" | "range" | "boolean";
+  descriptor?: ModelParameterDescriptor;
+  min?: number;
+  max?: number;
+};
+
+const toDocumentedParameter = (value: unknown): DocumentedParameter | null => {
+  const record = asRecord(value);
+  const type = toString(record?.type)?.toLowerCase();
+  if (!record || !type) return null;
+
+  // Capability-descriptor booleans mark a request field as supported; they do
+  // not describe a boolean-valued UI control.
+  if (type === "boolean") return { type };
+
+  if (type === "enum") {
+    const rawValues = Array.isArray(record.values)
+      ? record.values.slice(0, MAX_PARAMETER_OPTIONS)
+      : record.values;
+    const values = toStringArray(rawValues);
+    if (!values?.length) return null;
+    const descriptor: ModelParameterDescriptor = {
+      type: "select",
+      options: values.map((entry) => ({ value: entry, label: entry })),
+    };
+    const defaultValue = validatedParameterValue(descriptor, record.default);
+    if (defaultValue !== undefined) descriptor.default = defaultValue;
+    return { type, descriptor };
+  }
+
+  if (type === "range") {
+    const min = toFiniteNumber(record.min);
+    const max = toFiniteNumber(record.max);
+    if (
+      min === undefined ||
+      max === undefined ||
+      !Number.isInteger(min) ||
+      !Number.isInteger(max) ||
+      min > max
+    ) {
+      return null;
+    }
+    const descriptor: ModelParameterDescriptor = {
+      type: "number",
+      min,
+      max,
+      step: 1,
+    };
+    const defaultValue = validatedParameterValue(descriptor, record.default);
+    if (
+      defaultValue !== undefined &&
+      typeof defaultValue === "number" &&
+      Number.isInteger(defaultValue)
+    ) {
+      descriptor.default = defaultValue;
+    }
+    return { type, descriptor, min, max };
+  }
+
+  return null;
+};
+
+const toDocumentedParameters = (value: unknown) => {
+  const record = asRecord(value);
+  const parameters: Record<string, DocumentedParameter> = {};
+  if (!record) return parameters;
+
+  for (const [key, rawDescriptor] of Object.entries(record).slice(
+    0,
+    MAX_PARAMETER_COUNT,
+  )) {
+    if (UNSAFE_KEYS.has(key) || !key.trim()) continue;
+    const parameter = toDocumentedParameter(rawDescriptor);
+    if (parameter) parameters[key] = parameter;
+  }
+  return parameters;
+};
+
+const toDocumentedDynamicParameters = (
+  parameters: Record<string, DocumentedParameter>,
+) => {
+  const dynamicParameters: Record<string, ModelParameterDescriptor> = {};
+  for (const [key, parameter] of Object.entries(parameters)) {
+    if (key === "n" || key === "input_references" || !parameter.descriptor) {
+      continue;
+    }
+    dynamicParameters[key] = parameter.descriptor;
+  }
+  return dynamicParameters;
+};
+
 const toParameterDefaults = (
-  rawDefaults: unknown,
+  rawDefaults: unknown[],
   parameters: Record<string, ModelParameterDescriptor>,
 ) => {
   const defaults: Record<string, ModelParameterValue> = {};
@@ -219,11 +369,12 @@ const toParameterDefaults = (
     if (parameter.default !== undefined) defaults[key] = parameter.default;
   }
 
-  const record = asRecord(rawDefaults);
-  if (record) {
+  for (const rawDefaultSet of rawDefaults) {
+    const record = asRecord(rawDefaultSet);
+    if (!record) continue;
     for (const [key, rawValue] of Object.entries(record)) {
       if (!(key in parameters)) continue;
-      const value = toParameterValue(rawValue);
+      const value = validatedParameterValue(parameters[key], rawValue);
       if (value !== undefined) defaults[key] = value;
     }
   }
@@ -253,6 +404,7 @@ const normalizeCatalogModel = (
     asRecord(
       firstPresent(record.supported_parameters, record.supportedParameters),
     ) ?? {};
+  const documentedParameters = toDocumentedParameters(supportedParameters);
   const inputModalities = toStringArray(
     firstPresent(
       record.input_modalities,
@@ -293,23 +445,39 @@ const normalizeCatalogModel = (
       ),
     ),
     inputImageConstraints?.maxItems,
+    documentedParameters.input_references?.type === "range" &&
+      documentedParameters.input_references.min !== undefined &&
+      documentedParameters.input_references.min >= 0
+      ? toNonNegativeInteger(documentedParameters.input_references.max)
+      : undefined,
   );
-  const dynamicParameters = toDynamicParameters(
-    firstPresent(
+  const dynamicParameters = {
+    ...toDynamicParameters(
       supportedParameters.parameters,
       supportedParameters.dynamic_parameters,
       supportedParameters.dynamicParameters,
     ),
-  );
+    ...toDocumentedDynamicParameters(documentedParameters),
+  };
   const parameterDefaults = toParameterDefaults(
-    firstPresent(
+    [
       supportedParameters.defaults,
       supportedParameters.parameter_defaults,
       supportedParameters.parameterDefaults,
-    ),
+    ],
     dynamicParameters,
   );
-  const parameterNames = Object.keys(dynamicParameters);
+  const parameterNames = Array.from(
+    new Set([
+      ...Object.keys(dynamicParameters),
+      ...Object.keys(documentedParameters),
+    ]),
+  );
+  const documentedResolutionOptions = documentedParameters.resolution?.descriptor
+    ?.options?.map((option) =>
+      typeof option.value === "string" ? option.value : undefined,
+    )
+    .filter((entry): entry is string => !!entry);
   const resolutionOptions = dynamicParameters.resolution?.options
     ?.map((option) =>
       typeof option.value === "string" || typeof option.value === "number"
@@ -318,6 +486,9 @@ const normalizeCatalogModel = (
     )
     .filter((entry): entry is string => !!entry);
   const normalizedResolutions =
+    (documentedResolutionOptions?.length
+      ? documentedResolutionOptions
+      : undefined) ??
     supportedResolutions ??
     (resolutionOptions?.length
       ? Array.from(new Set(resolutionOptions))
@@ -327,6 +498,10 @@ const normalizeCatalogModel = (
   const hasReferenceParameter = parameterNames.some((name) =>
     /reference.*image|image.*reference/i.test(name),
   );
+  const hasDocumentedInputReferences =
+    documentedParameters.input_references?.type === "range" &&
+    maxReferenceImages !== undefined &&
+    maxReferenceImages > 0;
   const supports: NonNullable<ModelOption["supports"]> = {};
 
   if (kind === "image") {
@@ -339,7 +514,8 @@ const normalizeCatalogModel = (
     if (
       capabilities.image_to_image === true ||
       capabilities.inpainting === true ||
-      hasImageInput
+      hasImageInput ||
+      hasDocumentedInputReferences
     ) {
       supports.imageEdit = true;
       supports.referenceImages = true;
@@ -419,6 +595,13 @@ const normalizeCatalogModel = (
   }
 
   if (kind === "image") {
+    const documentedImageCount = documentedParameters.n;
+    const documentedMaxOutputImages =
+      documentedImageCount?.type === "range" &&
+      documentedImageCount.min !== undefined &&
+      documentedImageCount.min >= 1
+        ? toNonNegativeInteger(documentedImageCount.max)
+        : undefined;
     const maxOutputImages = minimumDefined(
       toNonNegativeInteger(
         firstPresent(
@@ -432,13 +615,21 @@ const normalizeCatalogModel = (
           supportedParameters.maxOutputImages,
         ),
       ),
+      documentedMaxOutputImages,
     );
-    const fixedOutputImages = toNonNegativeInteger(
+    const catalogFixedOutputImages = toNonNegativeInteger(
       firstPresent(
         supportedParameters.fixed_image_count,
         supportedParameters.fixedImageCount,
       ),
     );
+    const documentedFixedOutputImages =
+      documentedMaxOutputImages !== undefined &&
+      documentedImageCount?.min === documentedImageCount.max
+        ? documentedMaxOutputImages
+        : undefined;
+    const fixedOutputImages =
+      catalogFixedOutputImages ?? documentedFixedOutputImages;
     if (maxOutputImages !== undefined) model.maxOutputImages = maxOutputImages;
     if (fixedOutputImages !== undefined) {
       model.fixedOutputImages = fixedOutputImages;

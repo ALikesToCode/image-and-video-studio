@@ -105,6 +105,140 @@ test("normalizes NanoGPT image catalog metadata and preserves slash-containing I
   });
 });
 
+test("normalizes documented direct NanoGPT image capability descriptors", () => {
+  const [model] = normalizeNanoGptImageModels([
+    {
+      id: "openai/gpt-image-2",
+      architecture: {
+        input_modalities: ["text"],
+        output_modalities: ["image"],
+      },
+      supported_parameters: {
+        resolution: {
+          type: "enum",
+          values: ["1024x1024", "1024x768", "", 1024],
+          default: "1024x768",
+        },
+        n: { type: "range", min: 1, max: 4, default: 2 },
+        quality: {
+          type: "enum",
+          values: ["medium", "high"],
+          default: "medium",
+        },
+        input_references: { type: "range", min: 0, max: 14 },
+        seed: { type: "boolean" },
+        parameters: {
+          output_format: {
+            type: "select",
+            options: [
+              { value: "png", label: "PNG" },
+              { value: "webp", label: "WebP" },
+            ],
+          },
+        },
+        parameter_defaults: { output_format: "webp" },
+      },
+    },
+  ]);
+
+  assert.deepEqual(model?.supportedResolutions, ["1024x1024", "1024x768"]);
+  assert.equal(model?.maxOutputImages, 4);
+  assert.equal(model?.maxReferenceImages, 14);
+  assert.deepEqual(model?.supports, {
+    imageGeneration: true,
+    imageEdit: true,
+    referenceImages: true,
+    sourceImage: true,
+    size: true,
+    seed: true,
+  });
+  assert.deepEqual(model?.dynamicParameters, {
+    output_format: {
+      type: "select",
+      options: [
+        { value: "png", label: "PNG" },
+        { value: "webp", label: "WebP" },
+      ],
+    },
+    resolution: {
+      type: "select",
+      options: [
+        { value: "1024x1024", label: "1024x1024" },
+        { value: "1024x768", label: "1024x768" },
+      ],
+      default: "1024x768",
+    },
+    quality: {
+      type: "select",
+      options: [
+        { value: "medium", label: "medium" },
+        { value: "high", label: "high" },
+      ],
+      default: "medium",
+    },
+  });
+  assert.deepEqual(model?.parameterDefaults, {
+    output_format: "webp",
+    resolution: "1024x768",
+    quality: "medium",
+  });
+});
+
+test("merges nested parameter aliases and rejects malformed direct descriptors", () => {
+  const [model] = normalizeNanoGptImageModels([
+    {
+      id: "provider/safe-descriptors",
+      architecture: { output_modalities: ["image"] },
+      supported_parameters: {
+        resolution: {
+          type: "enum",
+          values: ["1024x1024"],
+          default: "not-supported",
+        },
+        n: { type: "range", min: 4, max: 1, default: 2 },
+        input_references: { type: "range", min: 0, max: "14" },
+        quality: { type: "enum", values: [null, "", 42] },
+        parameters: {
+          first: { type: "number", min: 0, max: 2, default: 1 },
+        },
+        dynamic_parameters: {
+          second: {
+            type: "select",
+            options: [{ value: "safe", label: "Safe" }],
+          },
+        },
+        dynamicParameters: {
+          third: { type: "boolean", default: false },
+        },
+        defaults: { first: 99 },
+        parameter_defaults: { second: "safe" },
+        parameterDefaults: { third: "not-a-boolean" },
+      },
+    },
+  ]);
+
+  assert.deepEqual(model?.supportedResolutions, ["1024x1024"]);
+  assert.equal(model?.maxOutputImages, undefined);
+  assert.equal(model?.maxReferenceImages, undefined);
+  assert.deepEqual(model?.dynamicParameters, {
+    first: { type: "number", min: 0, max: 2, default: 1 },
+    second: {
+      type: "select",
+      options: [{ value: "safe", label: "Safe" }],
+    },
+    third: { type: "boolean", default: false },
+    resolution: {
+      type: "select",
+      options: [{ value: "1024x1024", label: "1024x1024" }],
+    },
+  });
+  assert.deepEqual(model?.parameterDefaults, {
+    first: 1,
+    second: "safe",
+    third: false,
+  });
+});
+
 test("normalizes NanoGPT video parameters, defaults, pricing, and conditional controls", () => {
   const models = normalizeNanoGptVideoModels({
     models: [
