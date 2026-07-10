@@ -1,5 +1,11 @@
 import { Provider } from "./constants";
 
+export type GenerationBilling = {
+    cost?: number;
+    paymentSource?: string;
+    remainingBalance?: number;
+};
+
 export type StoredMedia = {
     id: string;
     dataUrl: string;
@@ -65,6 +71,8 @@ export type PersistedGenerationJob = {
     remoteJobId?: string;
     remoteOperationName?: string;
     remoteStatus?: string;
+    billing?: GenerationBilling;
+    requestId?: string;
     saveToGallery?: boolean;
 };
 

@@ -8,6 +8,15 @@ import {
   jsonOrNull,
   providerErrorMessage,
 } from "@/lib/api-safety";
+import { NANOGPT_IMAGE_MODELS } from "@/lib/constants";
+
+type ImageModelCapabilities = {
+  supportedResolutions?: string[];
+  maxOutputImages?: number;
+  fixedOutputImages?: number;
+  maxReferenceImages?: number;
+  supportsReferenceImages?: boolean;
+};
 
 type ImageRequest = {
   apiKey?: string;
@@ -27,6 +36,8 @@ type ImageRequest = {
   imageUrls?: string[];
   image_url?: string | string[];
   input_references?: Array<string | { image_url?: { url?: string } }>;
+  modelCapabilities?: ImageModelCapabilities;
+  compatibilityMode?: "legacy";
 };
 
 type ImagePayload = {
@@ -35,6 +46,9 @@ type ImagePayload = {
   mimeType: string;
   model?: string;
 };
+
+const MAX_OUTPUT_IMAGES = 20;
+const MAX_INPUT_REFERENCES = 24;
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -87,14 +101,17 @@ const collectInputReferences = (value: unknown, output: string[]) => {
   }
 };
 
-const hasArrayImageInput = (body: ImageRequest) =>
-  Array.isArray(body.imageDataUrls) ||
-  Array.isArray(body.imageUrl) ||
-  Array.isArray(body.imageUrls) ||
-  Array.isArray(body.image_url) ||
-  Array.isArray(body.input_references);
+const isSupportedImageReference = (value: string) => {
+  if (value.startsWith("data:image/")) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+};
 
-const normalizeDataUrlInputs = (body: ImageRequest) => {
+const normalizeInputReferences = (body: ImageRequest) => {
   const rawInputs: string[] = [];
   collectStringOrArray(body.imageDataUrl, rawInputs);
   collectStringOrArray(body.imageDataUrls, rawInputs);
@@ -105,13 +122,89 @@ const normalizeDataUrlInputs = (body: ImageRequest) => {
 
   const inputs: string[] = [];
   for (const input of rawInputs) {
-    if (!input.startsWith("data:image/")) continue;
+    if (!isSupportedImageReference(input)) continue;
     if (!inputs.includes(input)) inputs.push(input);
   }
+  return inputs;
+};
+
+const positiveInteger = (value: unknown) => {
+  const number = asPositiveInt(value);
+  return number && number > 0 ? number : undefined;
+};
+
+const resolveModelCapabilities = (
+  model: string,
+  value: ImageModelCapabilities | undefined,
+): ImageModelCapabilities => {
+  const fallback = NANOGPT_IMAGE_MODELS.find((entry) => entry.id === model);
+  const maxOutputImages =
+    positiveInteger(value?.maxOutputImages) ?? fallback?.maxOutputImages;
+  const fixedOutputImages =
+    positiveInteger(value?.fixedOutputImages) ?? fallback?.fixedOutputImages;
   return {
-    inputs,
-    preferArray: hasArrayImageInput(body),
+    supportedResolutions: Array.isArray(value?.supportedResolutions)
+      ? value.supportedResolutions.filter(
+          (entry): entry is string => typeof entry === "string" && Boolean(entry.trim()),
+        )
+      : fallback?.supportedResolutions,
+    maxOutputImages:
+      maxOutputImages === undefined
+        ? undefined
+        : Math.min(maxOutputImages, MAX_OUTPUT_IMAGES),
+    fixedOutputImages:
+      fixedOutputImages === undefined
+        ? undefined
+        : Math.min(fixedOutputImages, MAX_OUTPUT_IMAGES),
+    maxReferenceImages:
+      typeof value?.maxReferenceImages === "number" &&
+      Number.isFinite(value.maxReferenceImages) &&
+      value.maxReferenceImages >= 0
+        ? Math.min(Math.floor(value.maxReferenceImages), MAX_INPUT_REFERENCES)
+        : fallback?.maxReferenceImages,
+    supportsReferenceImages:
+      typeof value?.supportsReferenceImages === "boolean"
+        ? value.supportsReferenceImages
+        : fallback?.supports?.referenceImages === true,
   };
+};
+
+const clampImageCount = (body: ImageRequest, capabilities: ImageModelCapabilities) => {
+  const fixed = positiveInteger(capabilities.fixedOutputImages);
+  if (fixed) return fixed;
+  const requested = normalizeImageCount(body);
+  const maximum = positiveInteger(capabilities.maxOutputImages) ?? 4;
+  return Math.min(requested, maximum);
+};
+
+const clampInputReferences = (
+  references: string[],
+  capabilities: ImageModelCapabilities,
+) => {
+  if (!capabilities.supportsReferenceImages) return [];
+  const maximum =
+    typeof capabilities.maxReferenceImages === "number"
+      ? Math.max(0, Math.floor(capabilities.maxReferenceImages))
+      : 1;
+  return references.slice(0, maximum);
+};
+
+const normalizeBilling = (data: unknown) => {
+  const root = asRecord(data) ?? {};
+  const billing: Record<string, number | string> = {};
+  if (typeof root.cost === "number" && Number.isFinite(root.cost)) {
+    billing.cost = root.cost;
+  }
+  if (typeof root.paymentSource === "string" && root.paymentSource) {
+    billing.paymentSource = root.paymentSource;
+  }
+  if (
+    typeof root.remainingBalance === "number" &&
+    Number.isFinite(root.remainingBalance)
+  ) {
+    billing.remainingBalance = root.remainingBalance;
+  }
+  return Object.keys(billing).length ? billing : undefined;
 };
 
 const normalizeImages = (data: unknown, model: string) => {
@@ -125,7 +218,11 @@ const normalizeImages = (data: unknown, model: string) => {
 
   for (const item of candidates) {
     if (typeof item === "string") {
-      images.push({ data: item, mimeType: "image/png", model });
+      if (item.startsWith("https://")) {
+        images.push({ url: item, mimeType: "image/png", model });
+      } else {
+        images.push({ data: item, mimeType: "image/png", model });
+      }
       continue;
     }
     const record = asRecord(item);
@@ -206,34 +303,75 @@ export async function POST(req: Request) {
   }
 
   const size = normalizeSize(body);
-  const { inputs: inputImages, preferArray: preferArrayInputImages } =
-    normalizeDataUrlInputs(body);
-  const payload: Record<string, unknown> = {
+  const capabilities = resolveModelCapabilities(model, body.modelCapabilities);
+  if (
+    size &&
+    capabilities.supportedResolutions?.length &&
+    !capabilities.supportedResolutions.includes(size)
+  ) {
+    return janitorAiJsonResponse(
+      req,
+      {
+        error: `Resolution ${size} is not supported by ${model}.`,
+        code: "unsupported_resolution",
+        parameter: "resolution",
+      },
+      { status: 400 },
+    );
+  }
+  const inputReferences = clampInputReferences(
+    normalizeInputReferences(body),
+    capabilities,
+  );
+  const normalizedPayload: Record<string, unknown> = {
     model,
     prompt,
-    n: normalizeImageCount(body),
-    response_format: "b64_json",
+    n: clampImageCount(body, capabilities),
   };
-  if (size) payload.size = size;
+  if (size) normalizedPayload.resolution = size;
   if (typeof body.seed === "number" && Number.isFinite(body.seed)) {
-    payload.seed = Math.round(body.seed);
+    normalizedPayload.seed = Math.round(body.seed);
   }
-  if (inputImages.length === 1 && !preferArrayInputImages) {
-    payload.imageDataUrl = inputImages[0];
-  } else if (inputImages.length > 1) {
-    payload.imageDataUrls = inputImages;
-  } else if (inputImages.length === 1) {
-    payload.imageDataUrls = inputImages;
+  if (inputReferences.length) {
+    normalizedPayload.input_references = inputReferences;
   }
 
-  const response = await fetch("https://nano-gpt.com/v1/images/generations", {
+  const useLegacyCompatibility = body.compatibilityMode === "legacy";
+  const payload = useLegacyCompatibility
+    ? {
+        model,
+        prompt,
+        n: normalizedPayload.n,
+        response_format: "b64_json",
+        ...(size ? { size } : {}),
+        ...(normalizedPayload.seed !== undefined
+          ? { seed: normalizedPayload.seed }
+          : {}),
+        ...(inputReferences.length === 1 && inputReferences[0]?.startsWith("data:image/")
+          ? { imageDataUrl: inputReferences[0] }
+          : inputReferences.filter((entry) => entry.startsWith("data:image/")).length
+            ? {
+                imageDataUrls: inputReferences.filter((entry) =>
+                  entry.startsWith("data:image/"),
+                ),
+              }
+            : {}),
+      }
+    : normalizedPayload;
+
+  const response = await fetch(
+    useLegacyCompatibility
+      ? "https://nano-gpt.com/v1/images/generations"
+      : "https://nano-gpt.com/api/v1/images",
+    {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(payload),
-  });
+    },
+  );
   const data = await jsonOrNull(response);
 
   if (!response.ok) {
@@ -253,8 +391,23 @@ export async function POST(req: Request) {
     );
   }
 
-  return janitorAiJsonResponse(
-    req,
-    imageResponsePayload(images, model, includeUserscriptShape)
+  const responsePayload = imageResponsePayload(
+    images,
+    model,
+    includeUserscriptShape,
   );
+  const billing = normalizeBilling(data);
+  const dataRecord = asRecord(data);
+  const requestId =
+    response.headers.get("x-request-id") ??
+    (typeof dataRecord?.requestId === "string"
+      ? dataRecord.requestId
+      : typeof dataRecord?.request_id === "string"
+        ? dataRecord.request_id
+        : undefined);
+  return janitorAiJsonResponse(req, {
+    ...responsePayload,
+    ...(billing ? { billing } : {}),
+    ...(requestId ? { requestId } : {}),
+  });
 }

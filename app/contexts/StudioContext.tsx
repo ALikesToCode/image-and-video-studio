@@ -33,6 +33,7 @@ import {
 } from "@/lib/constants";
 import {
     type GeneratedImage,
+    type GenerationBilling,
     type NavyUsageResponse,
     type PersistedGenerationJob,
     type ReferenceRole,
@@ -115,6 +116,8 @@ export type GenerationJob = {
     remoteJobId?: string;
     remoteOperationName?: string;
     remoteStatus?: string;
+    billing?: GenerationBilling;
+    requestId?: string;
     negativePrompt?: string;
     promptAgentModel?: string;
     referenceIds?: string[];
@@ -566,11 +569,12 @@ const buildGeneratedImages = (payload: unknown): GeneratedImage[] => {
         .map((image) => {
             if (!isRecord(image)) return null;
             const data = getString(image.data);
-            if (!data) return null;
+            const url = getString(image.url);
+            if (!data && !url) return null;
             const mimeType = getString(image.mimeType, "image/png");
             return {
                 id: createId(),
-                dataUrl: dataUrlFromBase64(data, mimeType),
+                dataUrl: data ? dataUrlFromBase64(data, mimeType) : url,
                 mimeType,
             };
         })
@@ -581,6 +585,28 @@ const errorMessageFromPayload = (payload: unknown, fallback: string) => {
     if (!isRecord(payload)) return fallback;
     const error = payload.error;
     return typeof error === "string" && error.trim() ? error : fallback;
+};
+
+const generationMetadataFromPayload = (payload: unknown) => {
+    const root = isRecord(payload) ? payload : {};
+    const rawBilling = isRecord(root.billing) ? root.billing : {};
+    const billing: GenerationBilling = {};
+    if (typeof rawBilling.cost === "number" && Number.isFinite(rawBilling.cost)) {
+        billing.cost = rawBilling.cost;
+    }
+    if (typeof rawBilling.paymentSource === "string" && rawBilling.paymentSource) {
+        billing.paymentSource = rawBilling.paymentSource;
+    }
+    if (
+        typeof rawBilling.remainingBalance === "number" &&
+        Number.isFinite(rawBilling.remainingBalance)
+    ) {
+        billing.remainingBalance = rawBilling.remainingBalance;
+    }
+    return {
+        billing: Object.keys(billing).length ? billing : undefined,
+        requestId: typeof root.requestId === "string" ? root.requestId : undefined,
+    };
 };
 
 const toPersistedJob = (job: GenerationJob): PersistedGenerationJob => ({
@@ -601,6 +627,8 @@ const toPersistedJob = (job: GenerationJob): PersistedGenerationJob => ({
     remoteJobId: job.remoteJobId,
     remoteOperationName: job.remoteOperationName,
     remoteStatus: job.remoteStatus,
+    billing: job.billing,
+    requestId: job.requestId,
     saveToGallery: job.saveToGallery,
 });
 
@@ -1284,6 +1312,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 imageSize: job.imageSize,
                 navyImageSize: job.navyImageSize,
             });
+            let generationBilling: GenerationBilling | undefined;
+            let providerRequestId: string | undefined;
 
             const images = await retryAsyncOperation<GeneratedImage[]>({
                 maxAttempts: job.remoteJobId ? 1 : job.imageRetryAttempts,
@@ -1337,16 +1367,44 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             sync: false,
                         };
                     } else if (job.provider === "nanogpt") {
-                        const imageUrl = buildNavyImageUrlPayload(referenceImages);
+                        const selectedNanoGptModel = nanoGptImageModels.find(
+                            (entry) => entry.id === job.model
+                        );
+                        const supportsReferenceImages =
+                            selectedNanoGptModel?.supports?.referenceImages === true;
+                        const maxReferenceImages = supportsReferenceImages
+                            ? selectedNanoGptModel?.maxReferenceImages ?? 1
+                            : 0;
+                        const requestedResolution =
+                            job.imageSize && job.imageSize !== AUTO_IMAGE_OPTION
+                                ? job.imageSize
+                                : job.chutesResolution ?? "";
+                        const supportedResolutions =
+                            selectedNanoGptModel?.supportedResolutions ?? [];
+                        const resolution =
+                            !supportedResolutions.length ||
+                                supportedResolutions.includes(requestedResolution)
+                                ? requestedResolution
+                                : supportedResolutions.includes(AUTO_IMAGE_OPTION)
+                                    ? AUTO_IMAGE_OPTION
+                                    : supportedResolutions[0];
                         body = {
                             ...body,
-                            size:
-                                job.imageSize && job.imageSize !== AUTO_IMAGE_OPTION
-                                    ? job.imageSize
-                                    : job.chutesResolution,
+                            resolution,
                             numberOfImages: job.imageCount,
-                            imageUrl,
-                            seed: Number(job.chutesSeed) || null,
+                            input_references: referenceImages
+                                .slice(0, maxReferenceImages)
+                                .map((reference) => reference.dataUrl),
+                            seed: selectedNanoGptModel?.supports?.seed
+                                ? Number(job.chutesSeed) || null
+                                : null,
+                            modelCapabilities: {
+                                supportedResolutions,
+                                maxOutputImages: selectedNanoGptModel?.maxOutputImages,
+                                fixedOutputImages: selectedNanoGptModel?.fixedOutputImages,
+                                maxReferenceImages,
+                                supportsReferenceImages,
+                            },
                         };
                     } else {
                         url = "/api/chutes/image";
@@ -1466,6 +1524,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             images.push({ id: createId(), dataUrl, mimeType: "image/png" });
                         }
                     } else {
+                        if (job.provider === "nanogpt") {
+                            const metadata = generationMetadataFromPayload(payload);
+                            generationBilling = metadata.billing;
+                            providerRequestId = metadata.requestId;
+                        }
                         images = buildGeneratedImages(payload);
                     }
 
@@ -1522,8 +1585,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             });
             completeJob(
                 job.id,
-                {},
-                `Generated ${images.length} image${images.length === 1 ? "" : "s"} with ${job.model}.`
+                {
+                    billing: generationBilling,
+                    requestId: providerRequestId,
+                },
+                `Generated ${images.length} image${images.length === 1 ? "" : "s"} with ${job.model}${
+                    typeof generationBilling?.cost === "number"
+                        ? ` for ${generationBilling.cost.toFixed(4)} ${generationBilling.paymentSource ?? "USD"}`
+                        : ""
+                }.`
             );
         } catch (error) {
             failJob(
