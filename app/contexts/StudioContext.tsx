@@ -1795,6 +1795,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         startJob(job, "Generating Video...");
         try {
             let response: Response;
+            let generationBilling = job.billing;
             const requestHeaders = {
                 "Content-Type": "application/json",
                 "x-user-api-key": job.apiKey,
@@ -1986,8 +1987,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         duration: job.videoDuration,
                     };
                 let generationId = job.remoteJobId ?? "";
-                let billing = job.billing;
-
                 if (!generationId) {
                     const submittedSourceImage =
                         selectedNanoGptModel?.supports?.sourceImage === true
@@ -2027,7 +2026,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             : typeof submitPayload?.runId === "string"
                                 ? submitPayload.runId
                                 : "";
-                    billing = generationMetadataFromPayload(submitPayload).billing;
+                    generationBilling = generationMetadataFromPayload(submitPayload).billing;
                     if (generationId) {
                         updateJob(job.id, {
                             remoteJobId: generationId,
@@ -2035,7 +2034,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                                 typeof submitPayload?.status === "string"
                                     ? submitPayload.status
                                     : "pending",
-                            billing,
+                            billing: generationBilling,
                         });
                     }
                 }
@@ -2069,12 +2068,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         );
                     }
                     const pollMetadata = generationMetadataFromPayload(pollPayload);
-                    billing = pollMetadata.billing ?? billing;
+                    generationBilling = pollMetadata.billing ?? generationBilling;
                     const remoteStatus =
                         typeof pollPayload?.status === "string"
                             ? pollPayload.status
                             : undefined;
-                    updateJob(job.id, { remoteStatus, billing });
+                    updateJob(job.id, {
+                        remoteStatus,
+                        billing: generationBilling,
+                    });
                     completed = pollPayload?.done === true;
                     delayMs = resolveNavyJobPollDelayMs({
                         payload: pollPayload,
@@ -2158,7 +2160,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     ? galleryEntries.map((entry) => entry.id)
                     : undefined,
             });
-            completeJob(job.id, { videoUrl }, "Video ready.");
+            completeJob(
+                job.id,
+                { videoUrl, billing: generationBilling },
+                `Video ready${
+                    typeof generationBilling?.cost === "number"
+                        ? ` for ${generationBilling.cost.toFixed(4)} ${generationBilling.paymentSource ?? "USD"}`
+                        : ""
+                }${
+                    typeof generationBilling?.remainingBalance === "number"
+                        ? `. Remaining balance: ${generationBilling.remainingBalance.toFixed(4)} ${generationBilling.paymentSource ?? "USD"}`
+                        : ""
+                }.`
+            );
         } catch (error) {
             failJob(job.id, error instanceof Error ? error.message : "Video generation failed");
         }
