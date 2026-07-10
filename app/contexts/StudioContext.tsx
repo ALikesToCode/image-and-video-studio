@@ -1820,6 +1820,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             negativePrompt: job.negativePrompt,
                             seconds: Number(job.videoDuration),
                             aspectRatio: job.videoAspect,
+                            size: job.videoResolution,
+                            seed: Number(job.chutesSeed) || null,
                         }),
                     });
                     submitPayload = await submitResponse.json();
@@ -1848,11 +1850,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 }
 
                 if (!remoteVideoUrl) {
+                    let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
                     for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
                         updateJob(job.id, {
                             progress: `Waiting for Navy render (${attempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
                         });
-                        await sleep(NAVY_JOB_POLL_INTERVAL_MS);
+                        await sleep(delayMs);
                         const pollResponse = await fetch(
                             `/api/navy/video?id=${encodeURIComponent(generationId)}`,
                             {
@@ -1871,6 +1874,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             remoteVideoUrl = pollPayload.videoUrl;
                             break;
                         }
+                        delayMs = resolveNavyJobPollDelayMs({
+                            payload: pollPayload,
+                            responseStatus: pollResponse.status,
+                            currentDelayMs: delayMs,
+                        });
                     }
                 }
 
