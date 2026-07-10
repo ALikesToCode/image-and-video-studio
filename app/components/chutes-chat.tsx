@@ -4435,7 +4435,9 @@ export function ChutesChat({
               </div>
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-foreground">
-                  <span className="sm:hidden">Next action</span>
+                  <span className="sm:hidden">
+                    Next · {chatTurnIntentCompactLabel(currentTurnDecision.intent)}
+                  </span>
                   <span className="hidden sm:inline">
                     Next action · {chatTurnIntentLabel(currentTurnDecision.intent)}
                   </span>

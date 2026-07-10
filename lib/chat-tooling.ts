@@ -999,12 +999,77 @@ const mediaIntentLabel = (intent: MediaToolCall) => {
   return "Audio";
 };
 
+const DIRECT_MEDIA_CREATION_PREFIX =
+  /^(?:["'“”‘’]\s*)?(?:(?:please|kindly)\s+)?(?:create|generate|draw|paint|illustrate|render|produce|make|design)\b/i;
+
+const IMAGE_OUTPUT_TERM =
+  /\b(?:image|picture|photo|illustration|artwork|portrait|poster|logo|wallpaper|concept art|cover art)\b/i;
+
+const VIDEO_OUTPUT_TERM = /\b(?:video|animation|movie|film|clip)\b/i;
+
+const AUDIO_OUTPUT_TERM =
+  /\b(?:audio|sound|voiceover|voice-over|speech|song|music|narration)\b/i;
+
+const META_OUTPUT_TERM =
+  /\b(?:prompt|table|list|api|sdk|component|code|guide|tutorial|comparison|react|vue|svelte|html|css|javascript|typescript|jsx|tsx)\b/i;
+
+const IMAGE_META_COMPOUND =
+  /\b(?:image|picture|photo|illustration|artwork|portrait|poster|logo|wallpaper|concept art|cover art)[-\s]+(?:(?:generat(?:ion|or|ing)|source)[-\s]+)?(?:prompt|gallery|models?|api|sdk|component|code|guide|tutorial)\b/i;
+
+const DIRECT_REQUEST_RETRACTION =
+  /\bbut\s+(?:(?:please|actually)\s+)?(?:do\s+not|don['’]?t|never)\b/i;
+
+const firstMatchIndex = (text: string, pattern: RegExp) => {
+  const match = pattern.exec(text);
+  return match?.index ?? Number.POSITIVE_INFINITY;
+};
+
+const isDirectImageCreationRequest = (text: string) => {
+  const normalized = normalizeValue(text).replace(/^\s*[-*]\s+/, "");
+  const prefix = DIRECT_MEDIA_CREATION_PREFIX.exec(normalized);
+  if (!prefix) return false;
+
+  const leadingRequest = normalized
+    .slice(prefix[0].length)
+    .split(/\n|[.!?](?:\s|$)/, 1)[0]
+    .slice(0, 512);
+  if (/^\s*(?:no|not)\b/i.test(leadingRequest)) return false;
+  if (DIRECT_REQUEST_RETRACTION.test(leadingRequest)) return false;
+
+  const imageIndex = firstMatchIndex(leadingRequest, IMAGE_OUTPUT_TERM);
+  if (!Number.isFinite(imageIndex)) return false;
+
+  const competingOutputIndex = Math.min(
+    firstMatchIndex(leadingRequest, VIDEO_OUTPUT_TERM),
+    firstMatchIndex(leadingRequest, AUDIO_OUTPUT_TERM),
+    firstMatchIndex(leadingRequest, META_OUTPUT_TERM)
+  );
+  if (competingOutputIndex < imageIndex) return false;
+
+  const metaCompound = IMAGE_META_COMPOUND.exec(leadingRequest);
+  return metaCompound?.index !== imageIndex;
+};
+
 export const resolveChatTurnIntent = (
-  _text: string,
+  text: string,
   toolSettings: ToolAvailability,
   mode: ChatTurnIntent = "auto"
 ): ChatTurnIntentDecision => {
   if (mode === "auto") {
+    if (isDirectImageCreationRequest(text)) {
+      if (!toolSettings.image) {
+        return {
+          intent: "chat",
+          source: "auto",
+          reason: "Image generation is unavailable with the current tool settings.",
+        };
+      }
+      return {
+        intent: "generate_image",
+        source: "auto",
+        reason: "Detected a direct image creation request.",
+      };
+    }
     return {
       intent: "auto",
       source: "auto",

@@ -214,13 +214,77 @@ const allMediaTools = {
   audio: true,
 };
 
-test("Auto chat intent never locally forces media generation", () => {
+test("Auto routes an unambiguous imperative image request only to image generation", () => {
+  const request = `Create a high-detail modern anime image.
+
+Background/setting: Snow-covered hilltop overlook at night, a weathered wooden bench near a metal railing, HentaVille city lights glittering in the valley below like ground-level stars, heavy snowfall blanketing the scene, bare winter trees flanking the clearing, faint silhouettes of three figures standing near the railing behind the main subjects.
+
+Main character (focus): Kieran, 21 years old, tall slim supermodel build, light flawless skin, amber eyes locked on a handwritten note, long black hair loose and wind-blown with snowflakes caught throughout, standing in ankle-deep snow facing the camera's left.
+
+Secondary character: Genevieve Laurent, approximately 21 years old, tall slender aristocratic build, pale porcelain skin, sharp grey almond eyes glistening, high cheekbones, angular jaw, standing opposite Kieran with her arm still extended from handing over the note.
+
+Composition/camera: First-person POV from Blake's position a few feet behind and between the two women, medium wide shot capturing both Kieran and Genevieve facing each other with the bench between them, city lights filling the valley below the railing, Blake's forearm visible at the bottom edge steadying Kieran's elbow.`;
+
+  const decision = resolveChatTurnIntent(request, allMediaTools);
+
+  assert.deepEqual(decision, {
+    intent: "generate_image",
+    source: "auto",
+    reason: "Detected a direct image creation request.",
+  });
+  assert.deepEqual(resolveChatTurnToolPolicy(decision), {
+    activeTools: ["generate_image"],
+    forcedToolCall: "generate_image",
+    allowSyntheticFallback: true,
+  });
+});
+
+test("Direct image routing uses the requested output instead of later subject words", () => {
+  const requests = [
+    "Create an image of a wooden table.",
+    "Create a poster with a list of names.",
+    "Create an image of a React robot.",
+    "Create an image for my video.",
+    "Generate cover art for this audio.",
+  ];
+
+  for (const request of requests) {
+    assert.equal(
+      resolveChatTurnIntent(request, allMediaTools).intent,
+      "generate_image",
+      request
+    );
+  }
+});
+
+test("Auto does not offer another media tool when direct image generation is unavailable", () => {
+  const decision = resolveChatTurnIntent("Create a modern anime image.", {
+    image: false,
+    video: true,
+    audio: true,
+  });
+
+  assert.deepEqual(decision, {
+    intent: "chat",
+    source: "auto",
+    reason: "Image generation is unavailable with the current tool settings.",
+  });
+  assert.deepEqual(resolveChatTurnToolPolicy(decision), {
+    activeTools: [],
+    forcedToolCall: null,
+    allowSyntheticFallback: false,
+  });
+});
+
+test("Auto keeps ambiguous and non-generation media requests unforced", () => {
   const requests = [
     "Create a prompt for an image of a rain-soaked neon street.",
     "Generate an image prompt, but do not create the image.",
     "Make this image prompt more cinematic.",
     "Explain how to generate an image with Flux.",
     "Compare image generation models and make a table.",
+    "Make a table comparing image generation models.",
+    "Design an image generation API.",
     "Brainstorm three image ideas for a travel campaign.",
     "Do not generate an image; just improve the prompt.",
     "I am not asking you to create a picture.",
@@ -230,8 +294,7 @@ test("Auto chat intent never locally forces media generation", () => {
     "Analyze this image now.",
     "Render this React component.",
     "Create a photo gallery component.",
-    "Create an image for my video.",
-    "Generate cover art for this audio.",
+    "Create a video from this image.",
     "Remove the background from this photo.",
     "Use this reference and make a watercolor version.",
     "Yes, do it.",
@@ -283,9 +346,9 @@ test("Manual media intent is deterministic and checks availability", () => {
   );
 });
 
-test("Only a manual media mode can force and synthesize a tool call", () => {
+test("Ambiguous Auto remains optional while a manual media mode forces a tool call", () => {
   const autoDecision = resolveChatTurnIntent(
-    "Generate an image of a lighthouse.",
+    "Brainstorm an image concept for a lighthouse.",
     allMediaTools
   );
   const chatDecision = resolveChatTurnIntent(
