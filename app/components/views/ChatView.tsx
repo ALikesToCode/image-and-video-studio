@@ -14,6 +14,8 @@ type ChatViewProps = {
     initialInput?: string | null;
 };
 
+const EMPTY_MODELS: ModelOption[] = [];
+
 const appendUniqueModels = (primary: ModelOption[], extra: ModelOption[]) => {
     const seen = new Set(primary.map((model) => model.id));
     return [
@@ -47,6 +49,14 @@ export function ChatView({ initialInput }: ChatViewProps) {
         navyChatModelsLoading,
         navyChatModelsError,
         refreshNavyChatModels,
+        nanoGptChatModels,
+        nanoGptChatModel,
+        setNanoGptChatModel,
+        nanoGptToolImageModel,
+        setNanoGptToolImageModel,
+        nanoGptChatModelsLoading,
+        nanoGptChatModelsError,
+        refreshNanoGptChatModels,
         navyImageModels,
         navyVideoModels,
         navyTtsModels,
@@ -74,7 +84,12 @@ export function ChatView({ initialInput }: ChatViewProps) {
     } = useStudio();
 
     const isNavyChat = chatProvider === "navy";
-    const chatApiKey = isNavyChat ? apiKeys.navy : apiKeys.chutes;
+    const isNanoGptChat = chatProvider === "nanogpt";
+    const chatApiKey = isNavyChat
+        ? apiKeys.navy
+        : isNanoGptChat
+            ? apiKeys.nanogpt
+            : apiKeys.chutes;
     const navyChatModelsFiltered = useMemo(() => {
         if (!navyChatModels.length) return [];
         const exclude = new Set([
@@ -85,9 +100,21 @@ export function ChatView({ initialInput }: ChatViewProps) {
         return navyChatModels.filter((model) => !exclude.has(model.id));
     }, [navyChatModels, navyImageModels, navyVideoModels, navyTtsModels]);
     const resolvedNavyChatModels = navyChatModelsFiltered.length ? navyChatModelsFiltered : navyChatModels;
-    const chatModels = isNavyChat ? resolvedNavyChatModels : chutesChatModels;
-    const chatModel = isNavyChat ? navyChatModel : chutesChatModel;
-    const setChatModel = isNavyChat ? setNavyChatModel : setChutesChatModel;
+    const chatModels = isNavyChat
+        ? resolvedNavyChatModels
+        : isNanoGptChat
+            ? nanoGptChatModels
+            : chutesChatModels;
+    const chatModel = isNavyChat
+        ? navyChatModel
+        : isNanoGptChat
+            ? nanoGptChatModel
+            : chutesChatModel;
+    const setChatModel = isNavyChat
+        ? setNavyChatModel
+        : isNanoGptChat
+            ? setNanoGptChatModel
+            : setChutesChatModel;
     const chutesImageToolModels = useMemo(
         () => appendUniqueModels(CHUTES_IMAGE_MODELS, nanoGptImageModels),
         [nanoGptImageModels]
@@ -96,21 +123,64 @@ export function ChatView({ initialInput }: ChatViewProps) {
         () => appendUniqueModels(navyImageModels, nanoGptImageModels),
         [navyImageModels, nanoGptImageModels]
     );
-    const imageModels = isNavyChat ? navyImageToolModels : chutesImageToolModels;
-    const videoModels = useMemo(
+    const nanoGptImageToolModels = useMemo(
         () =>
             appendUniqueModels(
+                nanoGptImageModels,
+                [...navyImageModels, ...CHUTES_IMAGE_MODELS]
+            ),
+        [nanoGptImageModels, navyImageModels]
+    );
+    const imageModels = isNavyChat
+        ? navyImageToolModels
+        : isNanoGptChat
+            ? nanoGptImageToolModels
+            : chutesImageToolModels;
+    const videoModels = useMemo(
+        () => {
+            if (isNanoGptChat) {
+                return appendUniqueModels(
+                    nanoGptVideoModels,
+                    [...navyVideoModels, ...CHUTES_VIDEO_MODELS]
+                ).filter(isChatVideoModelSupported);
+            }
+            return appendUniqueModels(
                 isNavyChat ? navyVideoModels : CHUTES_VIDEO_MODELS,
                 nanoGptVideoModels
-            ).filter(isChatVideoModelSupported),
-        [isNavyChat, navyVideoModels, nanoGptVideoModels]
+            ).filter(isChatVideoModelSupported);
+        },
+        [isNanoGptChat, isNavyChat, navyVideoModels, nanoGptVideoModels]
     );
-    const audioModels = isNavyChat ? navyTtsModels : CHUTES_TTS_MODELS;
-    const toolImageModel = isNavyChat ? navyToolImageModel : chutesToolImageModel;
-    const setToolImageModel = isNavyChat ? setNavyToolImageModel : setChutesToolImageModel;
-    const modelsLoading = isNavyChat ? navyChatModelsLoading : chutesChatModelsLoading;
-    const modelsError = isNavyChat ? navyChatModelsError : chutesChatModelsError;
-    const onRefreshModels = isNavyChat ? refreshNavyChatModels : refreshChutesChatModels;
+    const audioModels = isNanoGptChat
+        ? EMPTY_MODELS
+        : isNavyChat
+            ? navyTtsModels
+            : CHUTES_TTS_MODELS;
+    const toolImageModel = isNavyChat
+        ? navyToolImageModel
+        : isNanoGptChat
+            ? nanoGptToolImageModel
+            : chutesToolImageModel;
+    const setToolImageModel = isNavyChat
+        ? setNavyToolImageModel
+        : isNanoGptChat
+            ? setNanoGptToolImageModel
+            : setChutesToolImageModel;
+    const modelsLoading = isNavyChat
+        ? navyChatModelsLoading
+        : isNanoGptChat
+            ? nanoGptChatModelsLoading
+            : chutesChatModelsLoading;
+    const modelsError = isNavyChat
+        ? navyChatModelsError
+        : isNanoGptChat
+            ? nanoGptChatModelsError
+            : chutesChatModelsError;
+    const onRefreshModels = isNavyChat
+        ? refreshNavyChatModels
+        : isNanoGptChat
+            ? refreshNanoGptChatModels
+            : refreshChutesChatModels;
     const handleSaveImages = (payload: {
         images: ChatImageAsset[];
         prompt: string;
@@ -119,20 +189,18 @@ export function ChatView({ initialInput }: ChatViewProps) {
     }) => saveChatImages(payload);
 
     useEffect(() => {
-        if (!isNavyChat) return;
-        if (!resolvedNavyChatModels.length) return;
-        if (!navyChatModel) {
-            setNavyChatModel(resolvedNavyChatModels[0].id);
+        if (!chatModels.length) return;
+        if (!chatModels.some((entry) => entry.id === chatModel)) {
+            setChatModel(chatModels[0].id);
         }
-    }, [isNavyChat, navyChatModel, resolvedNavyChatModels, setNavyChatModel]);
+    }, [chatModel, chatModels, setChatModel]);
 
     useEffect(() => {
-        if (!isNavyChat) return;
-        if (!navyImageModels.length) return;
-        if (!navyToolImageModel) {
-            setNavyToolImageModel(navyImageModels[0].id);
+        if (!imageModels.length) return;
+        if (!imageModels.some((entry) => entry.id === toolImageModel)) {
+            setToolImageModel(imageModels[0].id);
         }
-    }, [isNavyChat, navyImageModels, navyToolImageModel, setNavyToolImageModel]);
+    }, [imageModels, setToolImageModel, toolImageModel]);
 
     useEffect(() => {
         if (!isNavyChat) return;

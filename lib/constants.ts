@@ -1,6 +1,6 @@
 export type Provider = "gemini" | "navy" | "chutes" | "openrouter" | "nanogpt";
 export type Mode = "image" | "video" | "tts";
-export type ChatProvider = "chutes" | "navy";
+export type ChatProvider = "chutes" | "navy" | "nanogpt";
 export type ModelEndpoint =
     | "gemini-generate-content"
     | "imagen-predict"
@@ -61,6 +61,12 @@ export type ModelInputImageConstraints = {
     provider?: ModelMediaConstraint;
 };
 
+export type ModelSubscription = {
+    included?: boolean;
+    inputTokenMultiplier?: number;
+    note?: string;
+};
+
 export type ModelOption = {
     id: string;
     label: string;
@@ -75,6 +81,7 @@ export type ModelOption = {
     maxOutputTokens?: number | null;
     modality?: string | null;
     tokenizer?: string | null;
+    category?: string | null;
     description?: string | null;
     metadataSource?: string | null;
     metadataStatus?: string;
@@ -84,9 +91,13 @@ export type ModelOption = {
     supportsReasoning?: boolean | null;
     supportsJsonMode?: boolean | null;
     supportsAudioInput?: boolean | null;
+    supportsVideoInput?: boolean | null;
     supportsImageOutput?: boolean | null;
     supportsStreaming?: boolean | null;
     pricing?: unknown;
+    costEstimate?: unknown;
+    providers?: string[];
+    subscription?: ModelSubscription;
     supports?: Partial<{
         imageGeneration: boolean;
         imageEdit: boolean;
@@ -306,6 +317,19 @@ export const NAVY_CHAT_MODELS: ModelOption[] = [
     {
         id: "claude-sonnet-4.5",
         label: "Claude Sonnet 4.5",
+    },
+];
+
+export const NANOGPT_LLM_MODELS: ModelOption[] = [
+    {
+        id: "minimax/minimax-m2.7",
+        label: "MiniMax M2.7",
+        provider: "nanogpt",
+        endpoint: "nanogpt-chat-completions",
+        inputModalities: ["text"],
+        outputModalities: ["text"],
+        metadataSource: "nanogpt-docs-fallback",
+        metadataStatus: "fallback",
     },
 ];
 

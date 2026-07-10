@@ -15,6 +15,8 @@ const models: ModelOption[] = [
     label: "GPT-5.5",
     endpoint: "/v1/chat/completions",
     tokenMultiplier: 12,
+    category: "reasoning",
+    providers: ["openai", "azure"],
     outputModalities: ["text"],
   },
   {
@@ -37,6 +39,14 @@ test("filterModelOptions searches labels, ids, endpoints, and modalities", () =>
   assert.deepEqual(
     filterModelOptions(models, "video").map((model) => model.id),
     ["veo-3.1"],
+  );
+  assert.deepEqual(
+    filterModelOptions(models, "azure").map((model) => model.id),
+    ["gpt-5.5"],
+  );
+  assert.deepEqual(
+    filterModelOptions(models, "reasoning").map((model) => model.id),
+    ["gpt-5.5"],
   );
 });
 

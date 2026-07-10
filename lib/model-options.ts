@@ -11,9 +11,11 @@ export const optionSearchText = (model: ModelOption) =>
     model.requiredPlan,
     model.modality,
     model.tokenizer,
+    model.category,
     model.metadataSource,
     model.metadataStatus,
     model.description,
+    ...(model.providers ?? []),
     ...(model.inputModalities ?? []),
     ...(model.outputModalities ?? []),
   ]
@@ -60,6 +62,9 @@ export const hasModelMetadata = (model: ModelOption) =>
       model.metadataSource !== undefined ||
       model.modality !== undefined ||
       model.tokenizer !== undefined ||
+      model.category !== undefined ||
+      model.providers !== undefined ||
+      model.subscription !== undefined ||
       model.inputModalities !== undefined ||
       model.outputModalities !== undefined,
   );

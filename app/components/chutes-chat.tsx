@@ -60,6 +60,7 @@ import {
   CHUTES_TTS_MODELS as STATIC_CHUTES_TTS_MODELS,
   CHUTES_VIDEO_MODELS as STATIC_CHUTES_VIDEO_MODELS,
   NANOGPT_IMAGE_MODELS as STATIC_NANOGPT_IMAGE_MODELS,
+  NANOGPT_LLM_MODELS as STATIC_NANOGPT_LLM_MODELS,
   NANOGPT_VIDEO_MODELS as STATIC_NANOGPT_VIDEO_MODELS,
   NAVY_CHAT_MODELS as STATIC_NAVY_CHAT_MODELS,
   NAVY_IMAGE_MODELS as STATIC_NAVY_IMAGE_MODELS,
@@ -69,6 +70,11 @@ import {
   type ChatProvider,
   type Provider,
 } from "@/lib/constants";
+import {
+  CHAT_PROVIDER_OPTIONS,
+  chatProviderDisplayName,
+  chatProviderHeading,
+} from "@/lib/chat-providers";
 import type { NavyUsageResponse } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl, cn } from "@/lib/utils";
 import {
@@ -212,6 +218,10 @@ Use concise, vivid descriptions with clear subjects, styles, and lighting. Ask f
 Summarize the final prompt before generating, and prefer sizes like 1024x1024 unless specified.
 When the user provides reference images, pass them through image_url as one URL/data URI or an array of up to 5 references.
 Generate one image per tool call; the Navy image endpoint does not support a multi-image count parameter.`;
+
+const NANOGPT_IMAGE_GUIDE_PROMPT = `# Prompt Guide for NanoGPT Image Generation
+
+Use the selected live model's catalog metadata as the source of truth. Write one production-ready visual prompt with a clear subject, composition, lighting, palette, materials, camera/framing, and constraints. Pass only resolution, quality, output format, seed, and reference-image fields advertised by that model.`;
 
 const FLUX_CROSS_MODAL_GUIDE = `# Flux Cross-Modal Prompt Protocol
 
@@ -381,6 +391,20 @@ const STATIC_MODEL_IDS = {
     video: idsForGroups([STATIC_NAVY_VIDEO_MODELS, STATIC_NANOGPT_VIDEO_MODELS]),
     audio: idsFor(STATIC_NAVY_TTS_MODELS),
   },
+  nanogpt: {
+    chat: idsFor(STATIC_NANOGPT_LLM_MODELS),
+    image: idsForGroups([
+      STATIC_NANOGPT_IMAGE_MODELS,
+      STATIC_NAVY_IMAGE_MODELS,
+      STATIC_CHUTES_IMAGE_MODELS,
+    ]),
+    video: idsForGroups([
+      STATIC_NANOGPT_VIDEO_MODELS,
+      STATIC_NAVY_VIDEO_MODELS,
+      STATIC_CHUTES_VIDEO_MODELS,
+    ]),
+    audio: new Set<string>(),
+  },
 } satisfies Record<ChatProvider, Record<"chat" | "image" | "video" | "audio", Set<string>>>;
 
 const isImageToolProvider = (value: unknown): value is Provider =>
@@ -402,7 +426,9 @@ const modelSupportsReasoning = (
   provider: ChatProvider,
   modelId: string,
   modelOption?: ModelOption,
-) => provider === "navy" && (modelOption?.supportsReasoning === true || isDeepSeekV4Model(modelId));
+) =>
+  (provider === "navy" || provider === "nanogpt") &&
+  (modelOption?.supportsReasoning === true || isDeepSeekV4Model(modelId));
 
 function NavyUsageFooter({
   usage,
@@ -1019,7 +1045,8 @@ export function ChutesChat({
     () => getReasoningPreferencesStorageKey(provider),
     [provider]
   );
-  const providerLabel = provider === "navy" ? "NavyAI" : "Chutes";
+  const providerLabel = chatProviderDisplayName(provider);
+  const providerHeading = chatProviderHeading(provider);
   const staticModelIds = STATIC_MODEL_IDS[provider];
   const navyToolUsageFooter =
     provider === "navy" ? (
@@ -1111,7 +1138,9 @@ export function ChutesChat({
     .filter(Boolean)
     .join(",");
   const attachmentUploadDisabled = !supportsImageAttachments && !supportsFileAttachments;
-  const isDeepSeekV4ChatModel = provider === "navy" && isDeepSeekV4Model(model);
+  const isDeepSeekV4ChatModel =
+    (provider === "navy" || provider === "nanogpt") &&
+    isDeepSeekV4Model(model);
   const chatModelSupportsReasoning = modelSupportsReasoning(provider, model, selectedChatModel);
   const chatModelToolCapability = chatModelToolSupport(selectedChatModel);
   useEffect(() => {
@@ -1508,11 +1537,11 @@ export function ChutesChat({
   const enabledChatTools = useMemo<AIChatToolName[]>(() => {
     if (chatModelToolCapability === false) return [];
     const enabled: AIChatToolName[] = [];
-    if (toolSettings.image) enabled.push("generate_image");
-    if (toolSettings.video) enabled.push("generate_video");
-    if (toolSettings.audio) enabled.push("generate_audio");
+    if (toolSettings.image && imageModels.length) enabled.push("generate_image");
+    if (toolSettings.video && videoModels.length) enabled.push("generate_video");
+    if (toolSettings.audio && audioModels.length) enabled.push("generate_audio");
     return enabled;
-  }, [chatModelToolCapability, toolSettings]);
+  }, [audioModels.length, chatModelToolCapability, imageModels.length, toolSettings, videoModels.length]);
   const systemPrompt = useMemo(() => {
     const modelList = imageModels.map((item) => item.id).join(", ");
     const videoModelList = videoModels.map((item) => item.id).join(", ");
@@ -1523,19 +1552,23 @@ export function ChutesChat({
       activeToolImageModels
     );
     const promptGuide =
-      provider === "navy" ? NAVY_IMAGE_GUIDE_PROMPT : CHUTES_IMAGE_GUIDE_PROMPT;
+      provider === "navy"
+        ? NAVY_IMAGE_GUIDE_PROMPT
+        : provider === "nanogpt"
+          ? NANOGPT_IMAGE_GUIDE_PROMPT
+          : CHUTES_IMAGE_GUIDE_PROMPT;
     const enabledToolLines: string[] = [];
-    if (toolSettings.image) {
+    if (toolSettings.image && imageModels.length) {
       enabledToolLines.push(
         `- generate_image (default model: ${toolImageModel}; preferred active image order: ${activeImageModelSummary || toolImageModel}; available image models: ${modelList})`
       );
     }
-    if (toolSettings.video) {
+    if (toolSettings.video && videoModels.length) {
       enabledToolLines.push(
         `- generate_video (default model: ${toolVideoModel}; available video models: ${videoModelList})`
       );
     }
-    if (toolSettings.audio) {
+    if (toolSettings.audio && audioModels.length) {
       enabledToolLines.push(
         `- generate_audio (default model: ${toolAudioModel}; available audio models: ${audioModelList})`
       );
@@ -1547,7 +1580,9 @@ export function ChutesChat({
     const providerHint =
       provider === "chutes"
         ? "For Chutes video generation, always ensure an image input is provided before calling generate_video."
-        : "For Navy video generation, use generate_video for short clips and keep durations reasonable.";
+        : provider === "nanogpt"
+          ? "For NanoGPT video generation, follow the selected live model's input and scalar-parameter capabilities exactly."
+          : "For Navy video generation, use generate_video for short clips and keep durations reasonable.";
 
     const crossModalHint =
       "When image generation is requested, optimize prompts so the output can also be used as a strong keyframe for video and as artwork aligned with narration/voice mood.";
@@ -1604,7 +1639,8 @@ ${defaultPrompt}`;
     const requestTools =
       options.allowTools === false ? [] : enabledChatTools;
     const reasoningPayload =
-      provider === "navy" && chatModelSupportsReasoning
+      (provider === "navy" || provider === "nanogpt") &&
+      chatModelSupportsReasoning
         ? {
             ...(isDeepSeekV4ChatModel
               ? {
@@ -1630,7 +1666,8 @@ ${defaultPrompt}`;
             ...toChatCompletionMessages(
               items.filter((item) => !item.transient),
               {
-                includeReasoningContent: provider === "navy",
+                includeReasoningContent:
+                  provider === "navy" || provider === "nanogpt",
               }
             ),
           ],
@@ -1774,6 +1811,28 @@ ${defaultPrompt}`;
       nextAttempt,
       maxAttempts,
     });
+
+    if (provider === "nanogpt") {
+      try {
+        const recovered = await callChatStreaming(
+          [
+            {
+              id: createId(),
+              role: "user",
+              content: recoveryInstruction,
+            },
+          ],
+          () => undefined,
+          undefined,
+          { allowTools: false, signal }
+        );
+        const recoveredPrompt = normalizeRecoveredImagePrompt(recovered.content);
+        if (recoveredPrompt) return recoveredPrompt;
+      } catch (error) {
+        if (isAbortLikeError(error, signal)) throw error;
+      }
+      return fallbackPrompt;
+    }
 
     const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
     const recoveryModels = resolveImagePromptRecoveryChatModels({
@@ -2845,9 +2904,9 @@ ${defaultPrompt}`;
       const invocationPrompt = getStringArg(args, ["prompt", "input", "text"]);
 
       const disabledByUser =
-        (toolName === "generate_image" && !toolSettings.image) ||
-        (toolName === "generate_video" && !toolSettings.video) ||
-        (toolName === "generate_audio" && !toolSettings.audio);
+        (toolName === "generate_image" && (!toolSettings.image || !imageModels.length)) ||
+        (toolName === "generate_video" && (!toolSettings.video || !videoModels.length)) ||
+        (toolName === "generate_audio" && (!toolSettings.audio || !audioModels.length));
       if (disabledByUser) {
         toolMessages.push({
           id: createId(),
@@ -3051,7 +3110,11 @@ ${defaultPrompt}`;
     // Optimistic update
     let currentMessages: ChatMessage[] = [...messagesRef.current, userMessage];
     commitMessages(currentMessages);
-    const forcedToolCall = detectForcedToolCall(trimmed, toolSettings);
+    const forcedToolCall = detectForcedToolCall(trimmed, {
+      image: toolSettings.image && imageModels.length > 0,
+      video: toolSettings.video && videoModels.length > 0,
+      audio: toolSettings.audio && audioModels.length > 0,
+    });
     let toolRounds = 0;
 
     try {
@@ -3305,7 +3368,7 @@ ${defaultPrompt}`;
             </div>
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold leading-none">
-                {provider === "navy" ? "NavyAI Chat" : "Chutes Agent"}
+                {providerHeading}
               </h2>
               <p className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
                 <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
@@ -3324,7 +3387,7 @@ ${defaultPrompt}`;
             </motion.div>
             <div>
               <h2 className="font-semibold text-lg leading-none">
-                {provider === "navy" ? "NavyAI Chat" : "Chutes Agent"}
+                {providerHeading}
               </h2>
               <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
@@ -3339,8 +3402,11 @@ ${defaultPrompt}`;
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="chutes">Chutes</SelectItem>
-                <SelectItem value="navy">NavyAI</SelectItem>
+                {CHAT_PROVIDER_OPTIONS.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -3597,7 +3663,67 @@ ${defaultPrompt}`;
                   <div className="rounded-lg border border-border/60 bg-secondary/20 p-3">
                     <div className="text-sm font-semibold">{selectedChatModel?.label ?? model}</div>
                     <div className="mt-1 text-xs text-muted-foreground">{model}</div>
+                    {selectedChatModel?.description ? (
+                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                        {selectedChatModel.description}
+                      </p>
+                    ) : null}
                   </div>
+                  {selectedChatModel?.category ||
+                  selectedChatModel?.contextWindow !== undefined ||
+                  selectedChatModel?.maxOutputTokens !== undefined ||
+                  selectedChatModel?.subscription ? (
+                    <div className="grid gap-2 text-xs sm:grid-cols-2">
+                      {selectedChatModel.category ? (
+                        <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                          Category: {selectedChatModel.category}
+                        </div>
+                      ) : null}
+                      {selectedChatModel.contextWindow !== undefined ? (
+                        <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                          Context: {formatModelWindow(selectedChatModel.contextWindow)} tokens
+                        </div>
+                      ) : null}
+                      {selectedChatModel.maxOutputTokens !== undefined ? (
+                        <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                          Max output: {formatModelWindow(selectedChatModel.maxOutputTokens)} tokens
+                        </div>
+                      ) : null}
+                      {selectedChatModel.subscription ? (
+                        <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                          <div>
+                            Subscription: {selectedChatModel.subscription.included === true
+                              ? "included"
+                              : selectedChatModel.subscription.included === false
+                                ? "paid extra"
+                                : "provider-defined"}
+                            {typeof selectedChatModel.subscription.inputTokenMultiplier === "number"
+                              ? ` · ${selectedChatModel.subscription.inputTokenMultiplier}x input tokens`
+                              : ""}
+                          </div>
+                          {selectedChatModel.subscription.note ? (
+                            <p className="mt-1 text-muted-foreground">
+                              {selectedChatModel.subscription.note}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {selectedChatModel?.providers?.length ? (
+                    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Available routes
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {selectedChatModel.providers.map((item) => (
+                          <span key={item} className="rounded-full bg-secondary px-2 py-1 text-xs">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-lg border border-border/60 bg-background/60 p-3">
                       <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inputs</div>

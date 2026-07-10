@@ -17,6 +17,7 @@ import {
     NAVY_IMAGE_QUALITIES,
     NAVY_IMAGE_SIZES,
     NAVY_CHAT_MODELS,
+    NANOGPT_LLM_MODELS,
     NAVY_VIDEO_MODELS,
     NAVY_TTS_MODELS,
     IMAGE_ASPECTS,
@@ -32,6 +33,7 @@ import {
     type ModelOption,
     type ModelParameterValue,
 } from "@/lib/constants";
+import { isChatProvider } from "@/lib/chat-providers";
 import {
     type GeneratedImage,
     type GenerationBilling,
@@ -216,6 +218,9 @@ const STORAGE_KEYS = {
     navyChatModels: "studio_navy_chat_models",
     navyChatModel: "studio_navy_chat_model",
     navyToolImageModel: "studio_navy_tool_image_model",
+    nanoGptChatModels: "studio_nanogpt_chat_models",
+    nanoGptChatModel: "studio_nanogpt_chat_model",
+    nanoGptToolImageModel: "studio_nanogpt_tool_image_model",
 };
 
 type StoredSettings = Partial<{
@@ -391,6 +396,7 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
             const maxOutputTokens = readNullableNumber(record, "maxOutputTokens", "max_output_tokens");
             const modality = readNullableString(record, "modality");
             const tokenizer = readNullableString(record, "tokenizer");
+            const category = readNullableString(record, "category");
             const description = readNullableString(record, "description");
             const metadataSource = readNullableString(record, "metadataSource", "metadata_source");
             const metadataStatus =
@@ -405,8 +411,31 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
             const supportsReasoning = readNullableBoolean(record, "supportsReasoning", "supports_reasoning");
             const supportsJsonMode = readNullableBoolean(record, "supportsJsonMode", "supports_json_mode");
             const supportsAudioInput = readNullableBoolean(record, "supportsAudioInput", "supports_audio_input");
+            const supportsVideoInput = readNullableBoolean(record, "supportsVideoInput", "supports_video_input");
             const supportsImageOutput = readNullableBoolean(record, "supportsImageOutput", "supports_image_output");
             const supportsStreaming = readNullableBoolean(record, "supportsStreaming", "supports_streaming");
+            const providers = readNullableStringArray(record, "providers");
+            const subscriptionRecord =
+                record.subscription &&
+                typeof record.subscription === "object" &&
+                !Array.isArray(record.subscription)
+                    ? record.subscription as Record<string, unknown>
+                    : null;
+            const subscription = subscriptionRecord
+                ? {
+                    ...(typeof subscriptionRecord.included === "boolean"
+                        ? { included: subscriptionRecord.included }
+                        : {}),
+                    ...(typeof subscriptionRecord.inputTokenMultiplier === "number" &&
+                    Number.isFinite(subscriptionRecord.inputTokenMultiplier) &&
+                    subscriptionRecord.inputTokenMultiplier >= 0
+                        ? { inputTokenMultiplier: subscriptionRecord.inputTokenMultiplier }
+                        : {}),
+                    ...(typeof subscriptionRecord.note === "string"
+                        ? { note: subscriptionRecord.note.slice(0, 1000) }
+                        : {}),
+                }
+                : undefined;
             const maxReferenceImages =
                 typeof record.maxReferenceImages === "number" && Number.isFinite(record.maxReferenceImages)
                     ? record.maxReferenceImages
@@ -456,6 +485,7 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                 ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
                 ...(modality !== undefined ? { modality } : {}),
                 ...(tokenizer !== undefined ? { tokenizer } : {}),
+                ...(category !== undefined ? { category } : {}),
                 ...(description !== undefined ? { description } : {}),
                 ...(metadataSource !== undefined ? { metadataSource } : {}),
                 ...(metadataStatus !== undefined ? { metadataStatus } : {}),
@@ -465,8 +495,11 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                 ...(supportsReasoning !== undefined ? { supportsReasoning } : {}),
                 ...(supportsJsonMode !== undefined ? { supportsJsonMode } : {}),
                 ...(supportsAudioInput !== undefined ? { supportsAudioInput } : {}),
+                ...(supportsVideoInput !== undefined ? { supportsVideoInput } : {}),
                 ...(supportsImageOutput !== undefined ? { supportsImageOutput } : {}),
                 ...(supportsStreaming !== undefined ? { supportsStreaming } : {}),
+                ...(providers !== undefined ? { providers } : {}),
+                ...(subscription && Object.keys(subscription).length ? { subscription } : {}),
                 ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
                 ...(supportedResolutions !== undefined ? { supportedResolutions } : {}),
                 ...(maxOutputImages !== undefined ? { maxOutputImages } : {}),
@@ -533,9 +566,6 @@ const isProvider = (value: unknown): value is Provider =>
     value === "chutes" ||
     value === "openrouter" ||
     value === "nanogpt";
-
-const isChatProvider = (value: unknown): value is ChatProvider =>
-    value === "chutes" || value === "navy";
 
 const isMode = (value: unknown): value is Mode =>
     value === "image" || value === "video" || value === "tts";
@@ -794,6 +824,13 @@ interface StudioContextType {
     setNavyToolImageModel: (s: string) => void;
     navyChatModelsLoading: boolean;
     navyChatModelsError: string | null;
+    nanoGptChatModels: ModelOption[];
+    nanoGptChatModel: string;
+    setNanoGptChatModel: (s: string) => void;
+    nanoGptToolImageModel: string;
+    setNanoGptToolImageModel: (s: string) => void;
+    nanoGptChatModelsLoading: boolean;
+    nanoGptChatModelsError: string | null;
 
     // Data / Models
     openRouterImageModels: ModelOption[];
@@ -883,6 +920,7 @@ interface StudioContextType {
     refreshModels: () => Promise<void>;
     refreshChutesChatModels: () => Promise<void>;
     refreshNavyChatModels: () => Promise<void>;
+    refreshNanoGptChatModels: () => Promise<void>;
     saveChatImages: (payload: {
         images: { id: string; dataUrl: string; mimeType: string; model?: string }[];
         prompt: string;
@@ -975,6 +1013,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [navyToolImageModel, setNavyToolImageModel] = useState(NAVY_IMAGE_MODELS[0]?.id ?? "flux");
     const [navyChatModelsLoading, setNavyChatModelsLoading] = useState(false);
     const [navyChatModelsError, setNavyChatModelsError] = useState<string | null>(null);
+    const [nanoGptChatModels, setNanoGptChatModels] = useState<ModelOption[]>(NANOGPT_LLM_MODELS);
+    const [nanoGptChatModel, setNanoGptChatModel] = useState(NANOGPT_LLM_MODELS[0]?.id ?? "");
+    const [nanoGptToolImageModel, setNanoGptToolImageModel] = useState(NANOGPT_IMAGE_MODELS[0]?.id ?? "");
+    const [nanoGptChatModelsLoading, setNanoGptChatModelsLoading] = useState(false);
+    const [nanoGptChatModelsError, setNanoGptChatModelsError] = useState<string | null>(null);
 
     // --- App Logic State ---
     const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
@@ -2832,6 +2875,34 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     }, [refreshNavyCatalog]);
 
+    const refreshNanoGptChatModels = useCallback(async () => {
+        setNanoGptChatModelsLoading(true);
+        setNanoGptChatModelsError(null);
+        try {
+            const key = apiKeys.nanogpt.trim();
+            const response = await fetch("/api/nanogpt/chat-models", {
+                headers: key ? { "x-user-api-key": key } : undefined,
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(
+                    payload?.error ?? "Failed to fetch NanoGPT chat models."
+                );
+            }
+            const models = sanitizeModelOptions(payload?.models ?? payload?.data ?? []);
+            if (!models.length) {
+                throw new Error("NanoGPT returned no chat models.");
+            }
+            setNanoGptChatModels(mergeModelOptions(NANOGPT_LLM_MODELS, models));
+        } catch (error) {
+            setNanoGptChatModelsError(
+                error instanceof Error ? error.message : "Unable to refresh NanoGPT chat models."
+            );
+        } finally {
+            setNanoGptChatModelsLoading(false);
+        }
+    }, [apiKeys.nanogpt]);
+
     // --- Effects (Persistence) ---
 
     // Hydration
@@ -2904,6 +2975,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (storedNavyChatModel) setNavyChatModel(storedNavyChatModel);
         const storedNavyToolImageModel = readLocalStorage<string>(STORAGE_KEYS.navyToolImageModel, "");
         if (storedNavyToolImageModel) setNavyToolImageModel(storedNavyToolImageModel);
+        const storedNanoGptChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.nanoGptChatModels, []);
+        if (storedNanoGptChatModels.length) {
+            setNanoGptChatModels(
+                mergeModelOptions(
+                    NANOGPT_LLM_MODELS,
+                    sanitizeModelOptions(storedNanoGptChatModels)
+                )
+            );
+        }
+        const storedNanoGptChatModel = readLocalStorage<string>(STORAGE_KEYS.nanoGptChatModel, "");
+        if (storedNanoGptChatModel) setNanoGptChatModel(storedNanoGptChatModel);
+        const storedNanoGptToolImageModel = readLocalStorage<string>(STORAGE_KEYS.nanoGptToolImageModel, "");
+        if (storedNanoGptToolImageModel) {
+            setNanoGptToolImageModel(storedNanoGptToolImageModel);
+        }
 
         if (isRecord(storedSettings)) {
             setModelParameterValuesByModel(
@@ -3197,6 +3283,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [hydrated, provider, mode, refreshNanoGptCatalog]);
 
     useEffect(() => {
+        if (!hydrated || chatProvider !== "nanogpt") return;
+        void refreshNanoGptChatModels();
+    }, [chatProvider, hydrated, refreshNanoGptChatModels]);
+
+    useEffect(() => {
         if (!hydrated) return;
         const selectionKey = `${provider}:${mode}`;
         const selections = sanitizeModelSelections(
@@ -3407,6 +3498,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (!hydrated) return;
+        writeLocalStorage(
+            STORAGE_KEYS.nanoGptChatModels,
+            JSON.stringify(nanoGptChatModels)
+        );
+    }, [nanoGptChatModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated || !nanoGptChatModel) return;
+        writeLocalStorage(
+            STORAGE_KEYS.nanoGptChatModel,
+            JSON.stringify(nanoGptChatModel)
+        );
+    }, [nanoGptChatModel, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated || !nanoGptToolImageModel) return;
+        writeLocalStorage(
+            STORAGE_KEYS.nanoGptToolImageModel,
+            JSON.stringify(nanoGptToolImageModel)
+        );
+    }, [nanoGptToolImageModel, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
         if (provider === "navy" && apiKeys.navy.trim()) {
             void refreshNavyUsage();
             const interval = window.setInterval(() => void refreshNavyUsage(), 60000);
@@ -3560,6 +3675,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         navyToolImageModel, setNavyToolImageModel,
         navyChatModelsLoading,
         navyChatModelsError,
+        nanoGptChatModels,
+        nanoGptChatModel, setNanoGptChatModel,
+        nanoGptToolImageModel, setNanoGptToolImageModel,
+        nanoGptChatModelsLoading,
+        nanoGptChatModelsError,
         openRouterImageModels,
         navyImageModels,
         navyVideoModels,
@@ -3596,6 +3716,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         supportsVideo, supportsTts,
         clearKey, clearGallery,
         refreshModels, refreshChutesChatModels, refreshNavyChatModels,
+        refreshNanoGptChatModels,
         saveChatImages,
         handleGenerate,
         generateImage: generateImages,
