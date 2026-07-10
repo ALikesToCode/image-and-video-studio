@@ -96,6 +96,101 @@ test("Navy capability grouping preserves new catalog metadata and buckets", () =
   assert.equal(grouped.chat[1]?.tokenMultiplier, 3);
 });
 
+test("Navy output modalities take priority over a shared media endpoint", () => {
+  const grouped = groupNavyModelsByCapability({
+    data: [
+      {
+        id: "gemini-omni",
+        endpoint: "/v1/images/generations",
+        input_modalities: ["text", "image", "video"],
+        output_modalities: ["video"],
+        metadata_status: "known",
+      },
+    ],
+  });
+
+  assert.deepEqual(grouped.image, []);
+  assert.deepEqual(
+    grouped.video.map((model) => model.id),
+    ["gemini-omni"]
+  );
+  assert.equal(grouped.video[0]?.supports?.video, true);
+  assert.equal(grouped.video[0]?.supports?.asyncJobs, true);
+});
+
+test("Navy media capabilities use conservative per-model reference limits", () => {
+  const grouped = groupNavyModelsByCapability({
+    data: [
+      {
+        id: "flux",
+        endpoint: "/v1/images/generations",
+        output_modalities: ["image"],
+        metadata_status: "known",
+      },
+      {
+        id: "flux.2-klein",
+        endpoint: "/v1/images/generations",
+        output_modalities: ["image"],
+        metadata_status: "known",
+      },
+      {
+        id: "grok-imagine",
+        endpoint: "/v1/images/generations",
+        output_modalities: ["image"],
+        metadata_status: "known",
+      },
+      {
+        id: "z-image",
+        endpoint: "/v1/images/generations",
+        output_modalities: ["image"],
+        metadata_status: "known",
+      },
+      {
+        id: "veo-3.1",
+        endpoint: "/v1/images/generations",
+        output_modalities: ["video"],
+        metadata_status: "known",
+      },
+      {
+        id: "unknown-image-model",
+        endpoint: "/v1/images/generations",
+        output_modalities: ["image"],
+        metadata_status: "unknown",
+      },
+      {
+        id: "unknown-video-model",
+        endpoint: "/v1/videos/generations",
+        output_modalities: ["video"],
+        metadata_status: "unknown",
+      },
+    ],
+  });
+  const media = new Map(
+    [...grouped.image, ...grouped.video].map((model) => [model.id, model])
+  );
+
+  assert.equal(media.get("flux")?.maxReferenceImages, 3);
+  assert.equal(media.get("flux.2-klein")?.maxReferenceImages, 3);
+  assert.equal(media.get("grok-imagine")?.maxReferenceImages, 1);
+  assert.equal(media.get("z-image")?.maxReferenceImages, 0);
+  assert.equal(media.get("veo-3.1")?.maxReferenceImages, 3);
+  assert.equal(media.get("flux")?.supports?.referenceImages, true);
+  assert.equal(media.get("grok-imagine")?.supports?.sourceImage, true);
+  assert.equal(media.get("z-image")?.supports?.referenceImages, false);
+  assert.equal(media.get("z-image")?.supports?.sourceImage, false);
+  assert.equal(media.get("unknown-image-model")?.maxReferenceImages, undefined);
+  assert.equal(
+    media.get("unknown-image-model")?.supports?.referenceImages,
+    undefined
+  );
+  assert.equal(media.get("unknown-image-model")?.supports?.sourceImage, undefined);
+  assert.equal(media.get("unknown-video-model")?.maxReferenceImages, undefined);
+  assert.equal(
+    media.get("unknown-video-model")?.supports?.referenceImages,
+    undefined
+  );
+});
+
 test("Static Navy image fallbacks omit models missing from the current catalog", () => {
   assert.equal(NAVY_IMAGE_MODELS.some((model) => model.id === "image-1"), false);
   assert.equal(NAVY_IMAGE_MODELS.some((model) => model.id === "dall-e-3"), false);
@@ -325,6 +420,41 @@ test("Navy GPT image payload omits unsupported style parameter", () => {
 
   assert.equal(payload.model, "gpt-image-2");
   assert.equal(payload.quality, "high");
+  assert.equal("style" in payload, false);
+});
+
+test("Navy GPT Image payload maps supported aspect ratios to pixel sizes", () => {
+  const ratios = new Map([
+    ["1:1", "1024x1024"],
+    ["3:2", "1536x1024"],
+    ["2:3", "1024x1536"],
+  ]);
+
+  for (const [aspectRatio, expectedSize] of ratios) {
+    const payload = buildNavyImageGenerationPayload({
+      model: "gpt-image-1.5",
+      prompt: "A naval command room at dusk",
+      aspectRatio,
+    });
+
+    assert.equal(payload.size, expectedSize);
+    assert.equal("aspect_ratio" in payload, false);
+    assert.equal("quality" in payload, false);
+  }
+});
+
+test("Navy GPT Image payload omits unsupported ratios and preserves model defaults", () => {
+  const payload = buildNavyImageGenerationPayload({
+    model: "gpt-image-2",
+    prompt: "A naval command room at dusk",
+    aspectRatio: "16:9",
+    quality: "auto",
+    style: "vivid",
+  });
+
+  assert.equal("size" in payload, false);
+  assert.equal("aspect_ratio" in payload, false);
+  assert.equal("quality" in payload, false);
   assert.equal("style" in payload, false);
 });
 
@@ -1033,8 +1163,8 @@ test("Navy model catalog is normalized into image, video, and TTS groups", () =>
   });
   assert.equal(grouped.image[0]?.metadataSource, null);
   assert.equal(grouped.image[0]?.metadataStatus, "unknown");
-  assert.equal(grouped.image[0]?.maxReferenceImages, 5);
-  assert.equal(grouped.image[0]?.supports?.referenceImages, true);
+  assert.equal(grouped.image[0]?.maxReferenceImages, undefined);
+  assert.equal(grouped.image[0]?.supports?.referenceImages, undefined);
   assert.deepEqual(
     grouped.video.map((model) => model.id),
     ["veo-3.1"]

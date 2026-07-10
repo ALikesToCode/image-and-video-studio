@@ -316,6 +316,12 @@ const isOpenAiImageModel = (model: string) =>
 const isOpenAiGptImageModel = (model: string) =>
   /\bgpt-image-/i.test(model.trim());
 
+const NAVY_GPT_IMAGE_ASPECT_RATIO_SIZES: Record<string, string> = {
+  "1:1": "1024x1024",
+  "3:2": "1536x1024",
+  "2:3": "1024x1536",
+};
+
 const isOpenAiDallEImageModel = (model: string) =>
   /\bdall-e-/i.test(model.trim());
 
@@ -1100,6 +1106,88 @@ const NAVY_TTS_MODEL_PATTERN =
   /(^|[/:._-])(tts|eleven|voice)([/:._-]|$)|gemini-.*tts/i;
 const NAVY_TRANSCRIPTION_MODEL_PATTERN = /\b(whisper|transcribe|scribe)\b/i;
 
+type NavyMediaKind = "image" | "video";
+
+type NavyMediaCapabilityProfile = {
+  maxReferenceImages: number;
+  supports: NonNullable<ModelOption["supports"]>;
+};
+
+const NAVY_MEDIA_CAPABILITY_PROFILES: Record<
+  string,
+  NavyMediaCapabilityProfile
+> = {
+  flux: {
+    maxReferenceImages: 3,
+    supports: {
+      imageEdit: true,
+      sourceImage: true,
+      referenceImages: true,
+      aspectRatio: true,
+    },
+  },
+  "flux.2-klein": {
+    maxReferenceImages: 3,
+    supports: {
+      imageEdit: true,
+      sourceImage: true,
+      referenceImages: true,
+      aspectRatio: true,
+    },
+  },
+  "grok-imagine": {
+    maxReferenceImages: 1,
+    supports: {
+      imageEdit: true,
+      sourceImage: true,
+      referenceImages: true,
+      aspectRatio: true,
+    },
+  },
+  "z-image": {
+    maxReferenceImages: 0,
+    supports: {
+      sourceImage: false,
+      referenceImages: false,
+      aspectRatio: true,
+    },
+  },
+  "veo-3.1": {
+    maxReferenceImages: 3,
+    supports: {
+      sourceImage: true,
+      referenceImages: true,
+      aspectRatio: true,
+      negativePrompt: true,
+      seed: true,
+    },
+  },
+};
+
+const withNavyMediaCapabilities = (
+  model: ModelOption,
+  kind: NavyMediaKind,
+): ModelOption => {
+  const metadataIsKnown = model.metadataStatus?.toLowerCase() === "known";
+  const profile = metadataIsKnown
+    ? NAVY_MEDIA_CAPABILITY_PROFILES[model.id.toLowerCase()]
+    : undefined;
+
+  return {
+    ...model,
+    supports: {
+      ...(model.supports ?? {}),
+      ...(kind === "video"
+        ? { video: true, asyncJobs: true }
+        : { imageGeneration: true }),
+      ...(profile?.supports ?? {}),
+    },
+    ...(profile
+      ? { maxReferenceImages: profile.maxReferenceImages }
+      : {}),
+  };
+};
+
 const toModelOption = (value: unknown): ModelOption | null => {
   const record = asRecord(value);
   if (!record) return null;
@@ -1262,6 +1350,7 @@ export const groupNavyModelsByCapability = (
 
       const endpoint = normalizeEndpoint(record.endpoint);
       const id = model.id.toLowerCase();
+      const outputModalities = normalizeModalities(model.outputModalities);
 
       if (
         endpoint.includes("/v1/chat/completions") ||
@@ -1288,59 +1377,27 @@ export const groupNavyModelsByCapability = (
         return groups;
       }
 
-      if (
+      const usesVideoEndpoint =
         endpoint.includes("/v1/videos/generations") ||
-        endpoint.includes("/videos/generations")
-      ) {
-        pushUniqueModel(groups.video, {
-          ...model,
-          supports: {
-            ...(model.supports ?? {}),
-            video: true,
-            asyncJobs: true,
-            sourceImage: true,
-            referenceImages: true,
-            aspectRatio: true,
-            negativePrompt: true,
-          },
-          maxReferenceImages: 5,
-        });
-        return groups;
-      }
-
-      if (
+        endpoint.includes("/videos/generations");
+      const usesImageEndpoint =
         endpoint.includes("/v1/images/generations") ||
-        endpoint.includes("/images/generations") ||
-        !endpoint
-      ) {
-        if (NAVY_VIDEO_MODEL_PATTERN.test(id)) {
-          pushUniqueModel(groups.video, {
-            ...model,
-            supports: {
-              ...(model.supports ?? {}),
-              video: true,
-              asyncJobs: true,
-              sourceImage: true,
-              referenceImages: true,
-              aspectRatio: true,
-              negativePrompt: true,
-            },
-            maxReferenceImages: 5,
-          });
-        } else if (!NAVY_TRANSCRIPTION_MODEL_PATTERN.test(id)) {
-          pushUniqueModel(groups.image, {
-            ...model,
-            supports: {
-              ...(model.supports ?? {}),
-              imageGeneration: true,
-              sourceImage: true,
-              referenceImages: true,
-              aspectRatio: true,
-              size: true,
-              seed: true,
-            },
-            maxReferenceImages: 5,
-          });
+        endpoint.includes("/images/generations");
+
+      if (usesVideoEndpoint || usesImageEndpoint || !endpoint) {
+        const mediaKind: NavyMediaKind = outputModalities.includes("video")
+          ? "video"
+          : outputModalities.includes("image")
+            ? "image"
+            : usesVideoEndpoint || NAVY_VIDEO_MODEL_PATTERN.test(id)
+              ? "video"
+              : "image";
+
+        if (!NAVY_TRANSCRIPTION_MODEL_PATTERN.test(id)) {
+          pushUniqueModel(
+            groups[mediaKind],
+            withNavyMediaCapabilities(model, mediaKind),
+          );
         }
       }
 
@@ -1552,28 +1609,40 @@ export const buildNavyImageGenerationPayload = ({
         `Avoid these visual issues: ${preparedPrompt.negativePrompt}.`,
       )
     : preparedPrompt.prompt;
-  const shouldPreferAspectRatio =
-    typeof aspectRatio === "string" &&
-    aspectRatio.trim() !== "" &&
-    aspectRatio !== "1:1";
-  const isLikelyVideoModel = NAVY_VIDEO_MODEL_PATTERN.test(model);
   const normalizedImageUrl = normalizeNavyImageUrlPayload(imageUrl);
   const normalizedSize =
     typeof size === "string" ? size.trim().toLowerCase() : "";
+  const explicitSize = isAutoImageOption(normalizedSize) ? "" : normalizedSize;
+  const normalizedAspectRatio =
+    typeof aspectRatio === "string" ? aspectRatio.trim().toLowerCase() : "";
+  const gptImageModel = isOpenAiGptImageModel(model);
+  const mappedGptImageSize =
+    gptImageModel && !explicitSize
+      ? NAVY_GPT_IMAGE_ASPECT_RATIO_SIZES[normalizedAspectRatio]
+      : undefined;
+  const payloadSize = explicitSize || mappedGptImageSize;
+  const normalizedQuality =
+    typeof quality === "string" ? quality.trim().toLowerCase() : "";
+  const shouldPreferAspectRatio =
+    !gptImageModel &&
+    !isAutoImageOption(normalizedAspectRatio) &&
+    normalizedAspectRatio !== "1:1";
 
   return sanitizeImageRequestBodyForModel(model, {
     model,
     prompt: promptWithNegativeGuidance,
-    ...(normalizedSize ? { size: normalizedSize } : {}),
-    ...(quality || !isLikelyVideoModel ? { quality: quality ?? "medium" } : {}),
+    ...(payloadSize ? { size: payloadSize } : {}),
+    ...(!isAutoImageOption(normalizedQuality)
+      ? { quality: normalizedQuality }
+      : {}),
     ...(style ? { style } : {}),
     ...(normalizedImageUrl ? { image_url: normalizedImageUrl } : {}),
     ...(typeof seed === "number" ? { seed } : {}),
     ...(typeof seconds === "number" ? { seconds } : {}),
     ...(typeof sync === "boolean" ? { sync } : {}),
     ...(responseFormat ? { response_format: responseFormat } : {}),
-    ...(!normalizedSize && shouldPreferAspectRatio
-      ? { aspect_ratio: aspectRatio }
+    ...(!payloadSize && shouldPreferAspectRatio
+      ? { aspect_ratio: normalizedAspectRatio }
       : {}),
   });
 };
