@@ -153,17 +153,17 @@ const AUDIO_TOOL_SCHEMA = {
 const TOOL_DEFINITIONS = {
   generate_image: {
     description:
-      "Generate or edit an image with the active ordered image pipeline. Omit model when uncertain so the configured pipeline order is used.",
+      "Use only when the user wants an image created or edited now. This is not for writing or improving an image prompt, explaining image generation, comparing models, or when an image is only source material or context. Use the active ordered image pipeline and omit model when uncertain so the configured pipeline order is used.",
     schema: IMAGE_TOOL_SCHEMA,
   },
   generate_video: {
     description:
-      "Generate a short video. Include a source image for image-to-video models and omit it for text-to-video models.",
+      "Use only when the user wants a video created or edited now, not when video is only source material or context. Include a source image for image-to-video models and omit it for text-to-video models.",
     schema: VIDEO_TOOL_SCHEMA,
   },
   generate_audio: {
     description:
-      "Generate speech audio with the configured voice model. Use input for OpenAI-compatible TTS and text for Chutes voice models.",
+      "Use only when the user wants speech audio created now, not when audio is only source material or context. Use the configured voice model, input for OpenAI-compatible TTS, and text for Chutes voice models.",
     schema: AUDIO_TOOL_SCHEMA,
   },
 } as const;

@@ -83,7 +83,7 @@ import {
   hasModelMetadata,
   isFetchedOnlyModel,
 } from "@/lib/model-options";
-import { CHUTES_IMAGE_GUIDE_PROMPT } from "@/lib/chutes-prompts";
+import { buildChatGenerationSystemPrompt } from "@/lib/chat-generation-prompt";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import ReactMarkdown from "react-markdown";
@@ -125,7 +125,6 @@ import {
 } from "@/lib/chat-tooling";
 import {
   buildSaferImagePromptForModel,
-  buildProviderPolicyHintForImageModels,
   buildImagePolicyRecoveryPrompt,
   isLikelyImagePolicyError,
   isFluxModel,
@@ -215,35 +214,6 @@ type ChutesChatProps = {
     provider: Provider;
   }) => Promise<void> | void;
 };
-
-const NAVY_IMAGE_GUIDE_PROMPT = `# Prompt Guide for NavyAI Image Generation
-
-Use concise, vivid descriptions with clear subjects, styles, and lighting. Ask for missing details.
-Summarize the final prompt before generating, and prefer sizes like 1024x1024 unless specified.
-When the user provides reference images, pass them through image_url as one URL/data URI or an array of up to 5 references.
-Generate one image per tool call; the Navy image endpoint does not support a multi-image count parameter.`;
-
-const NANOGPT_IMAGE_GUIDE_PROMPT = `# Prompt Guide for NanoGPT Image Generation
-
-Use the selected live model's catalog metadata as the source of truth. Write one production-ready visual prompt with a clear subject, composition, lighting, palette, materials, camera/framing, and constraints. Pass only resolution, quality, output format, seed, and reference-image fields advertised by that model.`;
-
-const FLUX_CROSS_MODAL_GUIDE = `# Flux Cross-Modal Prompt Protocol
-
-When generating image prompts for Flux models, optimize for downstream video and audio:
-
-1. Keep one primary subject with stable identity details (face, outfit, props).
-2. Use a cinematic frame with clear foreground, midground, and background.
-3. Include an action-ready pose and a motion-friendly scene (good for later video animation).
-4. Specify camera + lens + composition (shot type, angle, depth of field).
-5. Specify lighting + color palette + atmosphere.
-6. Include emotional tone so voice/audio style can match.
-7. Add quality constraints: sharp focus, clean anatomy, clear silhouette, no text/logo/watermark.
-
-Output format before tool call:
-- Final Flux prompt
-- Optional negative prompt
-- One-line video readiness note
-- One-line audio mood note`;
 
 const getChatStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_history`;
@@ -1588,87 +1558,47 @@ export function ChutesChat({
     return enabled;
   }, [audioModels.length, chatModelToolCapability, imageModels.length, toolSettings, videoModels.length]);
   const systemPrompt = useMemo(() => {
-    const modelList = imageModels.map((item) => item.id).join(", ");
-    const videoModelList = videoModels.map((item) => item.id).join(", ");
-    const audioModelList = audioModels.map((item) => item.id).join(", ");
-    const activeImageModelSummary = activeToolImageModels.join(", ");
-    const fluxModelActive = activeToolImageModels.some((item) => /flux/i.test(item));
-    const providerPolicyHint = buildProviderPolicyHintForImageModels(
-      activeToolImageModels
+    const orderedImageModels = activeToolImageModels
+      .map((id) => imageModels.find((entry) => entry.id === id))
+      .filter((entry): entry is ModelOption => Boolean(entry));
+    const selectedImageModel =
+      imageModels.find((entry) => entry.id === toolImageModel) ??
+      orderedImageModels[0];
+    const imageFallbackModels = orderedImageModels.filter(
+      (entry) => entry !== selectedImageModel
     );
-    const promptGuide =
-      provider === "navy"
-        ? NAVY_IMAGE_GUIDE_PROMPT
-        : provider === "nanogpt"
-          ? NANOGPT_IMAGE_GUIDE_PROMPT
-          : CHUTES_IMAGE_GUIDE_PROMPT;
-    const enabledToolLines: string[] = [];
-    if (toolSettings.image && imageModels.length) {
-      enabledToolLines.push(
-        `- generate_image (default model: ${toolImageModel}; preferred active image order: ${activeImageModelSummary || toolImageModel}; available image models: ${modelList})`
-      );
-    }
-    if (toolSettings.video && videoModels.length) {
-      enabledToolLines.push(
-        `- generate_video (default model: ${toolVideoModel}; available video models: ${videoModelList})`
-      );
-    }
-    if (toolSettings.audio && audioModels.length) {
-      enabledToolLines.push(
-        `- generate_audio (default model: ${toolAudioModel}; available audio models: ${audioModelList})`
-      );
-    }
-    const toolInstruction = enabledToolLines.length
-      ? `You can call these tools when appropriate:\n${enabledToolLines.join("\n")}`
-      : "No tools are enabled right now. Help the user with planning/prompts only.";
+    const selectedVideoModel = videoModelById.get(toolVideoModel);
+    const selectedAudioModel = audioModels.find(
+      (entry) => entry.id === toolAudioModel
+    );
 
-    const providerHint =
-      provider === "chutes"
-        ? "For Chutes video generation, always ensure an image input is provided before calling generate_video."
-        : provider === "nanogpt"
-          ? "For NanoGPT video generation, follow the selected live model's input and scalar-parameter capabilities exactly."
-          : "For Navy video generation, use generate_video for short clips and keep durations reasonable.";
-
-    const crossModalHint =
-      "When image generation is requested, optimize prompts so the output can also be used as a strong keyframe for video and as artwork aligned with narration/voice mood.";
-
-    const fluxHint = fluxModelActive
-      ? `Flux mode is active (active image models: ${activeImageModelSummary || toolImageModel}). Strictly follow the Flux Cross-Modal Prompt Protocol below whenever a Flux-family image model is active. The tool layer will also convert Flux-family image requests into an "Artwork direction" prompt with "Desired qualities"; do not send raw negative-prompt style text for Flux.`
-      : "If the user asks for Flux or selects a Flux model, switch into Flux Cross-Modal Prompt Protocol.";
-    const policyScopeHint = providerPolicyHint
-      ? `${providerPolicyHint}
-Only apply those provider-policy guardrails when the target image model is in that family. Leave unrelated image models unchanged.`
-      : "";
-    const imagePromptInstruction =
-      "Before calling generate_image, send the tool an optimized final visual prompt, not the user's raw request text. Always include a prompt string. Prefer the active image model order from left to right. Include a model only when one available model clearly fits the request; that model will be tried first before ordered fallback. Do not include the default model just to restate the default; omit model when uncertain so the preferred order starts from the top. Try the ordered pipeline rather than giving up after one model. For OpenAI GPT Image models, write prompts in a production guide shape: background/scene, subject, key details, composition, lighting/mood, and constraints; include the intended output format; describe materials, textures, framing, viewpoint, placement, pose, gaze, and object interactions; render exact in-image text only when explicitly requested; preserve explicit edit/reference invariants; and do not send a style parameter, because style direction belongs in the prompt text. For Flux-family models, convert the request into Flux-ready artwork direction with positive visual details. For stricter OpenAI/Gemini-family image models, phrase adult subjects as clearly adult, tasteful, non-explicit, consensual editorial artwork so the first provider request is policy-compliant instead of relying on retries.";
-
-    const defaultPrompt = `${promptGuide}
-${FLUX_CROSS_MODAL_GUIDE}
-
-You are a generation assistant. Help craft prompts, ask for missing details when needed, and summarize the final prompt before calling a generation tool.
-${crossModalHint}
-${fluxHint}
-${policyScopeHint}
-${imagePromptInstruction}
-If the user explicitly asks to generate now, you must call the relevant tool in the same turn (do not stop at prompt drafting only).
-${providerHint}
-${toolInstruction}`;
-    const customPrompt = customSystemPrompt.trim();
-    if (!customPrompt) return defaultPrompt;
-    return `${customPrompt}
-
-${defaultPrompt}`;
+    return buildChatGenerationSystemPrompt({
+      customPrompt: customSystemPrompt,
+      imageModel:
+        toolSettings.image && imageModels.length
+          ? selectedImageModel
+          : undefined,
+      imageFallbackModels,
+      videoModel:
+        toolSettings.video && videoModels.length
+          ? selectedVideoModel
+          : undefined,
+      audioModel:
+        toolSettings.audio && audioModels.length
+          ? selectedAudioModel
+          : undefined,
+    });
   }, [
     activeToolImageModels,
-    toolImageModel,
-    toolVideoModel,
-    toolAudioModel,
-    imageModels,
-    videoModels,
     audioModels,
-    toolSettings,
-    provider,
     customSystemPrompt,
+    imageModels,
+    toolAudioModel,
+    toolImageModel,
+    toolSettings,
+    toolVideoModel,
+    videoModelById,
+    videoModels.length,
   ]);
 
   const callChatStreaming = async (

@@ -146,6 +146,43 @@ test("AI SDK tools are server-owned and restricted to the supported allowlist", 
   assert.equal("execute" in tools.generate_audio, false);
 });
 
+test("AI SDK media tools describe execution intent, not prompt-writing tasks", () => {
+  const tools = buildAIChatTools([
+    "generate_image",
+    "generate_video",
+    "generate_audio",
+  ]);
+  const imageDescription =
+    typeof tools.generate_image.description === "string"
+      ? tools.generate_image.description
+      : "";
+  const videoDescription =
+    typeof tools.generate_video.description === "string"
+      ? tools.generate_video.description
+      : "";
+  const audioDescription =
+    typeof tools.generate_audio.description === "string"
+      ? tools.generate_audio.description
+      : "";
+
+  assert.match(
+    imageDescription,
+    /only when the user wants an image created or edited now/i
+  );
+  assert.match(
+    imageDescription,
+    /not for writing or improving an image prompt/i
+  );
+  assert.match(
+    videoDescription,
+    /not when video is only source material or context/i
+  );
+  assert.match(
+    audioDescription,
+    /not when audio is only source material or context/i
+  );
+});
+
 test("AI SDK stream state exposes every completed parallel tool call", () => {
   const state = extractAIChatStreamState({
     id: "assistant-1",
