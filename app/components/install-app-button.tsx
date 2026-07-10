@@ -36,15 +36,17 @@ const isStandaloneDisplay = () => {
 export function InstallAppButton({ className }: { className?: string }) {
   const [installPrompt, setInstallPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(() => isStandaloneDisplay());
+  const [installed, setInstalled] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [guidance, setGuidance] = useState<InstallGuidance>(() =>
-    typeof window === "undefined"
-      ? getInstallGuidance("")
-      : getInstallGuidance(window.navigator.userAgent)
+    getInstallGuidance("")
   );
 
   useEffect(() => {
+    const hydrationHandle = window.setTimeout(() => {
+      setInstalled(isStandaloneDisplay());
+      setGuidance(getInstallGuidance(window.navigator.userAgent));
+    }, 0);
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
       const nextPrompt = event as BeforeInstallPromptEvent;
@@ -61,6 +63,7 @@ export function InstallAppButton({ className }: { className?: string }) {
     window.addEventListener("appinstalled", handleInstalled);
 
     return () => {
+      window.clearTimeout(hydrationHandle);
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       window.removeEventListener("appinstalled", handleInstalled);
     };

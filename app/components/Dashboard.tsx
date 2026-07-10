@@ -37,18 +37,6 @@ const isTab = (value: string | null): value is Tab =>
     value === "audio" ||
     value === "gallery";
 
-const readInitialTab = (): Tab => {
-    if (typeof window === "undefined") return "chat";
-    const params = new URLSearchParams(window.location.search);
-    const view = params.get("view");
-    return isTab(view) ? view : "chat";
-};
-
-const readInitialEmbedMode = () => {
-    if (typeof window === "undefined") return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get("embed") === "1" || params.get("embed") === "true";
-};
 const ChatView = dynamic(() => import("./views/ChatView").then((mod) => mod.ChatView), {
     loading: () => <ViewLoading label="Loading chat" />,
 });
@@ -80,8 +68,8 @@ export function Dashboard() {
         setMode,
         setPrompt,
     } = studio;
-    const [activeTab, setActiveTab] = useState<Tab>(readInitialTab);
-    const [embedMode, setEmbedMode] = useState(readInitialEmbedMode);
+    const [activeTab, setActiveTab] = useState<Tab>("chat");
+    const [embedMode, setEmbedMode] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [pendingJanitorAutoGeneratePrompt, setPendingJanitorAutoGeneratePrompt] =
         useState<string | null>(null);
@@ -117,16 +105,20 @@ export function Dashboard() {
     }, [hydrated, setMode, setPrompt]);
 
     useEffect(() => {
-        if (typeof window === "undefined") return;
-        const handle = window.setTimeout(() => {
+        const syncLocationState = () => {
             const params = new URLSearchParams(window.location.search);
             const view = params.get("view");
             if (isTab(view)) {
                 setActiveTab(view);
             }
             setEmbedMode(params.get("embed") === "1" || params.get("embed") === "true");
-        }, 0);
-        return () => window.clearTimeout(handle);
+        };
+        const handle = window.setTimeout(syncLocationState, 0);
+        window.addEventListener("popstate", syncLocationState);
+        return () => {
+            window.clearTimeout(handle);
+            window.removeEventListener("popstate", syncLocationState);
+        };
     }, []);
 
     useEffect(() => {
