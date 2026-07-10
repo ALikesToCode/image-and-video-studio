@@ -100,17 +100,19 @@ import {
   type ChatImageAsset,
   type ChatMediaPreview,
   type ChatMediaAsset,
+  type ChatTurnIntent,
   buildChatMediaPreview,
   buildAssistantToolContextContent,
   buildCancelledToolResults,
   buildNanoGptImageToolRequest,
   buildNanoGptVideoToolRequest,
   createSyntheticFallbackToolCall,
-  detectForcedToolCall,
   isDeepSeekV4Model,
   isChatVideoModelSupported,
   normalizeImageToolModelRequest,
   repairImageToolArguments,
+  resolveChatTurnIntent,
+  resolveChatTurnToolPolicy,
   resolveNavyVideoStartResult,
   resolveToolArguments,
   resolveRequestedImageModels,
@@ -159,6 +161,7 @@ type ChatMessage = {
   images?: ChatImageAsset[];
   media?: ChatMediaAsset[];
   attachments?: ChatAttachmentAsset[];
+  turnIntent?: ChatTurnIntent;
   transient?: boolean;
 };
 
@@ -166,6 +169,7 @@ type QueuedChatTurn = {
   id: string;
   content: string;
   attachments: ChatAttachmentAsset[];
+  turnIntent: ChatTurnIntent;
 };
 
 type ChutesChatProps = {
@@ -261,6 +265,26 @@ const MAX_PENDING_ATTACHMENTS = 6;
 const CHAT_TEXT_ATTACHMENT_MAX_CHARS = 18_000;
 const CHAT_TEXT_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
 const CHAT_IMAGE_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+
+const CHAT_TURN_INTENTS: readonly ChatTurnIntent[] = [
+  "auto",
+  "chat",
+  "generate_image",
+  "generate_video",
+  "generate_audio",
+];
+
+const isChatTurnIntent = (value: unknown): value is ChatTurnIntent =>
+  typeof value === "string" &&
+  (CHAT_TURN_INTENTS as readonly string[]).includes(value);
+
+const chatTurnIntentLabel = (intent: ChatTurnIntent) => {
+  if (intent === "auto") return "Auto · Agent decides";
+  if (intent === "chat") return "Chat only";
+  if (intent === "generate_image") return "Create image";
+  if (intent === "generate_video") return "Create video";
+  return "Create audio";
+};
 
 const isAbortLikeError = (error: unknown, signal?: AbortSignal) =>
   signal?.aborted === true ||
@@ -772,6 +796,9 @@ export const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
       }
       if (typeof record.toolCallId === "string") message.toolCallId = record.toolCallId;
       if (typeof record.name === "string") message.name = record.name;
+      if (isChatTurnIntent(record.turnIntent)) {
+        message.turnIntent = record.turnIntent;
+      }
 
       if (Array.isArray(record.toolCalls)) {
         const toolCalls = record.toolCalls
@@ -1001,6 +1028,7 @@ export function ChutesChat({
 }: ChutesChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [turnIntent, setTurnIntent] = useState<ChatTurnIntent>("auto");
   const [customSystemPrompt, setCustomSystemPrompt] = useState("");
   const [systemPromptHydrated, setSystemPromptHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1088,13 +1116,18 @@ export function ChutesChat({
     setQueuedTurns(nextTurns);
     return nextTurns;
   }, []);
-  const enqueueChatTurn = useCallback((content: string, attachments: ChatAttachmentAsset[]) => {
+  const enqueueChatTurn = useCallback((
+    content: string,
+    attachments: ChatAttachmentAsset[],
+    queuedTurnIntent: ChatTurnIntent
+  ) => {
     updateQueuedTurns((prev) => [
       ...prev,
       {
         id: createId(),
         content,
         attachments,
+        turnIntent: queuedTurnIntent,
       },
     ]);
   }, [updateQueuedTurns]);
@@ -1534,6 +1567,18 @@ export function ChutesChat({
     element.scrollTop = element.scrollHeight;
   }, [messages, busy]);
 
+  const toolAvailability = useMemo(
+    () => ({
+      image: toolSettings.image && imageModels.length > 0,
+      video: toolSettings.video && videoModels.length > 0,
+      audio: toolSettings.audio && audioModels.length > 0,
+    }),
+    [audioModels.length, imageModels.length, toolSettings, videoModels.length]
+  );
+  const currentTurnDecision = useMemo(
+    () => resolveChatTurnIntent(input, toolAvailability, turnIntent),
+    [input, toolAvailability, turnIntent]
+  );
   const enabledChatTools = useMemo<AIChatToolName[]>(() => {
     if (chatModelToolCapability === false) return [];
     const enabled: AIChatToolName[] = [];
@@ -1634,10 +1679,18 @@ ${defaultPrompt}`;
       toolCalls?: ToolCall[];
     }) => void,
     toolChoiceOverride?: unknown,
-    options: { allowTools?: boolean; signal?: AbortSignal } = {}
+    options: {
+      allowTools?: boolean;
+      activeTools?: AIChatToolName[] | null;
+      signal?: AbortSignal;
+    } = {}
   ) => {
     const requestTools =
-      options.allowTools === false ? [] : enabledChatTools;
+      options.allowTools === false
+        ? []
+        : options.activeTools
+          ? enabledChatTools.filter((name) => options.activeTools?.includes(name))
+          : enabledChatTools;
     const reasoningPayload =
       (provider === "navy" || provider === "nanogpt") &&
       chatModelSupportsReasoning
@@ -3073,13 +3126,18 @@ ${defaultPrompt}`;
 
   const runChatTurn = async (
     trimmed: string,
-    attachments: ChatAttachmentAsset[] = []
+    attachments: ChatAttachmentAsset[] = [],
+    submittedTurnIntent: ChatTurnIntent = "auto"
   ) => {
     if (!apiKey.trim()) {
       setChatError(`Add your ${providerLabel} API key in settings.`);
       const nextQueuedTurn = takeNextQueuedTurn();
       if (nextQueuedTurn) {
-        void runChatTurn(nextQueuedTurn.content, nextQueuedTurn.attachments);
+        void runChatTurn(
+          nextQueuedTurn.content,
+          nextQueuedTurn.attachments,
+          nextQueuedTurn.turnIntent
+        );
       } else {
         setChatBusy(false);
       }
@@ -3089,7 +3147,11 @@ ${defaultPrompt}`;
       setChatError("Select a chat model.");
       const nextQueuedTurn = takeNextQueuedTurn();
       if (nextQueuedTurn) {
-        void runChatTurn(nextQueuedTurn.content, nextQueuedTurn.attachments);
+        void runChatTurn(
+          nextQueuedTurn.content,
+          nextQueuedTurn.attachments,
+          nextQueuedTurn.turnIntent
+        );
       } else {
         setChatBusy(false);
       }
@@ -3105,21 +3167,26 @@ ${defaultPrompt}`;
       role: "user",
       content: trimmed || "Please analyze the attached file(s).",
       attachments,
+      turnIntent: submittedTurnIntent,
     };
 
     // Optimistic update
     let currentMessages: ChatMessage[] = [...messagesRef.current, userMessage];
     commitMessages(currentMessages);
-    const forcedToolCall = detectForcedToolCall(trimmed, {
-      image: toolSettings.image && imageModels.length > 0,
-      video: toolSettings.video && videoModels.length > 0,
-      audio: toolSettings.audio && audioModels.length > 0,
-    });
+    const turnDecision = resolveChatTurnIntent(
+      trimmed,
+      toolAvailability,
+      submittedTurnIntent
+    );
+    const turnToolPolicy = resolveChatTurnToolPolicy(turnDecision);
+    const forcedToolCall = turnToolPolicy.forcedToolCall;
     let toolRounds = 0;
 
     try {
       for (let step = 0; step < MAX_CHAT_MODEL_STEPS; step += 1) {
-        const allowTools = toolRounds < MAX_CHAT_TOOL_ROUNDS;
+        const allowTools =
+          toolRounds < MAX_CHAT_TOOL_ROUNDS &&
+          turnToolPolicy.activeTools?.length !== 0;
         // Create placeholder assistant message
         const assistantId = createId();
         const assistantMessage: ChatMessage = {
@@ -3152,7 +3219,11 @@ ${defaultPrompt}`;
           step === 0 && forcedToolCall && allowTools
             ? { type: "function", function: { name: forcedToolCall } }
             : undefined,
-          { allowTools, signal: abortController.signal }
+          {
+            allowTools,
+            activeTools: turnToolPolicy.activeTools,
+            signal: abortController.signal,
+          }
         );
 
         // After stream is done, final update to ensure consistency (and clean up any missing fields)
@@ -3198,7 +3269,11 @@ ${defaultPrompt}`;
 
         // Check for tool calls
         if (!finalToolCalls.length) {
-          if (step === 0 && forcedToolCall) {
+          if (
+            step === 0 &&
+            forcedToolCall &&
+            turnToolPolicy.allowSyntheticFallback
+          ) {
             const fallbackToolCall = createSyntheticFallbackToolCall({
               requestedTool: forcedToolCall,
               provider,
@@ -3275,7 +3350,11 @@ ${defaultPrompt}`;
       }
       const nextQueuedTurn = takeNextQueuedTurn();
       if (nextQueuedTurn) {
-        void runChatTurn(nextQueuedTurn.content, nextQueuedTurn.attachments);
+        void runChatTurn(
+          nextQueuedTurn.content,
+          nextQueuedTurn.attachments,
+          nextQueuedTurn.turnIntent
+        );
       } else {
         setChatBusy(false);
       }
@@ -3301,15 +3380,16 @@ ${defaultPrompt}`;
     }
     setChatError(null);
     setInput("");
+    setTurnIntent("auto");
     setPendingAttachments([]);
     setAttachmentError(null);
 
     if (busyRef.current || queuedTurnsRef.current.length) {
-      enqueueChatTurn(trimmed, attachmentsToSend);
+      enqueueChatTurn(trimmed, attachmentsToSend, currentTurnDecision.intent);
       return;
     }
 
-    void runChatTurn(trimmed, attachmentsToSend);
+    void runChatTurn(trimmed, attachmentsToSend, currentTurnDecision.intent);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -4005,6 +4085,37 @@ ${defaultPrompt}`;
                     Ask me to generate images, videos, audio, refine prompts, or brainstorm ideas.
                   </p>
                 </div>
+                <div className="grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 justify-start"
+                    onClick={() => setTurnIntent("generate_image")}
+                    disabled={!toolAvailability.image}
+                  >
+                    <ImageIcon className="mr-2 h-4 w-4" />
+                    Create image
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 justify-start"
+                    onClick={() => setTurnIntent("generate_video")}
+                    disabled={!toolAvailability.video}
+                  >
+                    <Video className="mr-2 h-4 w-4" />
+                    Create video
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 justify-start"
+                    onClick={() => setTurnIntent("chat")}
+                  >
+                    <Bot className="mr-2 h-4 w-4" />
+                    Ask only
+                  </Button>
+                </div>
               </motion.div>
             ) : (
               messages.map((message) => {
@@ -4069,9 +4180,14 @@ ${defaultPrompt}`;
                       "w-full"
                     )}>
                       {/* Name/Role */}
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium px-1">
-                        {isUser ? "You" : isTool ? "System Helper" : "Agent"}
-                      </span>
+                      <div className="flex items-center gap-1.5 px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                        <span>{isUser ? "You" : isTool ? "System Helper" : "Agent"}</span>
+                        {isUser && message.turnIntent ? (
+                          <span className="rounded-full border border-border/60 bg-background/70 px-1.5 py-0.5 normal-case tracking-normal text-muted-foreground">
+                            {chatTurnIntentLabel(message.turnIntent)}
+                          </span>
+                        ) : null}
+                      </div>
 
                       {/* Content */}
                       <div className={cn(
@@ -4339,6 +4455,56 @@ ${defaultPrompt}`;
             </div>
           ) : null}
 
+          <div className="mb-2 flex flex-col gap-2 rounded-xl border border-border/60 bg-background/70 p-2.5 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="mt-0.5 rounded-lg bg-primary/10 p-1.5 text-primary">
+                {currentTurnDecision.intent === "generate_image" ? (
+                  <ImageIcon className="h-4 w-4" />
+                ) : currentTurnDecision.intent === "generate_video" ? (
+                  <Video className="h-4 w-4" />
+                ) : currentTurnDecision.intent === "generate_audio" ? (
+                  <AudioLines className="h-4 w-4" />
+                ) : (
+                  <Bot className="h-4 w-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-foreground">
+                  Next action · {chatTurnIntentLabel(currentTurnDecision.intent)}
+                </p>
+                <p aria-live="polite" className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                  {currentTurnDecision.reason}
+                </p>
+              </div>
+            </div>
+            <Select
+              value={turnIntent}
+              onValueChange={(value) => {
+                if (isChatTurnIntent(value)) setTurnIntent(value);
+              }}
+            >
+              <SelectTrigger
+                aria-label="Choose action for this chat turn"
+                className="h-11 w-full shrink-0 bg-background sm:w-[190px]"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto · Agent decides</SelectItem>
+                <SelectItem value="chat">Chat only</SelectItem>
+                <SelectItem value="generate_image" disabled={!toolAvailability.image}>
+                  Create image
+                </SelectItem>
+                <SelectItem value="generate_video" disabled={!toolAvailability.video}>
+                  Create video
+                </SelectItem>
+                <SelectItem value="generate_audio" disabled={!toolAvailability.audio}>
+                  Create audio
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="glass-card relative flex items-end gap-2 rounded-2xl p-1.5 shadow-lg ring-1 ring-white/20 sm:rounded-3xl">
             <Button
               type="button"
@@ -4436,16 +4602,16 @@ ${defaultPrompt}`;
                   className="max-w-[22rem] truncate rounded-full border border-border/60 bg-background/60 px-2 py-1"
                   title={turn.content}
                 >
-                  #{index + 1} {turn.content}
+                  #{index + 1} · {chatTurnIntentLabel(turn.turnIntent)} · {turn.content}
                 </span>
               ))}
             </div>
           ) : null}
           {chatError ? (
-            <p className="mt-2 text-xs text-destructive">{chatError}</p>
+            <p role="alert" className="mt-2 text-xs text-destructive">{chatError}</p>
           ) : null}
           {attachmentError ? (
-            <p className="mt-2 text-xs text-destructive">{attachmentError}</p>
+            <p role="alert" className="mt-2 text-xs text-destructive">{attachmentError}</p>
           ) : null}
         </div>
       </footer>

@@ -10,7 +10,6 @@ import {
   buildCancelledToolResults,
   buildAssistantToolContextContent,
   createSyntheticFallbackToolCall,
-  detectForcedToolCall,
   isDeepSeekV4Model,
   isChatVideoModelSupported,
   normalizeDeepSeekReasoningEffort,
@@ -19,6 +18,8 @@ import {
   repairImageToolArguments,
   resolveToolArguments,
   resolveRequestedImageModels,
+  resolveChatTurnIntent,
+  resolveChatTurnToolPolicy,
   resolveNavyVideoStartResult,
   runImageModelFallbackSequence,
   runImageModelPipelineParallel,
@@ -207,37 +208,112 @@ test("Chat media preview keeps generated image metadata for fullscreen viewer", 
   });
 });
 
-test("Forced tool detection recognizes explicit audio requests", () => {
-  assert.equal(
-    detectForcedToolCall("Turn this paragraph into speech and generate audio now.", {
-      image: true,
-      video: true,
-      audio: true,
-    }),
-    "generate_audio"
+const allMediaTools = {
+  image: true,
+  video: true,
+  audio: true,
+};
+
+test("Auto chat intent never locally forces media generation", () => {
+  const requests = [
+    "Create a prompt for an image of a rain-soaked neon street.",
+    "Generate an image prompt, but do not create the image.",
+    "Make this image prompt more cinematic.",
+    "Explain how to generate an image with Flux.",
+    "Compare image generation models and make a table.",
+    "Brainstorm three image ideas for a travel campaign.",
+    "Do not generate an image; just improve the prompt.",
+    "I am not asking you to create a picture.",
+    "Can you generate images?",
+    "Do you support video generation?",
+    "What image models can create logos?",
+    "Analyze this image now.",
+    "Render this React component.",
+    "Create a photo gallery component.",
+    "Create an image for my video.",
+    "Generate cover art for this audio.",
+    "Remove the background from this photo.",
+    "Use this reference and make a watercolor version.",
+    "Yes, do it.",
+    "Make another one.",
+  ];
+
+  for (const request of requests) {
+    assert.deepEqual(resolveChatTurnIntent(request, allMediaTools), {
+      intent: "auto",
+      source: "auto",
+      reason: "The agent can choose available generation tools from the full conversation.",
+    }, request);
+  }
+});
+
+test("Manual chat intent overrides auto generation", () => {
+  assert.deepEqual(
+    resolveChatTurnIntent(
+      "Generate an image of a glass greenhouse.",
+      allMediaTools,
+      "chat"
+    ),
+    {
+      intent: "chat",
+      source: "manual",
+      reason: "Generation tools are disabled for this turn.",
+    }
   );
 });
 
-test("Forced tool detection recognizes explicit video requests", () => {
-  assert.equal(
-    detectForcedToolCall("Animate this image into a short video clip now.", {
-      image: true,
-      video: true,
-      audio: true,
-    }),
-    "generate_video"
+test("Manual media intent is deterministic and checks availability", () => {
+  for (const intent of ["generate_image", "generate_video", "generate_audio"] as const) {
+    assert.equal(
+      resolveChatTurnIntent("Improve this prompt only.", allMediaTools, intent).intent,
+      intent
+    );
+  }
+  assert.deepEqual(
+    resolveChatTurnIntent(
+      "Create a video of the scene.",
+      { image: true, video: false, audio: true },
+      "generate_video"
+    ),
+    {
+      intent: "chat",
+      source: "manual",
+      reason: "Video generation is unavailable with the current tool settings.",
+    }
   );
 });
 
-test("Forced tool detection does not turn unrelated creation requests into images", () => {
-  assert.equal(
-    detectForcedToolCall("Create a short poem about summer rain.", {
-      image: true,
-      video: true,
-      audio: true,
-    }),
-    null
+test("Only a manual media mode can force and synthesize a tool call", () => {
+  const autoDecision = resolveChatTurnIntent(
+    "Generate an image of a lighthouse.",
+    allMediaTools
   );
+  const chatDecision = resolveChatTurnIntent(
+    "Generate an image of a lighthouse.",
+    allMediaTools,
+    "chat"
+  );
+  const imageDecision = resolveChatTurnIntent(
+    "Improve this prompt.",
+    allMediaTools,
+    "generate_image"
+  );
+
+  assert.deepEqual(resolveChatTurnToolPolicy(autoDecision), {
+    activeTools: null,
+    forcedToolCall: null,
+    allowSyntheticFallback: false,
+  });
+  assert.deepEqual(resolveChatTurnToolPolicy(chatDecision), {
+    activeTools: [],
+    forcedToolCall: null,
+    allowSyntheticFallback: false,
+  });
+  assert.deepEqual(resolveChatTurnToolPolicy(imageDecision), {
+    activeTools: ["generate_image"],
+    forcedToolCall: "generate_image",
+    allowSyntheticFallback: true,
+  });
 });
 
 test("Synthetic fallback builds an image tool call from the drafted prompt without pinning the default model", () => {

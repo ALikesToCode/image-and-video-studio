@@ -25,6 +25,22 @@ export type ForcedToolCall =
   | "generate_audio"
   | null;
 
+export type MediaToolCall = Exclude<ForcedToolCall, null>;
+
+export type ChatTurnIntent = "auto" | "chat" | MediaToolCall;
+
+export type ChatTurnIntentDecision = {
+  intent: ChatTurnIntent;
+  source: "auto" | "manual";
+  reason: string;
+};
+
+export type ChatTurnToolPolicy = {
+  activeTools: MediaToolCall[] | null;
+  forcedToolCall: MediaToolCall | null;
+  allowSyntheticFallback: boolean;
+};
+
 export type ChatImageAsset = {
   id: string;
   dataUrl: string;
@@ -968,33 +984,81 @@ export const sanitizeChatAttachmentAssets = (value: unknown): ChatAttachmentAsse
     .filter((entry): entry is ChatAttachmentAsset => !!entry);
 };
 
-export const detectForcedToolCall = (
-  text: string,
+const mediaIntentAvailability = (
+  intent: MediaToolCall,
   toolSettings: ToolAvailability
-): ForcedToolCall => {
-  const normalized = text.toLowerCase();
-  const explicitGenerate =
-    /\b(generate|create|make|render|produce|draw|animate|convert|turn|read|speak|narrate)\b/.test(
-      normalized
-    ) || /\bnow\b/.test(normalized);
-  if (!explicitGenerate) return null;
+) => {
+  if (intent === "generate_image") return toolSettings.image;
+  if (intent === "generate_video") return toolSettings.video;
+  return toolSettings.audio;
+};
 
-  const videoIntent =
-    /\b(video|clip|animate|animation|movie)\b/.test(normalized) ||
-    /\bturn .* into .*video\b/.test(normalized);
-  const audioIntent =
-    /\b(audio|voice|speech|tts|narration|read aloud|read this|speak this)\b/.test(
-      normalized
-    ) || /\bturn .* into .*speech\b/.test(normalized);
-  const imageIntent =
-    /\b(image|picture|photo|art|illustration|render)\b/.test(normalized) ||
-    /\bflux\b/.test(normalized) ||
-    /\bdall[- ]?e\b/.test(normalized);
+const mediaIntentLabel = (intent: MediaToolCall) => {
+  if (intent === "generate_image") return "Image";
+  if (intent === "generate_video") return "Video";
+  return "Audio";
+};
 
-  if (videoIntent && toolSettings.video) return "generate_video";
-  if (audioIntent && toolSettings.audio) return "generate_audio";
-  if (imageIntent && toolSettings.image) return "generate_image";
-  return null;
+export const resolveChatTurnIntent = (
+  _text: string,
+  toolSettings: ToolAvailability,
+  mode: ChatTurnIntent = "auto"
+): ChatTurnIntentDecision => {
+  if (mode === "auto") {
+    return {
+      intent: "auto",
+      source: "auto",
+      reason:
+        "The agent can choose available generation tools from the full conversation.",
+    };
+  }
+
+  if (mode === "chat") {
+    return {
+      intent: "chat",
+      source: "manual",
+      reason: "Generation tools are disabled for this turn.",
+    };
+  }
+
+  const label = mediaIntentLabel(mode);
+  if (!mediaIntentAvailability(mode, toolSettings)) {
+    return {
+      intent: "chat",
+      source: "manual",
+      reason: `${label} generation is unavailable with the current tool settings.`,
+    };
+  }
+
+  return {
+    intent: mode,
+    source: "manual",
+    reason: `${label} generation is selected for this turn.`,
+  };
+};
+
+export const resolveChatTurnToolPolicy = (
+  decision: ChatTurnIntentDecision
+): ChatTurnToolPolicy => {
+  if (decision.intent === "auto") {
+    return {
+      activeTools: null,
+      forcedToolCall: null,
+      allowSyntheticFallback: false,
+    };
+  }
+  if (decision.intent === "chat") {
+    return {
+      activeTools: [],
+      forcedToolCall: null,
+      allowSyntheticFallback: false,
+    };
+  }
+  return {
+    activeTools: [decision.intent],
+    forcedToolCall: decision.intent,
+    allowSyntheticFallback: true,
+  };
 };
 
 export const extractPromptForFallback = (
