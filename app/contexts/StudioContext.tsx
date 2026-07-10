@@ -895,7 +895,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [imageAspect, setImageAspect] = useState(AUTO_IMAGE_OPTION);
     const [imageSize, setImageSize] = useState(AUTO_IMAGE_OPTION);
     const [navyImageSize, setNavyImageSize] = useState(AUTO_IMAGE_OPTION);
-    const [navyImageQuality, setNavyImageQuality] = useState("medium");
+    const [navyImageQuality, setNavyImageQuality] = useState(AUTO_IMAGE_OPTION);
     const [chutesGuidanceScale, setChutesGuidanceScale] = useState("7.5");
     // Chutes video
     const [chutesVideoFps, setChutesVideoFps] = useState("16");
