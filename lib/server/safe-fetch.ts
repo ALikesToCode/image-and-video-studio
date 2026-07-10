@@ -46,12 +46,31 @@ const isPrivateOrLocalIpv4 = (host: string) => {
 
 const isPrivateOrLocalIpv6 = (host: string) => {
   const normalized = host.toLowerCase();
+  const firstHextet = Number.parseInt(normalized.split(":")[0] ?? "", 16);
+  const mappedIpv4 = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(
+    normalized
+  );
+  if (mappedIpv4) {
+    const high = Number.parseInt(mappedIpv4[1], 16);
+    const low = Number.parseInt(mappedIpv4[2], 16);
+    const value = high * 65_536 + low;
+    const ipv4 = [
+      Math.floor(value / 16_777_216) % 256,
+      Math.floor(value / 65_536) % 256,
+      Math.floor(value / 256) % 256,
+      value % 256,
+    ].join(".");
+    return isPrivateOrLocalIpv4(ipv4);
+  }
   return (
+    normalized === "::" ||
     normalized === "::1" ||
     normalized === "0:0:0:0:0:0:0:1" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe80:")
+    (Number.isFinite(firstHextet) &&
+      ((firstHextet & 0xfe00) === 0xfc00 ||
+        (firstHextet & 0xffc0) === 0xfe80 ||
+        (firstHextet & 0xffc0) === 0xfec0 ||
+        (firstHextet & 0xff00) === 0xff00))
   );
 };
 
@@ -145,50 +164,56 @@ export async function safeFetchExternalMedia(
   while (true) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
-    let response: Response;
     try {
-      response = await fetch(currentUrl.toString(), {
+      const response = await fetch(currentUrl.toString(), {
         headers: options.headers,
         redirect: "manual",
         signal: controller.signal,
       });
+
+      const isRedirect =
+        response.status >= 300 &&
+        response.status < 400 &&
+        response.headers.has("location");
+      if (isRedirect) {
+        if (!options.allowRedirects || redirects >= MAX_REDIRECTS) {
+          throw new Error("Media URL redirect is not allowed.");
+        }
+        const location = response.headers.get("location");
+        currentUrl = validateExternalMediaUrl(
+          new URL(location ?? "", currentUrl).toString(),
+          options.allowedHosts
+        );
+        redirects += 1;
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error("Unable to download media.");
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (!isAllowedContentType(contentType, options.allowedContentTypes)) {
+        throw new Error(
+          `Unexpected media content type: ${contentType ?? "unknown"}.`
+        );
+      }
+
+      const body = await readBoundedBody(response, options.maxBytes);
+      const headers = new Headers();
+      if (contentType) headers.set("Content-Type", contentType);
+      headers.set("Content-Length", String(body.byteLength));
+      return new Response(body, {
+        status: 200,
+        headers,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error("Media download timed out.");
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
-
-    const isRedirect =
-      response.status >= 300 && response.status < 400 && response.headers.has("location");
-    if (isRedirect) {
-      if (!options.allowRedirects || redirects >= MAX_REDIRECTS) {
-        throw new Error("Media URL redirect is not allowed.");
-      }
-      const location = response.headers.get("location");
-      currentUrl = validateExternalMediaUrl(
-        new URL(location ?? "", currentUrl).toString(),
-        options.allowedHosts
-      );
-      redirects += 1;
-      continue;
-    }
-
-    if (!response.ok) {
-      throw new Error("Unable to download media.");
-    }
-
-    const contentType = response.headers.get("content-type");
-    if (!isAllowedContentType(contentType, options.allowedContentTypes)) {
-      throw new Error(
-        `Unexpected media content type: ${contentType ?? "unknown"}.`
-      );
-    }
-
-    const body = await readBoundedBody(response, options.maxBytes);
-    const headers = new Headers();
-    if (contentType) headers.set("Content-Type", contentType);
-    headers.set("Content-Length", String(body.byteLength));
-    return new Response(body, {
-      status: 200,
-      headers,
-    });
   }
 }

@@ -27,6 +27,22 @@ test("validateExternalMediaUrl rejects unsafe URL shapes", () => {
     /Local/
   );
   assert.throws(
+    () =>
+      validateExternalMediaUrl(
+        "https://[::ffff:127.0.0.1]/file.png",
+        ["[::ffff:7f00:1]"]
+      ),
+    /Local/
+  );
+  assert.throws(
+    () => validateExternalMediaUrl("https://[::]/file.png", ["[::]"]),
+    /Local/
+  );
+  assert.throws(
+    () => validateExternalMediaUrl("https://[fe90::1]/file.png", ["[fe90::1]"]),
+    /Local/
+  );
+  assert.throws(
     () => validateExternalMediaUrl("https://attacker.example/file.png", allowedHosts),
     /host/
   );
@@ -139,6 +155,45 @@ test("safeFetchExternalMedia rejects redirect to an unallowed host", async () =>
       /host/
     );
   } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("safeFetchExternalMedia applies its timeout while reading the body", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => {
+            controller.error(new Error("stream aborted"));
+          });
+        },
+      }),
+      { headers: { "content-type": "video/mp4" } }
+    );
+
+  let guardTimeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await assert.rejects(
+      Promise.race([
+        safeFetchExternalMedia("https://media.example.com/video.mp4", {
+          allowedHosts,
+          allowedContentTypes: ["video/"],
+          maxBytes: 10,
+          timeoutMs: 10,
+        }),
+        new Promise((_, reject) => {
+          guardTimeout = setTimeout(
+            () => reject(new Error("safe fetch did not enforce body timeout")),
+            100
+          );
+        }),
+      ]),
+      /timed out/
+    );
+  } finally {
+    if (guardTimeout) clearTimeout(guardTimeout);
     globalThis.fetch = originalFetch;
   }
 });
