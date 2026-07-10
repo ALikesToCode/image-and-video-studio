@@ -10,10 +10,56 @@ export type ModelEndpoint =
     | "navy-images-generations"
     | "navy-audio-speech"
     | "nanogpt-images-generations"
+    | "nanogpt-video-generation"
     | "chutes-image"
     | "chutes-video"
     | "chutes-audio"
     | string;
+
+export type ModelParameterValue = string | number | boolean | null;
+
+export type ModelParameterType =
+    | "select"
+    | "switch"
+    | "boolean"
+    | "number"
+    | "text"
+    | "string";
+
+export type ModelParameterOption = {
+    value: Exclude<ModelParameterValue, null>;
+    label: string;
+};
+
+export type ModelParameterDescriptor = {
+    type: ModelParameterType;
+    label?: string;
+    description?: string;
+    placeholder?: string;
+    default?: ModelParameterValue;
+    options?: ModelParameterOption[];
+    min?: number;
+    max?: number;
+    step?: number;
+    showWhen?: Record<string, ModelParameterValue>;
+};
+
+export type ModelMediaConstraint = {
+    minWidth?: number;
+    minHeight?: number;
+    maxWidth?: number;
+    maxHeight?: number;
+    maxBytes?: number;
+    formats?: string[];
+    source?: string;
+    note?: string;
+};
+
+export type ModelInputImageConstraints = {
+    maxItems?: number;
+    route?: ModelMediaConstraint;
+    provider?: ModelMediaConstraint;
+};
 
 export type ModelOption = {
     id: string;
@@ -58,6 +104,12 @@ export type ModelOption = {
         lastFrame: boolean;
     }>;
     maxReferenceImages?: number;
+    supportedResolutions?: string[];
+    maxOutputImages?: number;
+    fixedOutputImages?: number;
+    inputImageConstraints?: ModelInputImageConstraints;
+    dynamicParameters?: Record<string, ModelParameterDescriptor>;
+    parameterDefaults?: Record<string, ModelParameterValue>;
 };
 
 export const GEMINI_IMAGE_MODELS: ModelOption[] = [
@@ -332,7 +384,7 @@ export const NANOGPT_IMAGE_MODELS: ModelOption[] = [
             size: true,
             seed: true,
         },
-        maxReferenceImages: 4,
+        maxReferenceImages: 3,
     },
     {
         id: "step-image-edit-2",
@@ -348,7 +400,29 @@ export const NANOGPT_IMAGE_MODELS: ModelOption[] = [
             size: true,
             seed: true,
         },
-        maxReferenceImages: 4,
+        maxReferenceImages: 1,
+    },
+];
+
+export const NANOGPT_VIDEO_MODELS: ModelOption[] = [
+    {
+        id: "veo3-1-fast-video",
+        label: "NanoGPT Veo 3.1 Fast",
+        provider: "nanogpt",
+        endpoint: "nanogpt-video-generation",
+        inputModalities: ["text", "image"],
+        outputModalities: ["video"],
+        supports: {
+            video: true,
+            asyncJobs: true,
+            sourceImage: true,
+            aspectRatio: true,
+            size: true,
+        },
+        maxReferenceImages: 1,
+        supportedResolutions: ["720p", "1080p"],
+        metadataSource: "nanogpt-catalog-fallback",
+        metadataStatus: "fallback",
     },
 ];
 
@@ -724,7 +798,7 @@ export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
     },
     nanogpt: {
         image: NANOGPT_IMAGE_MODELS[0].id,
-        video: NANOGPT_IMAGE_MODELS[0].id,
+        video: NANOGPT_VIDEO_MODELS[0].id,
         tts: NANOGPT_IMAGE_MODELS[0].id,
     },
 };
