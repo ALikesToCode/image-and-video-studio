@@ -538,8 +538,47 @@ export const buildAssistantToolContextContent = ({
     .filter(Boolean)
     .join("\n\n");
 
+const primaryProviderErrorText = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.message;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+
+  const record = value as Record<string, unknown>;
+  const nestedError = record.error;
+  if (typeof nestedError === "string") return nestedError;
+  if (
+    nestedError &&
+    typeof nestedError === "object" &&
+    !Array.isArray(nestedError)
+  ) {
+    const nestedRecord = nestedError as Record<string, unknown>;
+    if (typeof nestedRecord.message === "string") return nestedRecord.message;
+    if (typeof nestedRecord.detail === "string") return nestedRecord.detail;
+  }
+  if (typeof record.message === "string") return record.message;
+  if (typeof record.detail === "string") return record.detail;
+  return "";
+};
+
+const providerRequiresReasoningDisabledForTools = (value: unknown) => {
+  const message = primaryProviderErrorText(value);
+  const mentionsTools =
+    /\b(?:function\s+(?:tools?|calling)|tools?|tool\s+(?:calls?|use))\b/i.test(
+      message
+    );
+  const requiresNone =
+    /\b(?:set|use)\s+(?:the\s+)?reasoning[_\s-]*effort\b[^.!?\n]{0,32}\bnone\b/i.test(
+      message
+    ) ||
+    /\breasoning[_\s-]*effort\b[^.!?\n]{0,48}\b(?:must|should|needs?\s+to|required\s+to|can\s+only)\b[^.!?\n]{0,32}\bnone\b/i.test(
+      message
+    );
+  return mentionsTools && requiresNone;
+};
+
 export const buildChatCompletionRecoveryPayloads = (
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  { providerError }: { providerError?: unknown } = {}
 ) => {
   const candidates: Array<{ label: string; payload: Record<string, unknown> }> = [];
   const seen = new Set<string>();
@@ -552,6 +591,21 @@ export const buildChatCompletionRecoveryPayloads = (
   };
 
   const withoutReasoning = stripReasoningContentFromChatPayload(payload);
+  const toolsRequireReasoningDisabled =
+    providerRequiresReasoningDisabledForTools(providerError) &&
+    Array.isArray(payload.tools) &&
+    payload.tools.length > 0;
+
+  if (toolsRequireReasoningDisabled) {
+    if (payload.reasoning_effort !== "none") {
+      const reasoningDisabled = clonePayload(withoutReasoning ?? payload);
+      reasoningDisabled.reasoning_effort = "none";
+      delete reasoningDisabled.thinking;
+      addCandidate("disable-reasoning-for-tools", reasoningDisabled);
+    }
+    return candidates;
+  }
+
   addCandidate("strip-reasoning", withoutReasoning);
 
   const reasoningBase = withoutReasoning ?? payload;

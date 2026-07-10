@@ -71,32 +71,52 @@ const requestJSONBody = (init?: RequestInit) => {
   }
 };
 
-const recoveringNavyFetch = async (
-  input: RequestInfo | URL,
-  init?: RequestInit
-) => {
-  let response = await globalThis.fetch(input, init);
-  if (!isRecoverableChatStatus(response.status)) return response;
-
-  const payload = requestJSONBody(init);
-  if (!payload) return response;
-  const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
-  const recoveries = buildChatCompletionRecoveryPayloads(payload).filter(
-    ({ label }) => !(hasTools && label === "text-only")
-  );
-
-  for (const recovery of recoveries) {
-    await response.body?.cancel().catch(() => undefined);
-    response = await globalThis.fetch(input, {
-      ...init,
-      body: JSON.stringify(recovery.payload),
-    });
-    if (response.ok || !isRecoverableChatStatus(response.status)) {
-      return response;
+const responseErrorBody = async (response: Response) => {
+  try {
+    const text = await response.clone().text();
+    if (!text) return undefined;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
     }
+  } catch {
+    return undefined;
   }
-  return response;
 };
+
+const createRecoveringChatFetch = (allowGeneralRecoveries: boolean) =>
+  async (input: RequestInfo | URL, init?: RequestInit) => {
+    let response = await globalThis.fetch(input, init);
+    if (!isRecoverableChatStatus(response.status)) return response;
+
+    const payload = requestJSONBody(init);
+    if (!payload) return response;
+    const providerError = await responseErrorBody(response);
+    const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
+    const recoveries = buildChatCompletionRecoveryPayloads(payload, {
+      providerError,
+    }).filter(
+      ({ label }) =>
+        (allowGeneralRecoveries || label === "disable-reasoning-for-tools") &&
+        !(hasTools && label === "text-only")
+    );
+
+    for (const recovery of recoveries) {
+      await response.body?.cancel().catch(() => undefined);
+      response = await globalThis.fetch(input, {
+        ...init,
+        body: JSON.stringify(recovery.payload),
+      });
+      if (response.ok || !isRecoverableChatStatus(response.status)) {
+        return response;
+      }
+    }
+    return response;
+  };
+
+const recoveringNavyFetch = createRecoveringChatFetch(true);
+const recoveringNanoGptFetch = createRecoveringChatFetch(false);
 
 const maxOutputTokens = (value: unknown) => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 1024;
@@ -172,7 +192,12 @@ export async function handleAIStudioChatRequest(request: Request) {
     apiKey,
     baseURL: PROVIDER_BASE_URLS[providerId],
     includeUsage: providerId === "navy" || providerId === "nanogpt",
-    fetch: providerId === "navy" ? recoveringNavyFetch : undefined,
+    fetch:
+      providerId === "navy"
+        ? recoveringNavyFetch
+        : providerId === "nanogpt"
+          ? recoveringNanoGptFetch
+        : undefined,
     supportedUrls: () => NATIVE_IMAGE_URLS,
     transformRequestBody: (providerBody) =>
       normalizeAIChatRequestBody({

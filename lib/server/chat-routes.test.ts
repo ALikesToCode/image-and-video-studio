@@ -116,6 +116,73 @@ test("Navy chat route retries GLM 400s without reasoning content", async () => {
   }
 });
 
+test("Navy chat route explicitly disables reasoning when tools require it", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Record<string, unknown>[] = [];
+  globalThis.fetch = async (_input, init) => {
+    const body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : {};
+    requestBodies.push(body);
+
+    if (requestBodies.length === 1) {
+      return Response.json(
+        {
+          error: {
+            message:
+              "Function tools with reasoning_effort are not supported in /v1/chat/completions. Set reasoning_effort to 'none'.",
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    return new Response("data: [DONE]\n\n", {
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+
+  try {
+    const response = await navyChatPost(
+      new Request("https://studio.test/api/navy/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "future-tool-reasoner",
+          messages: [{ role: "user", content: "Generate an image." }],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "generate_image",
+                parameters: { type: "object", properties: {} },
+              },
+            },
+          ],
+          toolChoice: "auto",
+          reasoningEffort: "high",
+        }),
+      })
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get("x-studio-chat-recovery"),
+      "disable-reasoning-for-tools"
+    );
+    assert.equal(requestBodies.length, 2);
+    assert.equal(requestBodies[1].reasoning_effort, "none");
+    assert.equal("tools" in requestBodies[1], true);
+    assert.equal(requestBodies[1].tool_choice, "auto");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy chat route can fall back to text-only when tool envelope is rejected", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];

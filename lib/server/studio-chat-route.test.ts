@@ -229,6 +229,165 @@ test("Studio chat retries Navy reasoning envelopes without dropping tools", asyn
   }
 });
 
+test("Studio chat retries reasoning-incompatible tool calls with reasoning disabled", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Record<string, unknown>[] = [];
+  globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    requestBodies.push(body);
+    if (requestBodies.length === 1) {
+      return Response.json(
+        {
+          error: {
+            message:
+              "Function tools with reasoning_effort are not supported for gpt-5.6-terra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+          },
+        },
+        { status: 400 }
+      );
+    }
+    return upstreamStream([
+      completionChunk({ role: "assistant", content: "Recovered." }, "stop"),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          provider: "navy",
+          model: "gpt-5.6-terra",
+          messages: [{ role: "user", content: "Generate an image." }],
+          enabledTools: ["generate_image"],
+          toolChoice: {
+            type: "function",
+            function: { name: "generate_image" },
+          },
+          reasoningEffort: "high",
+        }),
+      })
+    );
+    await response.text();
+
+    assert.equal(requestBodies.length, 2);
+    assert.equal(requestBodies[0].reasoning_effort, "high");
+    assert.equal(requestBodies[1].reasoning_effort, "none");
+    assert.equal("tools" in requestBodies[1], true);
+    assert.deepEqual(requestBodies[1].tool_choice, {
+      type: "function",
+      function: { name: "generate_image" },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio chat recovers NanoGPT tool calls that require reasoning disabled", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{
+    url: string;
+    body: Record<string, unknown>;
+  }> = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    });
+    if (requests.length === 1) {
+      return Response.json(
+        {
+          error: {
+            message:
+              "Function tools with reasoning_effort are incompatible for a future model. Set reasoning_effort to none to continue using tools.",
+          },
+        },
+        { status: 422 }
+      );
+    }
+    return upstreamStream([
+      completionChunk({ role: "assistant", content: "Recovered." }, "stop"),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "nano-secret",
+        },
+        body: JSON.stringify({
+          provider: "nanogpt",
+          model: "future-tool-reasoner",
+          messages: [{ role: "user", content: "Generate an image." }],
+          enabledTools: ["generate_image"],
+          toolChoice: {
+            type: "function",
+            function: { name: "generate_image" },
+          },
+          reasoningEffort: "high",
+        }),
+      })
+    );
+    await response.text();
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].url, "https://nano-gpt.com/api/v1/chat/completions");
+    assert.equal(requests[1].body.reasoning_effort, "none");
+    assert.equal("tools" in requests[1].body, true);
+    assert.deepEqual(requests[1].body.tool_choice, {
+      type: "function",
+      function: { name: "generate_image" },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio chat preserves unrelated NanoGPT errors without generic retries", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return Response.json(
+      { error: { message: "Unrelated provider failure." } },
+      { status: 422 }
+    );
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "nano-secret",
+        },
+        body: JSON.stringify({
+          provider: "nanogpt",
+          model: "future-tool-reasoner",
+          messages: [{ role: "user", content: "Generate an image." }],
+          enabledTools: ["generate_image"],
+          reasoningEffort: "high",
+        }),
+      })
+    );
+    const chunks = await readUIChunks(response);
+    const errorChunk = chunks.find((chunk) => chunk.type === "error");
+
+    assert.equal(requestCount, 1);
+    assert.match(String(errorChunk?.errorText), /Unrelated provider failure/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Studio chat rejects unknown providers and never accepts client tool schemas", async () => {
   const rejected = await studioChatPost(
     new Request("https://studio.test/api/studio/chat", {

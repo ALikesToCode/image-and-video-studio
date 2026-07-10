@@ -626,6 +626,108 @@ test("Chat recovery can drop unsupported reasoning controls", () => {
   assert.equal("temperature" in recoveries[0].payload, false);
 });
 
+test("Chat recovery explicitly disables reasoning when tools require it", () => {
+  const payload = buildChatCompletionPayload({
+    model: "future-tool-reasoner",
+    messages: [{ role: "user", content: "Generate an image." }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+    toolChoice: "auto",
+    reasoningEffort: "high",
+  });
+
+  const recoveries = buildChatCompletionRecoveryPayloads(payload, {
+    providerError: {
+      error: {
+        message:
+          "Function tools with reasoning_effort are not supported for future-tool-reasoner in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+      },
+    },
+  });
+
+  assert.equal(recoveries[0]?.label, "disable-reasoning-for-tools");
+  assert.equal(recoveries[0]?.payload.reasoning_effort, "none");
+  assert.equal("tools" in recoveries[0].payload, true);
+  assert.equal(recoveries[0].payload.tool_choice, "auto");
+  assert.equal(payload.reasoning_effort, "high");
+});
+
+test("Chat tool recovery disables active reasoning and strips historical reasoning", () => {
+  const payload = buildChatCompletionPayload({
+    model: "future-tool-reasoner",
+    messages: [
+      { role: "user", content: "Generate an image." },
+      {
+        role: "assistant",
+        content: "",
+        reasoning_content: "I should call the image tool.",
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+    reasoningEffort: "high",
+  });
+
+  const recoveries = buildChatCompletionRecoveryPayloads(payload, {
+    providerError: {
+      error: {
+        message:
+          "reasoning_effort must be none when function tools are present.",
+      },
+    },
+  });
+  const retryMessages = recoveries[0]?.payload.messages as Array<
+    Record<string, unknown>
+  >;
+
+  assert.equal(recoveries.length, 1);
+  assert.equal(recoveries[0]?.label, "disable-reasoning-for-tools");
+  assert.equal(recoveries[0]?.payload.reasoning_effort, "none");
+  assert.equal("reasoning_content" in retryMessages[1], false);
+});
+
+test("Chat recovery does not disable reasoning for unrelated provider errors", () => {
+  const payload = buildChatCompletionPayload({
+    model: "future-tool-reasoner",
+    messages: [{ role: "user", content: "Generate an image." }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+    reasoningEffort: "high",
+  });
+
+  const recoveries = buildChatCompletionRecoveryPayloads(payload, {
+    providerError: { error: { message: "Unsupported tool schema." } },
+  });
+
+  assert.equal(
+    recoveries.some(
+      (recovery) => recovery.label === "disable-reasoning-for-tools"
+    ),
+    false
+  );
+});
+
 test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {
   const payload = buildChatCompletionPayload({
     model: "gpt-4o",

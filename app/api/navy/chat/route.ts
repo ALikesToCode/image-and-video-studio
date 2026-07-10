@@ -83,7 +83,9 @@ export async function POST(req: Request) {
   if (!response.ok) {
     let data = await jsonOrNull(response);
     if (isRecoverableChatStatus(response.status)) {
-      for (const recovery of buildChatCompletionRecoveryPayloads(payload)) {
+      for (const recovery of buildChatCompletionRecoveryPayloads(payload, {
+        providerError: data,
+      })) {
         const retryResponse = await upstreamChatCompletion(apiKey, recovery.payload);
         if (retryResponse.ok) {
           return streamingResponse(retryResponse, recovery.label);
