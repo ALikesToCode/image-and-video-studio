@@ -197,6 +197,8 @@ test("normalizes NanoGPT video parameters, defaults, pricing, and conditional co
   assert.deepEqual(model?.supports, {
     video: true,
     asyncJobs: true,
+    textToVideo: true,
+    imageToVideo: true,
     referenceImages: true,
     sourceImage: true,
     seed: true,
@@ -250,6 +252,29 @@ test("normalizes NanoGPT video parameters, defaults, pricing, and conditional co
     loop: false,
     reference_image_urls: "",
   });
+});
+
+test("marks image-only video models as requiring a source image", () => {
+  const [model] = normalizeNanoGptVideoModels([
+    {
+      id: "provider/image-only-video",
+      architecture: {
+        modality: "text+image->video",
+        input_modalities: ["text", "image"],
+        output_modalities: ["video"],
+      },
+      capabilities: {
+        video_generation: true,
+        text_to_video: false,
+        image_to_video: true,
+      },
+      supported_parameters: { parameters: {} },
+    },
+  ]);
+
+  assert.equal(model?.supports?.textToVideo, false);
+  assert.equal(model?.supports?.imageToVideo, true);
+  assert.equal(model?.supports?.sourceImage, true);
 });
 
 test("uses the most conservative documented image caps", () => {

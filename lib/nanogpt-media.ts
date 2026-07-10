@@ -355,7 +355,13 @@ const normalizeCatalogModel = (
       supports.video = true;
     }
     supports.asyncJobs = true;
-    if (capabilities.image_to_video === true || hasImageInput) {
+    if (typeof capabilities.text_to_video === "boolean") {
+      supports.textToVideo = capabilities.text_to_video;
+    }
+    if (typeof capabilities.image_to_video === "boolean") {
+      supports.imageToVideo = capabilities.image_to_video;
+    }
+    if (supports.imageToVideo === true || hasImageInput) {
       supports.sourceImage = true;
     }
     if (

@@ -93,6 +93,8 @@ export type ModelOption = {
         referenceImages: boolean;
         tts: boolean;
         video: boolean;
+        textToVideo: boolean;
+        imageToVideo: boolean;
         asyncJobs: boolean;
         negativePrompt: boolean;
         seed: boolean;
