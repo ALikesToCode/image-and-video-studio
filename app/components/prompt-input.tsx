@@ -1,7 +1,8 @@
 import { Button } from "@/app/components/ui/button";
 import { Label } from "@/app/components/ui/label";
 import { Textarea } from "@/app/components/ui/textarea";
-import { Loader2, Sparkles, Wand2 } from "lucide-react";
+import { Plus, Sparkles, Wand2 } from "lucide-react";
+import { resolveGenerationSubmitState } from "@/lib/generation-ux";
 
 interface PromptInputProps {
     prompt: string;
@@ -24,8 +25,10 @@ export function PromptInput({
     mode,
     showNegativePrompt = true,
 }: PromptInputProps) {
+    const submitState = resolveGenerationSubmitState({ prompt, busy, mode });
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && prompt.trim()) {
+            e.preventDefault();
             onGenerate();
         }
     };
@@ -33,9 +36,10 @@ export function PromptInput({
     return (
         <div className="space-y-4">
             <div className="space-y-2">
-                <Label>Prompt</Label>
+                <Label htmlFor="studio-generation-prompt">Prompt</Label>
                 <div className="relative">
                     <Textarea
+                        id="studio-generation-prompt"
                         placeholder={
                             mode === "image"
                                 ? "Describe the image you want to generate..."
@@ -46,7 +50,7 @@ export function PromptInput({
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        className="min-h-[96px] resize-none pr-12 text-base shadow-inner bg-background/50 border-border/50 focus:border-primary/50 focus:ring-primary/20 transition-all font-light sm:min-h-[120px] sm:text-lg"
+                        className="min-h-[96px] resize-none border-border/50 bg-background/50 pr-12 text-base font-light shadow-inner transition-colors focus:border-primary/50 focus:ring-primary/20 sm:min-h-[120px] sm:text-lg"
                     />
                     <div className="absolute right-3 top-3">
                         <Sparkles className="h-5 w-5 text-muted-foreground opacity-20" />
@@ -56,8 +60,11 @@ export function PromptInput({
 
             {showNegativePrompt ? (
                 <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Negative Prompt (Optional)</Label>
+                    <Label htmlFor="studio-negative-prompt" className="text-xs text-muted-foreground">
+                        Negative Prompt (Optional)
+                    </Label>
                     <Textarea
+                        id="studio-negative-prompt"
                         placeholder="What to exclude..."
                         value={negativePrompt}
                         onChange={(e) => setNegativePrompt(e.target.value)}
@@ -68,27 +75,33 @@ export function PromptInput({
 
             <Button
                 size="lg"
-                className="w-full bg-gradient-to-r from-primary to-primary/80 px-4 transition-all hover:scale-[1.01] hover:shadow-lg"
+                className="min-h-11 w-full bg-gradient-to-r from-primary to-primary/80 px-4 transition-colors hover:from-primary/90 hover:to-primary/70"
                 onClick={onGenerate}
-                disabled={!prompt.trim() || busy}
+                disabled={submitState.disabled}
             >
                 {busy ? (
                     <>
-                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        Queue Generation
+                        <Plus className="mr-2 h-5 w-5" />
+                        {submitState.label}
                     </>
                 ) : (
                     <>
                         <Wand2 className="mr-2 h-5 w-5" />
-                        Generate {mode === "image" ? "Image" : mode === "video" ? "Video" : "Audio"}
+                        {submitState.label}
                     </>
                 )}
             </Button>
-            <div className="text-center text-xs text-muted-foreground">
-                <span className="hidden sm:inline">
-                    Press <kbd className="font-mono">Cmd/Ctrl+Enter</kbd> to generate
-                </span>
-                <span className="sm:hidden">Tap Generate to start</span>
+            <div aria-live="polite" className="text-center text-xs text-muted-foreground">
+                {busy ? (
+                    submitState.hint
+                ) : (
+                    <>
+                        <span className="hidden sm:inline">
+                            Press <kbd className="font-mono">Cmd/Ctrl+Enter</kbd> to generate
+                        </span>
+                        <span className="sm:hidden">Tap Generate to start</span>
+                    </>
+                )}
             </div>
         </div>
     );
