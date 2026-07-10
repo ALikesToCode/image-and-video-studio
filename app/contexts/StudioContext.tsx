@@ -1874,6 +1874,121 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         url: remoteVideoUrl,
                     }),
                 });
+            } else if (job.provider === "nanogpt") {
+                const selectedNanoGptModel = nanoGptVideoModels.find(
+                    (entry) => entry.id === job.model
+                );
+                const catalogParameters = job.modelParameters ?? {};
+                const parameters = Object.keys(catalogParameters).length
+                    ? catalogParameters
+                    : {
+                        aspect_ratio: job.videoAspect,
+                        resolution: job.videoResolution,
+                        duration: job.videoDuration,
+                    };
+                let generationId = job.remoteJobId ?? "";
+                let billing = job.billing;
+
+                if (!generationId) {
+                    const maxReferenceImages =
+                        selectedNanoGptModel?.supports?.referenceImages === true
+                            ? selectedNanoGptModel.maxReferenceImages ?? 1
+                            : 0;
+                    const submitResponse = await fetch("/api/nanogpt/video", {
+                        method: "POST",
+                        headers: requestHeaders,
+                        body: JSON.stringify({
+                            prompt: job.prompt,
+                            model: job.model,
+                            parameters,
+                            sourceImage:
+                                selectedNanoGptModel?.supports?.sourceImage === true
+                                    ? sourceImage
+                                    : undefined,
+                            referenceImages: referenceImages
+                                .slice(0, maxReferenceImages)
+                                .map((reference) => reference.dataUrl),
+                        }),
+                    });
+                    const submitPayload = await submitResponse.json();
+                    if (!submitResponse.ok) {
+                        throw new Error(
+                            errorMessageFromPayload(
+                                submitPayload,
+                                "NanoGPT video generation failed."
+                            )
+                        );
+                    }
+                    generationId =
+                        typeof submitPayload?.id === "string"
+                            ? submitPayload.id
+                            : typeof submitPayload?.runId === "string"
+                                ? submitPayload.runId
+                                : "";
+                    billing = generationMetadataFromPayload(submitPayload).billing;
+                    if (generationId) {
+                        updateJob(job.id, {
+                            remoteJobId: generationId,
+                            remoteStatus:
+                                typeof submitPayload?.status === "string"
+                                    ? submitPayload.status
+                                    : "pending",
+                            billing,
+                        });
+                    }
+                }
+
+                if (!generationId) {
+                    throw new Error("No NanoGPT video run id returned.");
+                }
+
+                let completed = false;
+                let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
+                for (
+                    let attempt = 0;
+                    attempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !completed;
+                    attempt += 1
+                ) {
+                    updateJob(job.id, {
+                        progress: `Waiting for NanoGPT render (${attempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
+                    });
+                    await sleep(delayMs);
+                    const pollResponse = await fetch(
+                        `/api/nanogpt/video?id=${encodeURIComponent(generationId)}`,
+                        { headers: { "x-user-api-key": job.apiKey } }
+                    );
+                    const pollPayload = await pollResponse.json();
+                    if (!pollResponse.ok) {
+                        throw new Error(
+                            errorMessageFromPayload(
+                                pollPayload,
+                                "Unable to poll NanoGPT video job."
+                            )
+                        );
+                    }
+                    const pollMetadata = generationMetadataFromPayload(pollPayload);
+                    billing = pollMetadata.billing ?? billing;
+                    const remoteStatus =
+                        typeof pollPayload?.status === "string"
+                            ? pollPayload.status
+                            : undefined;
+                    updateJob(job.id, { remoteStatus, billing });
+                    completed = pollPayload?.done === true;
+                    delayMs = resolveNavyJobPollDelayMs({
+                        payload: pollPayload,
+                        responseStatus: pollResponse.status,
+                        currentDelayMs: delayMs,
+                    });
+                }
+                if (!completed) {
+                    throw new Error("Timed out waiting for the NanoGPT video render.");
+                }
+
+                response = await fetch("/api/nanogpt/video/download", {
+                    method: "POST",
+                    headers: requestHeaders,
+                    body: JSON.stringify({ id: generationId }),
+                });
             } else {
                 throw new Error("Video generation is not available for this provider.");
             }
@@ -2133,6 +2248,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (!activePrompt.trim()) { setErrorMessage("Prompt required"); return; }
         if (activeMode === "video" && provider === "chutes" && !videoImage && selectedReferences.length === 0) {
             setErrorMessage("Chutes video generation requires a source image or selected reference.");
+            return;
+        }
+        if (
+            activeMode === "video" &&
+            selectedModelOption?.supports?.imageToVideo === true &&
+            selectedModelOption.supports.textToVideo === false &&
+            !videoImage &&
+            selectedReferences.length === 0
+        ) {
+            setErrorMessage(`${selectedModelOption.label} requires a source image or selected reference.`);
             return;
         }
         const batchCreatedAt = new Date().toISOString();

@@ -17,12 +17,16 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/app/components/ui/dialog";
+import {
+    getModelReferenceLimit,
+    modelAcceptsImageReferences,
+    modelAcceptsSourceImage,
+} from "@/lib/model-media-capabilities";
 
 export function VideoGenView() {
     const context = useStudio();
     const {
         videoUrl,
-        hasActiveJobs,
         statusMessage,
         videoImage,
         setVideoImage,
@@ -33,12 +37,24 @@ export function VideoGenView() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const selectedModel = context.modelSuggestions.find(
+        (entry) => entry.id === context.model
+    );
+    const acceptsSourceImage = modelAcceptsSourceImage(selectedModel);
+    const requiresSourceImage =
+        selectedModel?.supports?.imageToVideo === true &&
+        selectedModel.supports.textToVideo === false;
+    const acceptsReferences = modelAcceptsImageReferences(selectedModel);
+    const referenceLimit = getModelReferenceLimit(selectedModel);
 
     useEffect(() => {
         if (mode !== "video") setMode("video");
     }, [mode, setMode]);
 
-    const isRunning = hasActiveJobs;
+    const activeVideoJob = [...context.runningJobs, ...context.queuedJobs].find(
+        (job) => job.mode === "video"
+    );
+    const isRunning = Boolean(activeVideoJob);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -127,20 +143,35 @@ export function VideoGenView() {
 
                 <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-5 sm:space-y-8">
                     <div className="mx-auto max-w-3xl">
-                        <ReferenceStrip
-                            references={context.references}
-                            selectedReferenceIds={context.selectedReferenceIds}
-                            onAddReference={context.addReferenceFile}
-                            onToggleReference={context.toggleReferenceSelection}
-                            onRemoveReference={context.removeReference}
-                            onClearSelected={context.clearSelectedReferences}
-                        />
+                        {acceptsReferences ? (
+                            <>
+                                <ReferenceStrip
+                                    references={context.references}
+                                    selectedReferenceIds={context.selectedReferenceIds}
+                                    onAddReference={context.addReferenceFile}
+                                    onToggleReference={context.toggleReferenceSelection}
+                                    onRemoveReference={context.removeReference}
+                                    onClearSelected={context.clearSelectedReferences}
+                                />
+                                {typeof referenceLimit === "number" && referenceLimit > 0 ? (
+                                    <p className="mt-2 text-xs text-muted-foreground">
+                                        Up to {referenceLimit} selected reference image{referenceLimit === 1 ? " is" : "s are"} sent to {selectedModel?.label ?? "this model"}.
+                                    </p>
+                                ) : null}
+                            </>
+                        ) : (
+                            <div className="rounded-xl border border-border/60 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                                {selectedModel?.label ?? "This model"} does not accept reference images.
+                            </div>
+                        )}
                     </div>
 
                     {/* Source Image Uploader */}
-                    {(
+                    {acceptsSourceImage ? (
                         <div className="mx-auto max-w-3xl space-y-3 sm:space-y-4">
-                            <h3 className="text-sm font-medium text-muted-foreground">Source Image</h3>
+                            <h3 className="text-sm font-medium text-muted-foreground">
+                                Source Image {requiresSourceImage ? "(required)" : "(optional)"}
+                            </h3>
                             <div
                                 className={cn(
                                     "relative rounded-2xl border-2 border-dashed transition-all duration-300 overflow-hidden",
@@ -178,10 +209,18 @@ export function VideoGenView() {
                                             <Upload className="h-6 w-6 text-muted-foreground" />
                                         </div>
                                         <p className="text-sm font-medium">Click or drag image to upload</p>
-                                        <p className="text-xs text-muted-foreground">Used for image-to-video when supported</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {requiresSourceImage
+                                                ? "This model cannot generate without an image."
+                                                : "Used for image-to-video when supported."}
+                                        </p>
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    ) : (
+                        <div className="mx-auto max-w-3xl rounded-xl border border-border/60 bg-secondary/20 p-3 text-sm text-muted-foreground">
+                            {selectedModel?.label ?? "This model"} is text-to-video only. The saved source image is retained locally and will not be sent.
                         </div>
                     )}
 
@@ -225,7 +264,11 @@ export function VideoGenView() {
                                     <div className="w-16 h-16 rounded-2xl bg-muted/30 flex items-center justify-center">
                                         <Sparkles className="h-8 w-8 opacity-50" />
                                     </div>
-                                    <p>Select a source image and generate a video.</p>
+                                    <p>
+                                        {acceptsSourceImage
+                                            ? "Optionally add a source image, then generate a video."
+                                            : "Describe the video you want to generate."}
+                                    </p>
                                 </motion.div>
                             )
                         )}
@@ -242,7 +285,9 @@ export function VideoGenView() {
                                 <div className="text-center space-y-4">
                                     <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
                                     <p className="text-lg font-medium animate-pulse">Generating Video...</p>
-                                    <p className="text-sm text-muted-foreground max-w-xs">{statusMessage}</p>
+                                    <p className="text-sm text-muted-foreground max-w-xs">
+                                        {activeVideoJob?.progress || statusMessage}
+                                    </p>
                                 </div>
                             </motion.div>
                         )}
@@ -258,7 +303,7 @@ export function VideoGenView() {
                             negativePrompt={context.negativePrompt}
                             setNegativePrompt={context.setNegativePrompt}
                             onGenerate={context.handleGenerate}
-                            busy={context.hasActiveJobs}
+                            busy={isRunning}
                             mode={context.mode}
                         />
                     </div>
