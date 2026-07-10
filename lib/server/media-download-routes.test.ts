@@ -505,6 +505,7 @@ test("Navy image route uses a prompt agent before strict-filter image models", a
     if (url === "https://api.navy/v1/chat/completions") {
       assert.equal(requestBody.model, "deepseek-v4-pro");
       assert.equal(requestBody.stream, false);
+      assert.equal("temperature" in requestBody, false);
       const systemPrompt = Array.isArray(requestBody.messages)
         ? String(
             (

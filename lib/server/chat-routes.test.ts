@@ -3,6 +3,44 @@ import assert from "node:assert/strict";
 
 import { POST as navyChatPost } from "../../app/api/navy/chat/route.ts";
 
+test("Navy chat route uses the provider temperature default for GPT-5 models", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Record<string, unknown>[] = [];
+  globalThis.fetch = async (_input, init) => {
+    const body =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : {};
+    requestBodies.push(body);
+    return new Response("data: [DONE]\n\n", {
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+
+  try {
+    const response = await navyChatPost(
+      new Request("https://studio.test/api/navy/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-5",
+          messages: [{ role: "user", content: "Reply briefly." }],
+          temperature: 0.7,
+        }),
+      })
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(requestBodies.length, 1);
+    assert.equal("temperature" in requestBodies[0], false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy chat route retries GLM 400s without reasoning content", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];

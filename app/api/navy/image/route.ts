@@ -121,7 +121,6 @@ const rewritePromptWithPromptAgent = async ({
       body: JSON.stringify({
         model: agentModel,
         stream: false,
-        temperature: 0.2,
         max_tokens: 700,
         messages: [
           { role: "system", content: promptAgentSystemPrompt(model) },

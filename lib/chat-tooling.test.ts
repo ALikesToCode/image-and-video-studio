@@ -272,7 +272,7 @@ test("DeepSeek V4 payloads support max reasoning effort aliases", () => {
   assert.equal(payload.reasoning_effort, "max");
 });
 
-test("General Navy reasoning effort supports full documented levels", () => {
+test("General Navy reasoning payloads use the model default temperature", () => {
   assert.equal(normalizeReasoningEffort("none"), "none");
   assert.equal(normalizeReasoningEffort("minimal"), "minimal");
   assert.equal(normalizeReasoningEffort("low"), "low");
@@ -291,7 +291,17 @@ test("General Navy reasoning effort supports full documented levels", () => {
 
   assert.equal("thinking" in payload, false);
   assert.equal(payload.reasoning_effort, "xhigh");
-  assert.equal(payload.temperature, 0.7);
+  assert.equal("temperature" in payload, false);
+});
+
+test("OpenAI reasoning model payloads use the default temperature without metadata", () => {
+  const payload = buildChatCompletionPayload({
+    model: "openai/gpt-5-mini",
+    messages: [{ role: "user", content: "Reply briefly." }],
+    temperature: 0.7,
+  });
+
+  assert.equal("temperature" in payload, false);
 });
 
 test("Chat recovery can drop unsupported reasoning controls", () => {
@@ -305,7 +315,7 @@ test("Chat recovery can drop unsupported reasoning controls", () => {
   const recoveries = buildChatCompletionRecoveryPayloads(payload);
   assert.equal(recoveries[0]?.label, "omit-reasoning-controls");
   assert.equal("reasoning_effort" in recoveries[0].payload, false);
-  assert.equal(recoveries[0].payload.temperature, 0.7);
+  assert.equal("temperature" in recoveries[0].payload, false);
 });
 
 test("Non-DeepSeek chat payloads preserve explicit tool_choice", () => {
@@ -391,7 +401,7 @@ test("Chat recovery payloads strip reasoning before dropping tools", () => {
 
 test("Chat recovery payloads can omit unsupported sampling fields", () => {
   const payload = buildChatCompletionPayload({
-    model: "gpt-5",
+    model: "custom-chat-model",
     messages: [{ role: "user", content: "Rewrite this prompt." }],
     maxTokens: 700,
     temperature: 0.2,

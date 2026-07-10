@@ -129,6 +129,12 @@ export const isDeepSeekV4Model = (model: string) => {
   return normalized === "deepseek-v4-pro" || normalized === "deepseek-v4-flash";
 };
 
+const isOpenAiDefaultTemperatureModel = (model: string) => {
+  const normalized = model.trim().toLowerCase();
+  const modelId = normalized.split(/[/:]/).at(-1) ?? normalized;
+  return /^(?:gpt-5(?:[.-]|$)|o\d+(?:[.-]|$))/.test(modelId);
+};
+
 export const buildChatMediaPreview = ({
   item,
   prompt,
@@ -218,10 +224,14 @@ export const buildChatCompletionPayload = ({
   if (typeof maxTokens === "number" && Number.isFinite(maxTokens)) {
     payload.max_tokens = maxTokens;
   }
+  const usesDefaultTemperature =
+    (isDeepSeekV4 && thinkingType === "enabled") ||
+    (!isDeepSeekV4 &&
+      (hasReasoningEffort || isOpenAiDefaultTemperatureModel(model)));
   if (
     typeof temperature === "number" &&
     Number.isFinite(temperature) &&
-    !(isDeepSeekV4 && thinkingType === "enabled")
+    !usesDefaultTemperature
   ) {
     payload.temperature = temperature;
   }

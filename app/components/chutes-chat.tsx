@@ -1773,7 +1773,6 @@ ${defaultPrompt}`;
             : { toolChoice: "none" }
         ),
         maxTokens: 1024,
-        temperature: 0.7,
         ...reasoningPayload,
       }),
     });
@@ -2033,7 +2032,6 @@ ${defaultPrompt}`;
             ],
             toolChoice: "none",
             maxTokens: 700,
-            temperature: 0.2,
             ...(provider === "navy" && isDeepSeekV4Model(recoveryModel)
               ? {
                   thinking: { type: "disabled" },
