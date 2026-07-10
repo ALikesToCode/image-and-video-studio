@@ -8,6 +8,7 @@ import {
   normalizeGeminiImageModelId,
   normalizeGeminiOperationName,
   normalizeGeminiVideoModelId,
+  normalizeNanoGptVideoJobId,
   normalizeNavyJobId,
   normalizeVeoDuration,
   parseDataUrl,
@@ -68,6 +69,20 @@ test("provider path inputs are normalized before URL construction", () => {
     geminiOperationStatusUrl("operations/abc_123-xyz"),
     "https://generativelanguage.googleapis.com/v1beta/operations/abc_123-xyz"
   );
+});
+
+test("NanoGPT video job IDs accept documented and legacy-safe handles", () => {
+  assert.equal(
+    normalizeNanoGptVideoJobId(" vid_m1abc123def456 "),
+    "vid_m1abc123def456"
+  );
+  assert.equal(
+    normalizeNanoGptVideoJobId("legacy-provider.request:abc_123"),
+    "legacy-provider.request:abc_123"
+  );
+  assert.equal(normalizeNanoGptVideoJobId("../video/status"), null);
+  assert.equal(normalizeNanoGptVideoJobId("job id with spaces"), null);
+  assert.equal(normalizeNanoGptVideoJobId("x".repeat(257)), null);
 });
 
 test("Veo duration is forced to 8 seconds for constrained workflows", () => {

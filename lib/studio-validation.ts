@@ -24,6 +24,7 @@ export type ParsedDataUrl = {
 
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 const NAVY_JOB_ID_PATTERN = /^job_[A-Za-z0-9_-]{1,128}$/;
+const NANOGPT_VIDEO_JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const GEMINI_OPERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$/;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -107,6 +108,12 @@ export const normalizeNavyJobId = (value: unknown) => {
   if (typeof value !== "string") return null;
   const jobId = value.trim();
   return NAVY_JOB_ID_PATTERN.test(jobId) ? jobId : null;
+};
+
+export const normalizeNanoGptVideoJobId = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const jobId = value.trim();
+  return NANOGPT_VIDEO_JOB_ID_PATTERN.test(jobId) ? jobId : null;
 };
 
 export const parseDataUrl = (
