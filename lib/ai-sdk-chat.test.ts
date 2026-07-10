@@ -262,6 +262,29 @@ test("AI SDK chat round-trips Gemini thought signatures through client history",
   );
 });
 
+test("AI SDK stream state recognizes NanoGPT Gemini thought signatures", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-nanogpt",
+    role: "assistant",
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolCallId: "call_nano_signed",
+        toolName: "generate_image",
+        state: "input-available",
+        input: { prompt: "a glass lighthouse" },
+        callProviderMetadata: {
+          nanogpt: { thoughtSignature: "nano-signature==" },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(state.toolCalls[0]?.extra_content, {
+    google: { thought_signature: "nano-signature==" },
+  });
+});
+
 test("AI SDK JSON schemas validate tool inputs at runtime", async () => {
   const tools = buildAIChatTools(["generate_image"]);
   const schema = asSchema(tools.generate_image.inputSchema);

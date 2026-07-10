@@ -422,7 +422,13 @@ const parseToolInput = (value: unknown) => {
 const thoughtSignatureFromMetadata = (value: unknown) => {
   const metadata = asRecord(value);
   if (!metadata) return null;
-  for (const key of ["google", "navy", "chutes", "openaiCompatible"]) {
+  for (const key of [
+    "google",
+    "navy",
+    "chutes",
+    "nanogpt",
+    "openaiCompatible",
+  ]) {
     const options = asRecord(metadata[key]);
     if (typeof options?.thoughtSignature === "string") {
       return options.thoughtSignature;

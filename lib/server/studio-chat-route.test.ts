@@ -504,6 +504,146 @@ test("Studio chat streams Gemini thought signatures into UI tool metadata", asyn
   }
 });
 
+test("Studio chat streams NanoGPT tools, usage, and Gemini signatures", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamUrl = "";
+  let upstreamHeaders = new Headers();
+  let upstreamBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    upstreamUrl = String(input);
+    upstreamHeaders = new Headers(init?.headers);
+    upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return upstreamStream([
+      completionChunk(
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              index: 0,
+              id: "call_nano_signed",
+              type: "function",
+              function: {
+                name: "generate_image",
+                arguments: '{"prompt":"a glass lighthouse"}',
+              },
+              extra_content: {
+                google: { thought_signature: "new-nano-signature==" },
+              },
+            },
+          ],
+        },
+        "tool_calls",
+      ),
+      JSON.stringify({
+        id: "chatcmpl_usage",
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "google/gemini-3-flash-preview",
+        choices: [],
+        usage: {
+          prompt_tokens: 12,
+          completion_tokens: 3,
+          total_tokens: 15,
+          prompt_tokens_details: { cached_tokens: 2 },
+          completion_tokens_details: { reasoning_tokens: 1 },
+        },
+      }),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "nano-secret",
+        },
+        body: JSON.stringify({
+          provider: "nanogpt",
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            { role: "user", content: "Generate an image." },
+            {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call_previous",
+                  type: "function",
+                  function: {
+                    name: "generate_image",
+                    arguments: '{"prompt":"a previous lighthouse"}',
+                  },
+                  extra_content: {
+                    google: { thought_signature: "old-nano-signature==" },
+                  },
+                },
+              ],
+            },
+            {
+              role: "tool",
+              name: "generate_image",
+              tool_call_id: "call_previous",
+              content: "Generated 1 image.",
+            },
+          ],
+          enabledTools: ["generate_image", "untrusted_tool"],
+          tools: [
+            {
+              type: "function",
+              function: { name: "untrusted_tool", parameters: {} },
+            },
+          ],
+        }),
+      }),
+    );
+    const messageResponse = response.clone();
+    const chunks = await readUIChunks(response);
+    const message = await readFinalUIMessage(messageResponse);
+
+    assert.equal(upstreamUrl, "https://nano-gpt.com/api/v1/chat/completions");
+    assert.equal(upstreamHeaders.get("authorization"), "Bearer nano-secret");
+    assert.deepEqual(upstreamBody.stream_options, { include_usage: true });
+    assert.deepEqual(
+      (upstreamBody.tools as Array<Record<string, unknown>>).map((tool) =>
+        (tool.function as Record<string, unknown>).name
+      ),
+      ["generate_image"],
+    );
+    const upstreamMessages = upstreamBody.messages as Array<
+      Record<string, unknown>
+    >;
+    const previousToolCalls = upstreamMessages[1]
+      ?.tool_calls as Array<Record<string, unknown>>;
+    assert.deepEqual(previousToolCalls[0]?.extra_content, {
+      google: { thought_signature: "old-nano-signature==" },
+    });
+
+    const toolPart = message.parts.find(
+      (part) =>
+        part.type === "dynamic-tool" &&
+        part.toolCallId === "call_nano_signed",
+    );
+    assert.ok(toolPart?.type === "dynamic-tool");
+    assert.deepEqual(toolPart.callProviderMetadata, {
+      nanogpt: { thoughtSignature: "new-nano-signature==" },
+    });
+    const finish = chunks.find((chunk) => chunk.type === "finish");
+    assert.deepEqual(finish?.messageMetadata, {
+      usage: {
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+        cachedInputTokens: 2,
+        reasoningTokens: 1,
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Studio chat rejects schema-invalid tool input", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

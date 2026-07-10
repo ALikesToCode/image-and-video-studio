@@ -20,7 +20,7 @@ import {
   normalizeReasoningEffort,
 } from "../chat-tooling.ts";
 
-type StudioChatProvider = "navy" | "chutes";
+type StudioChatProvider = "navy" | "chutes" | "nanogpt";
 
 type StudioChatRequest = {
   apiKey?: string;
@@ -38,6 +38,7 @@ type StudioChatRequest = {
 const PROVIDER_BASE_URLS: Record<StudioChatProvider, string> = {
   navy: "https://api.navy/v1",
   chutes: "https://llm.chutes.ai/v1",
+  nanogpt: "https://nano-gpt.com/api/v1",
 };
 
 const NATIVE_IMAGE_URLS = {
@@ -45,7 +46,7 @@ const NATIVE_IMAGE_URLS = {
 };
 
 const isStudioChatProvider = (value: unknown): value is StudioChatProvider =>
-  value === "navy" || value === "chutes";
+  value === "navy" || value === "chutes" || value === "nanogpt";
 
 const isRecoverableChatStatus = (status: number) =>
   status === 400 || status === 422;
@@ -108,6 +109,28 @@ const safeStreamError = (error: unknown, apiKey: string) =>
     1000
   );
 
+const usageMessageMetadata = (usage: {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  inputTokenDetails?: { cacheReadTokens?: number };
+  outputTokenDetails?: { reasoningTokens?: number };
+}) => {
+  const entries = {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens,
+    reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+  };
+  const defined = Object.fromEntries(
+    Object.entries(entries).filter(
+      ([, value]) => typeof value === "number" && Number.isFinite(value),
+    ),
+  );
+  return Object.keys(defined).length ? { usage: defined } : undefined;
+};
+
 export async function handleAIStudioChatRequest(request: Request) {
   const body = await parseRequestBody(request);
   if (!body) {
@@ -148,7 +171,7 @@ export async function handleAIStudioChatRequest(request: Request) {
     name: providerId,
     apiKey,
     baseURL: PROVIDER_BASE_URLS[providerId],
-    includeUsage: providerId === "navy",
+    includeUsage: providerId === "navy" || providerId === "nanogpt",
     fetch: providerId === "navy" ? recoveringNavyFetch : undefined,
     supportedUrls: () => NATIVE_IMAGE_URLS,
     transformRequestBody: (providerBody) =>
@@ -177,6 +200,10 @@ export async function handleAIStudioChatRequest(request: Request) {
       stream: result.stream,
       tools,
       sendReasoning: true,
+      messageMetadata: ({ part }) =>
+        part.type === "finish"
+          ? usageMessageMetadata(part.totalUsage)
+          : undefined,
       onError: (error) => safeStreamError(error, apiKey),
     });
 
