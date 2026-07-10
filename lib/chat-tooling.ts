@@ -152,6 +152,18 @@ export const buildChatMediaPreview = ({
   mimeType: item.mimeType || null,
 });
 
+export const resolveNavyVideoStartResult = (value: unknown) => {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    videoUrl:
+      typeof record.videoUrl === "string" ? record.videoUrl.trim() : "",
+    jobId: typeof record.id === "string" ? record.id.trim() : "",
+  };
+};
+
 export const normalizeDeepSeekThinkingType = (value: unknown) =>
   value === "disabled" ? "disabled" : "enabled";
 
@@ -754,7 +766,6 @@ export const detectForcedToolCall = (
   if (videoIntent && toolSettings.video) return "generate_video";
   if (audioIntent && toolSettings.audio) return "generate_audio";
   if (imageIntent && toolSettings.image) return "generate_image";
-  if (toolSettings.image) return "generate_image";
   return null;
 };
 

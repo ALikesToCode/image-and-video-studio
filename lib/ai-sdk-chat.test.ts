@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   buildAIChatTools,
+  chatModelToolSupport,
+  extractAIChatStreamState,
   normalizeAIChatRequestBody,
   toAIModelMessages,
 } from "./ai-sdk-chat.ts";
@@ -141,4 +143,65 @@ test("AI SDK tools are server-owned and restricted to the supported allowlist", 
   assert.equal("execute" in tools.generate_image, false);
   assert.equal("execute" in tools.generate_video, false);
   assert.equal("execute" in tools.generate_audio, false);
+});
+
+test("AI SDK stream state exposes every completed parallel tool call", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-1",
+    role: "assistant",
+    parts: [
+      { type: "reasoning", text: "The user requested two assets." },
+      { type: "text", text: "Creating both assets." },
+      {
+        type: "dynamic-tool",
+        toolCallId: "call_image",
+        toolName: "generate_image",
+        state: "input-available",
+        input: { prompt: "a lighthouse" },
+      },
+      {
+        type: "dynamic-tool",
+        toolCallId: "call_audio",
+        toolName: "generate_audio",
+        state: "input-available",
+        input: { input: "Welcome home" },
+      },
+    ],
+  });
+
+  assert.equal(state.content, "Creating both assets.");
+  assert.equal(state.thinking, "The user requested two assets.");
+  assert.deepEqual(state.toolCalls, [
+    {
+      id: "call_image",
+      type: "function",
+      function: {
+        name: "generate_image",
+        arguments: '{"prompt":"a lighthouse"}',
+      },
+    },
+    {
+      id: "call_audio",
+      type: "function",
+      function: {
+        name: "generate_audio",
+        arguments: '{"input":"Welcome home"}',
+      },
+    },
+  ]);
+});
+
+test("Chat tools are disabled only when model metadata explicitly rejects them", () => {
+  assert.equal(chatModelToolSupport(undefined), null);
+  assert.equal(chatModelToolSupport({}), null);
+  assert.equal(chatModelToolSupport({ supportsTools: true }), true);
+  assert.equal(chatModelToolSupport({ supportsFunctionCalling: true }), true);
+  assert.equal(chatModelToolSupport({ supportsTools: false }), false);
+  assert.equal(
+    chatModelToolSupport({
+      supportsTools: false,
+      supportsFunctionCalling: true,
+    }),
+    true
+  );
 });

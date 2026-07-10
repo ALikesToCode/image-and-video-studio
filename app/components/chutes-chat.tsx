@@ -33,7 +33,9 @@ import {
   Info,
   Code2,
   ExternalLink,
+  Square,
 } from "lucide-react";
+import { DefaultChatTransport, readUIMessageStream } from "ai";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import {
@@ -98,6 +100,7 @@ import {
   isDeepSeekV4Model,
   normalizeImageToolModelRequest,
   repairImageToolArguments,
+  resolveNavyVideoStartResult,
   resolveToolArguments,
   resolveRequestedImageModels,
   runImageModelPipelineParallel,
@@ -124,15 +127,14 @@ import {
 } from "@/lib/studio-generation";
 import { extractPdfTextFromFile, isSupportedPdfFile } from "@/lib/client/pdf-text";
 import { ImageViewer } from "./image-viewer";
+import {
+  chatModelToolSupport,
+  extractAIChatStreamState,
+  type AIChatToolCall,
+  type AIChatToolName,
+} from "@/lib/ai-sdk-chat";
 
-type ToolCall = {
-  id: string;
-  type: string;
-  function: {
-    name: string;
-    arguments: string;
-  };
-};
+type ToolCall = AIChatToolCall;
 
 type ChatMessage = {
   id: string;
@@ -235,11 +237,34 @@ const getToolAudioModelStorageKey = (provider: ChatProvider) =>
 const getReasoningPreferencesStorageKey = (provider: ChatProvider) =>
   `studio_chat_${provider}_reasoning_preferences`;
 const MAX_CHAT_MESSAGES = 120;
+const MAX_CHAT_TOOL_ROUNDS = 6;
+const MAX_CHAT_MODEL_STEPS = MAX_CHAT_TOOL_ROUNDS + 1;
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const MAX_PENDING_ATTACHMENTS = 6;
 const CHAT_TEXT_ATTACHMENT_MAX_CHARS = 18_000;
 const CHAT_TEXT_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
 const CHAT_IMAGE_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+
+const isAbortLikeError = (error: unknown) =>
+  (error instanceof Error && error.name === "AbortError") ||
+  (error instanceof Error && /\babort(?:ed|ing)?\b/i.test(error.message));
+
+const abortableDelay = (delayMs: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      window.clearTimeout(timeout);
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -693,24 +718,6 @@ const extractTextFragment = (value: unknown): string => {
   return "";
 };
 
-const extractReasoningFragment = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((item) => extractReasoningFragment(item)).join("");
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return (
-      extractTextFragment(record.reasoning_text) ||
-      extractTextFragment(record.reasoning) ||
-      extractTextFragment(record.summary) ||
-      extractTextFragment(record.text) ||
-      ""
-    );
-  }
-  return "";
-};
-
 const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
   if (!Array.isArray(value)) return [];
   return value
@@ -944,6 +951,8 @@ export function ChutesChat({
   const [systemPromptHydrated, setSystemPromptHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
+  const latestGeneratedImageRef = useRef<string | null>(videoImage ?? null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const queuedTurnsRef = useRef<QueuedChatTurn[]>([]);
   const [queuedTurns, setQueuedTurns] = useState<QueuedChatTurn[]>([]);
@@ -1076,6 +1085,10 @@ export function ChutesChat({
   const attachmentUploadDisabled = !supportsImageAttachments && !supportsFileAttachments;
   const isDeepSeekV4ChatModel = provider === "navy" && isDeepSeekV4Model(model);
   const chatModelSupportsReasoning = modelSupportsReasoning(provider, model, selectedChatModel);
+  const chatModelToolCapability = chatModelToolSupport(selectedChatModel);
+  useEffect(() => {
+    if (videoImage) latestGeneratedImageRef.current = videoImage;
+  }, [videoImage]);
   const availableImageModelIds = useMemo(
     () => new Set(imageModels.map((item) => item.id)),
     [imageModels]
@@ -1445,210 +1458,14 @@ export function ChutesChat({
     element.scrollTop = element.scrollHeight;
   }, [messages, busy]);
 
-  const toolSpec = useMemo(() => {
-    const specs: Array<Record<string, unknown>> = [];
-
-    if (toolSettings.image) {
-      specs.push(
-        provider === "navy"
-          ? {
-              type: "function",
-              function: {
-                name: "generate_image",
-                description:
-                  "Generate an image. Prefer the active ordered pipeline; include a model only when one clearly fits so it can be tried first before ordered fallback.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    prompt: { type: "string", description: "Image description." },
-                    model: { type: "string", description: "Image model id." },
-                    size: {
-                      type: "string",
-                      description: "Image size like 1024x1024.",
-                    },
-                    quality: {
-                      type: "string",
-                      description:
-                        "OpenAI GPT Image quality: low, medium, high, or auto.",
-                    },
-                    style: {
-                      type: "string",
-                      description:
-                        "Only for image models with a documented style request parameter. Do not send this for OpenAI GPT Image models such as gpt-image-2; put style direction in the prompt instead.",
-                    },
-                    image_url: {
-                      oneOf: [
-                        { type: "string" },
-                        {
-                          type: "array",
-                          items: { type: "string" },
-                          maxItems: 5,
-                        },
-                      ],
-                      description:
-                        "Optional reference image URL or data URI, or up to 5 reference images for multi-reference editing.",
-                    },
-                  },
-                  required: ["prompt"],
-                },
-              },
-            }
-          : {
-              type: "function",
-              function: {
-                name: "generate_image",
-                description:
-                  "Generate an image. Prefer the active ordered pipeline; include a model only when one clearly fits so it can be tried first before ordered fallback.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    prompt: { type: "string", description: "Image description." },
-                    model: { type: "string", description: "Image model id." },
-                    negative_prompt: {
-                      type: "string",
-                      description: "What to avoid in the image.",
-                    },
-                    guidance_scale: { type: "number", description: "CFG guidance." },
-                    width: { type: "number", description: "Width in pixels." },
-                    height: { type: "number", description: "Height in pixels." },
-                    resolution: {
-                      type: "string",
-                      description: "Resolution like 1024x1024 (HiDream).",
-                    },
-                    num_inference_steps: {
-                      type: "number",
-                      description: "Diffusion steps.",
-                    },
-                    seed: { type: "integer", description: "Seed (optional)." },
-                  },
-                  required: ["prompt"],
-                },
-              },
-            }
-      );
-    }
-
-    if (toolSettings.video) {
-      specs.push(
-        provider === "navy"
-          ? {
-              type: "function",
-              function: {
-                name: "generate_video",
-                description:
-                  "Generate a short video. Use the default video model unless the user asks for a specific one.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    prompt: { type: "string", description: "Video description." },
-                    model: { type: "string", description: "Video model id." },
-                    size: {
-                      type: "string",
-                      description: "Output size or aspect ratio such as 16:9.",
-                    },
-                    seconds: {
-                      type: "number",
-                      description: "Video duration in seconds (if supported).",
-                    },
-                    image_url: {
-                      type: "string",
-                      description:
-                        "Optional start frame as URL or data URI when supported.",
-                    },
-                    seed: {
-                      type: "integer",
-                      description: "Optional seed for reproducibility.",
-                    },
-                  },
-                  required: ["prompt"],
-                },
-              },
-            }
-          : {
-              type: "function",
-              function: {
-                name: "generate_video",
-                description:
-                  "Generate a video from an input image using Chutes i2v. Requires an image URL or data URI.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    prompt: { type: "string", description: "Video description." },
-                    model: { type: "string", description: "Video model id." },
-                    image: {
-                      type: "string",
-                      description:
-                        "Source image as URL or data URI. Required for Chutes video.",
-                    },
-                    fps: {
-                      type: "number",
-                      description: "Frames per second.",
-                    },
-                    guidance_scale_2: {
-                      type: "number",
-                      description: "Secondary guidance scale.",
-                    },
-                  },
-                  required: ["prompt", "image"],
-                },
-              },
-            }
-      );
-    }
-
-    if (toolSettings.audio) {
-      specs.push(
-        provider === "navy"
-          ? {
-              type: "function",
-              function: {
-                name: "generate_audio",
-                description:
-                  "Generate speech audio from text. Use the default TTS model unless the user asks for a specific one.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    input: { type: "string", description: "Text to synthesize." },
-                    model: { type: "string", description: "TTS model id." },
-                    voice: { type: "string", description: "Voice preset." },
-                    speed: { type: "number", description: "Playback speed." },
-                    response_format: {
-                      type: "string",
-                      description: "Audio format: mp3, opus, aac, flac.",
-                    },
-                  },
-                  required: ["input"],
-                },
-              },
-            }
-          : {
-              type: "function",
-              function: {
-                name: "generate_audio",
-                description:
-                  "Generate speech audio from text with Chutes voice models.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    text: { type: "string", description: "Text to synthesize." },
-                    model: { type: "string", description: "Audio model id." },
-                    speed: { type: "number", description: "Playback speed." },
-                    speaker: { type: "integer", description: "Speaker id (CSM-1B)." },
-                    max_duration_ms: {
-                      type: "integer",
-                      description: "Maximum duration in milliseconds (CSM-1B).",
-                    },
-                  },
-                  required: ["text"],
-                },
-              },
-            }
-      );
-    }
-
-    return specs;
-  }, [provider, toolSettings]);
-
+  const enabledChatTools = useMemo<AIChatToolName[]>(() => {
+    if (chatModelToolCapability === false) return [];
+    const enabled: AIChatToolName[] = [];
+    if (toolSettings.image) enabled.push("generate_image");
+    if (toolSettings.video) enabled.push("generate_video");
+    if (toolSettings.audio) enabled.push("generate_audio");
+    return enabled;
+  }, [chatModelToolCapability, toolSettings]);
   const systemPrompt = useMemo(() => {
     const modelList = imageModels.map((item) => item.id).join(", ");
     const videoModelList = videoModels.map((item) => item.id).join(", ");
@@ -1729,11 +1546,16 @@ ${defaultPrompt}`;
 
   const callChatStreaming = async (
     items: ChatMessage[],
-    onUpdate: (update: { content?: string; thinking?: string; toolCalls?: ToolCall[] }) => void,
-    toolChoiceOverride?: unknown
+    onUpdate: (update: {
+      content?: string;
+      thinking?: string;
+      toolCalls?: ToolCall[];
+    }) => void,
+    toolChoiceOverride?: unknown,
+    options: { allowTools?: boolean; signal?: AbortSignal } = {}
   ) => {
-    const endpoint = provider === "navy" ? "/api/navy/chat" : "/api/chutes/chat";
-    const hasEnabledTools = toolSpec.length > 0;
+    const requestTools =
+      options.allowTools === false ? [] : enabledChatTools;
     const reasoningPayload =
       provider === "navy" && chatModelSupportsReasoning
         ? {
@@ -1747,170 +1569,68 @@ ${defaultPrompt}`;
             reasoningEffort,
           }
         : {};
-    const response = await fetch(endpoint, {
-      method: "POST",
+    const transport = new DefaultChatTransport({
+      api: "/api/studio/chat",
       headers: {
-        "Content-Type": "application/json",
         "x-user-api-key": apiKey,
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...toChatCompletionMessages(
-            items.filter((item) => !item.transient),
-            {
-              includeReasoningContent: provider === "navy",
-            }
-          ),
-        ],
-        ...(
-          hasEnabledTools
-            ? {
-                tools: toolSpec,
-                toolChoice: toolChoiceOverride ?? "auto",
+      prepareSendMessagesRequest: () => ({
+        body: {
+          provider,
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...toChatCompletionMessages(
+              items.filter((item) => !item.transient),
+              {
+                includeReasoningContent: provider === "navy",
               }
-            : { toolChoice: "none" }
-        ),
-        maxTokens: 1024,
-        ...reasoningPayload,
+            ),
+          ],
+          enabledTools: requestTools,
+          ...(requestTools.length
+            ? { toolChoice: toolChoiceOverride ?? "auto" }
+            : {}),
+          maxTokens: 1024,
+          ...reasoningPayload,
+        },
       }),
     });
-
-    if (!response.ok) {
-      const payload = await response.json();
-      throw new Error(payload?.error ?? "Chat request failed.");
-    }
-
-    if (!response.body) {
-      throw new Error("No response body.");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    // Accumulators
-    let contentAcc = "";
-    let thinkingAcc = "";
-    const toolCallsMap = new Map<
-      number,
-      { id?: string; type?: string; name?: string; args: string }
-    >();
-    const buildToolCallsForUpdates = () =>
-      Array.from(toolCallsMap.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([index, tc]) => ({
-          id: tc.id || `pending-tool-${index}`,
-          type: tc.type || "function",
-          function: {
-            name: tc.name || "",
-            arguments: tc.args || "",
-          },
-        }))
-        .filter((tc) => tc.function.name);
-    const buildExecutableToolCalls = () =>
-      Array.from(toolCallsMap.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([, tc]) => ({
-          id: tc.id || "",
-          type: tc.type || "function",
-          function: {
-            name: tc.name || "",
-            arguments: tc.args || "",
-          },
-        }))
-        .filter((tc) => tc.function.name && tc.id);
-
-    const parser = createParser({
-      onEvent: (event: EventSourceMessage) => {
-        if (event.data === "[DONE]") return;
-        try {
-          const json = JSON.parse(event.data);
-          const choice = json.choices?.[0];
-          if (!choice) return;
-
-          const delta =
-            choice.delta && typeof choice.delta === "object"
-              ? (choice.delta as Record<string, unknown>)
-              : {};
-
-          const deltaContent = extractTextFragment(delta.content);
-          if (deltaContent) {
-            contentAcc += deltaContent;
-            onUpdate({ content: contentAcc });
-          }
-
-          const reasoningText =
-            extractReasoningFragment(delta.reasoning_content) ||
-            extractReasoningFragment(delta.reasoning);
-          if (reasoningText) {
-            thinkingAcc += reasoningText;
-            onUpdate({ thinking: thinkingAcc });
-          }
-
-          const rawToolCalls = Array.isArray(delta.tool_calls)
-            ? delta.tool_calls
-            : [];
-          if (rawToolCalls.length) {
-            for (const tc of rawToolCalls) {
-              if (!tc || typeof tc !== "object") continue;
-              const toolRecord = tc as Record<string, unknown>;
-              const fn =
-                toolRecord.function && typeof toolRecord.function === "object"
-                  ? (toolRecord.function as Record<string, unknown>)
-                  : {};
-              const index =
-                typeof toolRecord.index === "number" ? toolRecord.index : 0;
-              if (!toolCallsMap.has(index)) {
-                toolCallsMap.set(index, { args: "" });
-              }
-              const current = toolCallsMap.get(index);
-              if (!current) continue;
-
-              if (typeof toolRecord.id === "string" && toolRecord.id) {
-                current.id = toolRecord.id;
-              }
-              if (typeof toolRecord.type === "string" && toolRecord.type) {
-                current.type = toolRecord.type;
-              }
-              if (typeof fn.name === "string" && fn.name) {
-                current.name = fn.name;
-              }
-              if (typeof fn.arguments === "string" && fn.arguments) {
-                current.args += fn.arguments;
-              }
-            }
-            const toolCalls = buildToolCallsForUpdates();
-
-            if (toolCalls.length > 0) {
-              onUpdate({ toolCalls });
-            }
-          }
-        } catch {
-          // Ignore malformed stream fragments and keep reading.
-        }
-      }
+    const stream = await transport.sendMessages({
+      trigger: "submit-message",
+      chatId: `studio-${provider}`,
+      messageId: undefined,
+      messages: [],
+      abortSignal: options.signal,
     });
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parser.feed(decoder.decode(value, { stream: true }));
-      }
-      parser.feed(decoder.decode());
-    } finally {
-      reader.releaseLock();
+    let finalState = {
+      content: "",
+      thinking: "",
+      toolCalls: [] as ToolCall[],
+      toolErrors: [] as string[],
+    };
+    for await (const uiMessage of readUIMessageStream({
+      stream,
+      terminateOnError: true,
+    })) {
+      finalState = extractAIChatStreamState(uiMessage);
+      onUpdate({
+        content: finalState.content,
+        thinking: finalState.thinking,
+        toolCalls: finalState.toolCalls,
+      });
     }
 
-    // Final result return could be useful, but state is updated via callback
+    if (finalState.toolErrors.length) {
+      throw new Error(finalState.toolErrors.join(" "));
+    }
     return {
-      content: contentAcc,
-      thinking: thinkingAcc,
-      toolCalls: buildExecutableToolCalls(),
+      content: finalState.content,
+      thinking: finalState.thinking,
+      toolCalls: finalState.toolCalls,
     };
   };
-
   const readAssistantTextResponse = async (response: Response) => {
     if (!response.body) {
       throw new Error("No response body.");
@@ -1990,12 +1710,14 @@ ${defaultPrompt}`;
     errorMessage,
     nextAttempt,
     maxAttempts,
+    signal,
   }: {
     targetModel: string;
     currentPrompt: string;
     errorMessage: string;
     nextAttempt: number;
     maxAttempts: number;
+    signal?: AbortSignal;
   }) => {
     const fallbackPrompt = buildSaferImagePromptForModel(targetModel, currentPrompt);
     const recoveryInstruction = buildImagePolicyRecoveryPrompt({
@@ -2038,13 +1760,15 @@ ${defaultPrompt}`;
                 }
               : {}),
           }),
+          signal,
         });
         if (!response.ok) continue;
         const recoveredPrompt = normalizeRecoveredImagePrompt(
           await readAssistantTextResponse(response)
         );
         if (recoveredPrompt) return recoveredPrompt;
-      } catch {
+      } catch (error) {
+        if (isAbortLikeError(error)) throw error;
         // Try the next recovery model before falling back to the local rewrite.
       }
     }
@@ -2118,7 +1842,8 @@ ${defaultPrompt}`;
       prompt?: string;
       images?: ChatImageAsset[];
       error?: string;
-    }) => void
+    }) => void,
+    signal?: AbortSignal
   ) => {
     const rawRequestedModel = getStringArg(args, ["model"]);
     const requestedModel = normalizeImageToolModelRequest({
@@ -2201,6 +1926,7 @@ ${defaultPrompt}`;
             "x-user-api-key": imageApiKey,
           },
           body: JSON.stringify(request.body),
+          signal,
         });
         let payload = await response.json();
         if (!response.ok) {
@@ -2217,6 +1943,7 @@ ${defaultPrompt}`;
                 headers: {
                   "x-user-api-key": imageApiKey,
                 },
+                signal,
               }
             );
             const pollPayload = await pollResponse.json();
@@ -2236,7 +1963,7 @@ ${defaultPrompt}`;
               responseStatus: pollResponse.status,
               currentDelayMs: delayMs,
             });
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            await abortableDelay(delayMs, signal);
           }
           if (!didComplete) {
             throw new Error("Timed out waiting for the Navy image job.");
@@ -2328,6 +2055,7 @@ ${defaultPrompt}`;
           errorMessage: message,
           nextAttempt: state.attempt + 1,
           maxAttempts: state.maxAttempts,
+          signal,
         });
         if (retryPrompt && retryPrompt !== currentPrompt) {
           request.prompt = retryPrompt;
@@ -2414,7 +2142,10 @@ ${defaultPrompt}`;
     };
   };
 
-  const runGenerateVideo = async (args: Record<string, unknown>) => {
+  const runGenerateVideo = async (
+    args: Record<string, unknown>,
+    signal?: AbortSignal
+  ) => {
     if (!apiKey.trim()) {
       throw new Error("Missing API key for video tool.");
     }
@@ -2423,10 +2154,14 @@ ${defaultPrompt}`;
       throw new Error("Tool call missing prompt.");
     }
     const modelOverride = getStringArg(args, ["model"]) || toolVideoModel;
+    const sourceImage =
+      getStringArg(args, ["image_url", "image"]) ||
+      latestGeneratedImageRef.current ||
+      videoImage ||
+      "";
 
     if (provider === "navy") {
       const size = getStringArg(args, ["size"]);
-      const imageUrl = getStringArg(args, ["image_url", "image"]);
       const seconds = getNumberArg(args, ["seconds"]);
       const seed = getNumberArg(args, ["seed"]);
       const createResponse = await fetch("/api/navy/video", {
@@ -2439,30 +2174,36 @@ ${defaultPrompt}`;
           model: modelOverride,
           prompt,
           size: size || undefined,
-          imageUrl: imageUrl || undefined,
+          imageUrl: sourceImage || undefined,
           seconds: seconds ?? undefined,
           seed: seed ?? undefined,
         }),
+        signal,
       });
       const createPayload = await createResponse.json();
       if (!createResponse.ok) {
         throw new Error(createPayload?.error ?? "Unable to start video generation.");
       }
 
-      const jobId =
-        typeof createPayload?.id === "string" ? createPayload.id : "";
-      if (!jobId) {
-        throw new Error("No video job id returned by provider.");
+      const startResult = resolveNavyVideoStartResult(createPayload);
+      const jobId = startResult.jobId;
+      let videoUrl = startResult.videoUrl;
+      if (!videoUrl && !jobId) {
+        throw new Error("No video result or job id returned by provider.");
       }
 
-      let videoUrl = "";
-      for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
+      for (
+        let attempt = 0;
+        !videoUrl && attempt < NAVY_JOB_POLL_MAX_ATTEMPTS;
+        attempt += 1
+      ) {
         const pollResponse = await fetch(
           `/api/navy/video?id=${encodeURIComponent(jobId)}`,
           {
             headers: {
               "x-user-api-key": apiKey,
             },
+            signal,
           }
         );
         const pollPayload = await pollResponse.json();
@@ -2472,9 +2213,7 @@ ${defaultPrompt}`;
           );
         }
         if (!pollPayload?.done) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, NAVY_JOB_POLL_INTERVAL_MS)
-          );
+          await abortableDelay(NAVY_JOB_POLL_INTERVAL_MS, signal);
           continue;
         }
         if (typeof pollPayload?.error === "string" && pollPayload.error.length) {
@@ -2495,6 +2234,7 @@ ${defaultPrompt}`;
           "x-user-api-key": apiKey,
         },
         body: JSON.stringify({ url: videoUrl }),
+        signal,
       });
       if (!downloadResponse.ok) {
         let message = "Unable to download generated video.";
@@ -2525,7 +2265,6 @@ ${defaultPrompt}`;
       };
     }
 
-    const sourceImage = getStringArg(args, ["image", "image_url"]);
     if (!sourceImage) {
       throw new Error("Chutes video generation requires an image URL or data URI.");
     }
@@ -2544,6 +2283,7 @@ ${defaultPrompt}`;
         fps: fps ?? undefined,
         guidance_scale_2: guidanceScale ?? undefined,
       }),
+      signal,
     });
     if (!response.ok) {
       const contentType = response.headers.get("content-type") ?? "";
@@ -2612,7 +2352,10 @@ ${defaultPrompt}`;
     };
   };
 
-  const runGenerateAudio = async (args: Record<string, unknown>) => {
+  const runGenerateAudio = async (
+    args: Record<string, unknown>,
+    signal?: AbortSignal
+  ) => {
     if (!apiKey.trim()) {
       throw new Error("Missing API key for audio tool.");
     }
@@ -2639,6 +2382,7 @@ ${defaultPrompt}`;
           speed: speed ?? undefined,
           responseFormat: responseFormat || undefined,
         }),
+        signal,
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -2682,6 +2426,7 @@ ${defaultPrompt}`;
         speaker: speaker ?? undefined,
         maxDuration: maxDuration ?? undefined,
       }),
+      signal,
     });
     if (!response.ok) {
       const contentType = response.headers.get("content-type") ?? "";
@@ -2862,10 +2607,19 @@ ${defaultPrompt}`;
   const handleToolCalls = async (
     toolCalls: ToolCall[],
     onProgress?: (message: ChatMessage) => void,
-    context?: { assistantContent: string; userPrompt: string }
+    context?: { assistantContent: string; userPrompt: string },
+    signal?: AbortSignal
   ) => {
     const toolMessages: ChatMessage[] = [];
-    for (const toolCall of toolCalls) {
+    const orderedToolCalls = [
+      ...toolCalls.filter(
+        (toolCall) => toolCall.function?.name !== "generate_video"
+      ),
+      ...toolCalls.filter(
+        (toolCall) => toolCall.function?.name === "generate_video"
+      ),
+    ];
+    for (const toolCall of orderedToolCalls) {
       const toolName = toolCall.function?.name ?? "";
       let args: Record<string, unknown> = {};
 
@@ -2949,7 +2703,9 @@ ${defaultPrompt}`;
               })),
               transient: true,
             });
-          });
+          }, signal);
+          latestGeneratedImageRef.current =
+            result.images[0]?.dataUrl ?? latestGeneratedImageRef.current;
           if (saveToGallery && onSaveImages) {
             await onSaveImages({
               images: result.images,
@@ -2978,7 +2734,7 @@ ${defaultPrompt}`;
         }
 
         if (toolName === "generate_video") {
-          const result = await runGenerateVideo(args);
+          const result = await runGenerateVideo(args, signal);
           refreshNavyUsageAfterMediaTool();
           toolMessages.push({
             id: createId(),
@@ -2993,7 +2749,7 @@ ${defaultPrompt}`;
         }
 
         if (toolName === "generate_audio") {
-          const result = await runGenerateAudio(args);
+          const result = await runGenerateAudio(args, signal);
           toolMessages.push({
             id: createId(),
             role: "tool",
@@ -3015,6 +2771,7 @@ ${defaultPrompt}`;
           name: toolName || undefined,
         });
       } catch (error) {
+        if (isAbortLikeError(error)) throw error;
         toolMessages.push({
           id: createId(),
           role: "tool",
@@ -3054,6 +2811,8 @@ ${defaultPrompt}`;
     }
     setChatError(null);
     setChatBusy(true);
+    const abortController = new AbortController();
+    chatAbortControllerRef.current = abortController;
 
     const userMessage: ChatMessage = {
       id: createId(),
@@ -3066,9 +2825,11 @@ ${defaultPrompt}`;
     let currentMessages: ChatMessage[] = [...messagesRef.current, userMessage];
     commitMessages(currentMessages);
     const forcedToolCall = detectForcedToolCall(trimmed, toolSettings);
+    let toolRounds = 0;
 
     try {
-      for (let step = 0; step < 3; step += 1) {
+      for (let step = 0; step < MAX_CHAT_MODEL_STEPS; step += 1) {
+        const allowTools = toolRounds < MAX_CHAT_TOOL_ROUNDS;
         // Create placeholder assistant message
         const assistantId = createId();
         const assistantMessage: ChatMessage = {
@@ -3098,9 +2859,10 @@ ${defaultPrompt}`;
             });
             commitMessages(currentMessages);
           },
-          step === 0 && forcedToolCall
+          step === 0 && forcedToolCall && allowTools
             ? { type: "function", function: { name: forcedToolCall } }
-            : undefined
+            : undefined,
+          { allowTools, signal: abortController.signal }
         );
 
         // After stream is done, final update to ensure consistency (and clean up any missing fields)
@@ -3184,12 +2946,14 @@ ${defaultPrompt}`;
               const toolMessages = await handleToolCalls(
                 [syntheticToolCall],
                 applyProgressMessage,
-                { assistantContent: assistantToolContext, userPrompt: trimmed }
+                { assistantContent: assistantToolContext, userPrompt: trimmed },
+                abortController.signal
               );
               if (toolMessages.length) {
                 removeProgressMessages([syntheticToolCall]);
                 currentMessages = [...currentMessages, ...toolMessages];
                 commitMessages(currentMessages);
+                toolRounds += 1;
                 continue;
               }
             }
@@ -3201,17 +2965,24 @@ ${defaultPrompt}`;
         const toolMessages = await handleToolCalls(
           finalToolCalls,
           applyProgressMessage,
-          { assistantContent: assistantToolContext, userPrompt: trimmed }
+          { assistantContent: assistantToolContext, userPrompt: trimmed },
+          abortController.signal
         );
         removeProgressMessages(finalToolCalls);
         currentMessages = [...currentMessages, ...toolMessages];
         commitMessages(currentMessages);
+        toolRounds += 1;
       }
     } catch (error) {
-      setChatError(
-        error instanceof Error ? error.message : "Unable to run chat."
-      );
+      if (!isAbortLikeError(error)) {
+        setChatError(
+          error instanceof Error ? error.message : "Unable to run chat."
+        );
+      }
     } finally {
+      if (chatAbortControllerRef.current === abortController) {
+        chatAbortControllerRef.current = null;
+      }
       const nextQueuedTurn = takeNextQueuedTurn();
       if (nextQueuedTurn) {
         void runChatTurn(nextQueuedTurn.content, nextQueuedTurn.attachments);
@@ -3219,6 +2990,11 @@ ${defaultPrompt}`;
         setChatBusy(false);
       }
     }
+  };
+
+  const stopChat = () => {
+    updateQueuedTurns([]);
+    chatAbortControllerRef.current?.abort();
   };
 
   const submitMessage = () => {
@@ -4247,6 +4023,19 @@ ${defaultPrompt}`;
                 rows={1}
               />
             </div>
+            {busy ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={stopChat}
+                title="Stop current request"
+                aria-label="Stop current request"
+                className="mb-1 h-10 w-10 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Square className="h-4 w-4 fill-current" />
+              </Button>
+            ) : null}
             <Button
               size="icon"
               onClick={() => void submitMessage()}
@@ -4271,6 +4060,11 @@ ${defaultPrompt}`;
             {attachmentUploadDisabled ? (
               <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
                 Uploads unavailable for this model metadata
+              </span>
+            ) : null}
+            {chatModelToolCapability === false ? (
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
+                Model does not advertise tool calling; explicit generation uses local fallback
               </span>
             ) : null}
           </div>

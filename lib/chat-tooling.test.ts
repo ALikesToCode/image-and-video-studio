@@ -15,6 +15,7 @@ import {
   repairImageToolArguments,
   resolveToolArguments,
   resolveRequestedImageModels,
+  resolveNavyVideoStartResult,
   runImageModelFallbackSequence,
   runImageModelPipelineParallel,
   sanitizeChatAttachmentAssets,
@@ -25,6 +26,23 @@ import {
   stripHeavyMediaFromMessagesForStorage,
   toChatCompletionMessages,
 } from "./chat-tooling.ts";
+
+test("Navy chat video accepts immediate URLs and queued job ids", () => {
+  assert.deepEqual(
+    resolveNavyVideoStartResult({
+      videoUrl: "https://media.example/video.mp4",
+      status: "completed",
+    }),
+    {
+      videoUrl: "https://media.example/video.mp4",
+      jobId: "",
+    }
+  );
+  assert.deepEqual(resolveNavyVideoStartResult({ id: "job_123" }), {
+    videoUrl: "",
+    jobId: "job_123",
+  });
+});
 
 test("Chat media preview keeps generated image metadata for fullscreen viewer", () => {
   const preview = buildChatMediaPreview({
@@ -68,6 +86,17 @@ test("Forced tool detection recognizes explicit video requests", () => {
       audio: true,
     }),
     "generate_video"
+  );
+});
+
+test("Forced tool detection does not turn unrelated creation requests into images", () => {
+  assert.equal(
+    detectForcedToolCall("Create a short poem about summer rain.", {
+      image: true,
+      video: true,
+      audio: true,
+    }),
+    null
   );
 });
 

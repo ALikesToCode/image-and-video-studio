@@ -3,6 +3,7 @@ import {
   jsonSchema,
   type ModelMessage,
   type ToolSet,
+  type UIMessage,
 } from "ai";
 
 import {
@@ -20,6 +21,15 @@ export const AI_CHAT_TOOL_NAMES = [
 ] as const;
 
 export type AIChatToolName = (typeof AI_CHAT_TOOL_NAMES)[number];
+
+export type AIChatToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
 
 const IMAGE_TOOL_SCHEMA = {
   type: "object",
@@ -405,4 +415,68 @@ export const normalizeAIChatToolChoice = (
     return { type: "tool" as const, toolName: name };
   }
   return "auto" as const;
+};
+
+export const extractAIChatStreamState = (message: UIMessage) => {
+  const content: string[] = [];
+  const thinking: string[] = [];
+  const toolCalls: AIChatToolCall[] = [];
+  const toolErrors: string[] = [];
+
+  for (const part of message.parts) {
+    if (part.type === "text") {
+      content.push(part.text);
+      continue;
+    }
+    if (part.type === "reasoning") {
+      thinking.push(part.text);
+      continue;
+    }
+    if (part.type !== "dynamic-tool") continue;
+    if (part.state === "output-error") {
+      toolErrors.push(
+        part.errorText || `Invalid arguments for ${part.toolName}.`
+      );
+      continue;
+    }
+    if (part.state !== "input-available") continue;
+    toolCalls.push({
+      id: part.toolCallId,
+      type: "function",
+      function: {
+        name: part.toolName,
+        arguments: JSON.stringify(part.input ?? {}),
+      },
+    });
+  }
+
+  return {
+    content: content.join(""),
+    thinking: thinking.join(""),
+    toolCalls,
+    toolErrors,
+  };
+};
+
+export const chatModelToolSupport = (
+  model:
+    | {
+        supportsTools?: boolean | null;
+        supportsFunctionCalling?: boolean | null;
+      }
+    | undefined
+) => {
+  if (
+    model?.supportsTools === true ||
+    model?.supportsFunctionCalling === true
+  ) {
+    return true;
+  }
+  if (
+    model?.supportsTools === false ||
+    model?.supportsFunctionCalling === false
+  ) {
+    return false;
+  }
+  return null;
 };
