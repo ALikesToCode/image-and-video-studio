@@ -60,6 +60,7 @@ import {
   CHUTES_TTS_MODELS as STATIC_CHUTES_TTS_MODELS,
   CHUTES_VIDEO_MODELS as STATIC_CHUTES_VIDEO_MODELS,
   NANOGPT_IMAGE_MODELS as STATIC_NANOGPT_IMAGE_MODELS,
+  NANOGPT_VIDEO_MODELS as STATIC_NANOGPT_VIDEO_MODELS,
   NAVY_CHAT_MODELS as STATIC_NAVY_CHAT_MODELS,
   NAVY_IMAGE_MODELS as STATIC_NAVY_IMAGE_MODELS,
   NAVY_TTS_MODELS as STATIC_NAVY_TTS_MODELS,
@@ -95,9 +96,12 @@ import {
   type ChatMediaAsset,
   buildChatMediaPreview,
   buildAssistantToolContextContent,
+  buildNanoGptImageToolRequest,
+  buildNanoGptVideoToolRequest,
   createSyntheticFallbackToolCall,
   detectForcedToolCall,
   isDeepSeekV4Model,
+  isChatVideoModelSupported,
   normalizeImageToolModelRequest,
   repairImageToolArguments,
   resolveNavyVideoStartResult,
@@ -167,6 +171,7 @@ type ChutesChatProps = {
   imageModels: ModelOption[];
   imageApiKeys?: Partial<Record<Provider, string>>;
   videoModels: ModelOption[];
+  videoApiKeys?: Partial<Record<Provider, string>>;
   audioModels: ModelOption[];
   toolImageModel: string;
   setToolImageModel: (value: string) => void;
@@ -196,6 +201,7 @@ type ChutesChatProps = {
     images: ChatImageAsset[];
     prompt: string;
     model: string;
+    provider: Provider;
   }) => Promise<void> | void;
 };
 
@@ -365,13 +371,13 @@ const STATIC_MODEL_IDS = {
   chutes: {
     chat: idsFor(STATIC_CHUTES_LLM_MODELS),
     image: idsForGroups([STATIC_CHUTES_IMAGE_MODELS, STATIC_NANOGPT_IMAGE_MODELS]),
-    video: idsFor(STATIC_CHUTES_VIDEO_MODELS),
+    video: idsForGroups([STATIC_CHUTES_VIDEO_MODELS, STATIC_NANOGPT_VIDEO_MODELS]),
     audio: idsFor(STATIC_CHUTES_TTS_MODELS),
   },
   navy: {
     chat: idsFor(STATIC_NAVY_CHAT_MODELS),
     image: idsForGroups([STATIC_NAVY_IMAGE_MODELS, STATIC_NANOGPT_IMAGE_MODELS]),
-    video: idsFor(STATIC_NAVY_VIDEO_MODELS),
+    video: idsForGroups([STATIC_NAVY_VIDEO_MODELS, STATIC_NANOGPT_VIDEO_MODELS]),
     audio: idsFor(STATIC_NAVY_TTS_MODELS),
   },
 } satisfies Record<ChatProvider, Record<"chat" | "image" | "video" | "audio", Set<string>>>;
@@ -918,6 +924,7 @@ export function ChutesChat({
   imageModels,
   imageApiKeys,
   videoModels,
+  videoApiKeys,
   audioModels,
   toolImageModel,
   setToolImageModel,
@@ -1107,6 +1114,25 @@ export function ChutesChat({
     (targetProvider: Provider) =>
       (imageApiKeys?.[targetProvider] ?? (targetProvider === provider ? apiKey : "")).trim(),
     [apiKey, imageApiKeys, provider]
+  );
+  const videoModelById = useMemo(
+    () => new Map(videoModels.map((item) => [item.id, item])),
+    [videoModels]
+  );
+  const videoProviderByModelId = useMemo(() => {
+    const entries = new Map<string, Provider>();
+    for (const item of videoModels) {
+      entries.set(
+        item.id,
+        isImageToolProvider(item.provider) ? item.provider : provider
+      );
+    }
+    return entries;
+  }, [videoModels, provider]);
+  const videoApiKeyForProvider = useCallback(
+    (targetProvider: Provider) =>
+      (videoApiKeys?.[targetProvider] ?? (targetProvider === provider ? apiKey : "")).trim(),
+    [apiKey, provider, videoApiKeys]
   );
   const orderedToolImageModels = useMemo(
     () => imageModelOrder.filter((entry) => availableImageModelIds.has(entry)),
@@ -1868,38 +1894,59 @@ ${defaultPrompt}`;
       throw new Error("Tool call missing prompt.");
     }
     const negativePrompt = getStringArg(finalArgs, ["negative_prompt"]);
-    const baseBody: Record<string, unknown> = {};
-    if (provider === "navy") {
-      const size = getStringArg(finalArgs, ["size"]);
-      const quality = getStringArg(finalArgs, ["quality"]);
-      const style = getStringArg(finalArgs, ["style"]);
+    const imageRequests = modelsToRun.map((targetModel) => {
+      const targetProvider = imageProviderByModelId.get(targetModel) ?? provider;
+      const targetModelOption = imageModels.find((entry) => entry.id === targetModel);
+      if (targetProvider === "nanogpt" && targetModelOption) {
+        const [prepared] = prepareImageModelRequests({
+          models: [targetModel],
+          baseBody: {},
+          prompt,
+          negativePrompt: negativePrompt || undefined,
+          includeNegativePrompt: false,
+        });
+        return {
+          ...prepared,
+          body: buildNanoGptImageToolRequest({
+            model: targetModelOption,
+            prompt: prepared.prompt,
+            args: finalArgs,
+          }),
+        };
+      }
+
+      const baseBody: Record<string, unknown> = {};
       const imageUrl = getStringOrStringArrayArg(finalArgs, ["image_url", "image"]);
-      if (size) Object.assign(baseBody, resolveNavyChatImageSizing(size));
-      if (quality) baseBody.quality = quality;
-      if (style) baseBody.style = style;
-      if (imageUrl) baseBody.imageUrl = imageUrl;
-      baseBody.sync = false;
-    } else {
-      const imageUrl = getStringOrStringArrayArg(finalArgs, ["image_url", "image"]);
-      const guidanceScale = getNumberArg(finalArgs, ["guidance_scale"]);
-      const width = getNumberArg(finalArgs, ["width"]);
-      const height = getNumberArg(finalArgs, ["height"]);
-      const steps = getNumberArg(finalArgs, ["num_inference_steps"]);
-      const seed = getNumberArg(finalArgs, ["seed"]);
-      const resolution = getStringArg(finalArgs, ["resolution"]);
-      baseBody.guidanceScale = guidanceScale ?? undefined;
-      baseBody.width = width ? Math.round(width) : undefined;
-      baseBody.height = height ? Math.round(height) : undefined;
-      baseBody.resolution = resolution || undefined;
-      baseBody.numInferenceSteps = steps ? Math.round(steps) : undefined;
-      baseBody.seed = seed !== null ? Math.round(seed) : null;
-      if (imageUrl) baseBody.imageUrl = imageUrl;
-    }
-    const imageRequests = prepareImageModelRequests({
-      models: modelsToRun,
-      baseBody,
-      prompt,
-      negativePrompt: negativePrompt || undefined,
+      if (targetProvider === "navy") {
+        const size = getStringArg(finalArgs, ["size"]);
+        const quality = getStringArg(finalArgs, ["quality"]);
+        const style = getStringArg(finalArgs, ["style"]);
+        if (size) Object.assign(baseBody, resolveNavyChatImageSizing(size));
+        if (quality) baseBody.quality = quality;
+        if (style) baseBody.style = style;
+        if (imageUrl) baseBody.imageUrl = imageUrl;
+        baseBody.sync = false;
+      } else {
+        const guidanceScale = getNumberArg(finalArgs, ["guidance_scale"]);
+        const width = getNumberArg(finalArgs, ["width"]);
+        const height = getNumberArg(finalArgs, ["height"]);
+        const steps = getNumberArg(finalArgs, ["num_inference_steps"]);
+        const seed = getNumberArg(finalArgs, ["seed"]);
+        const resolution = getStringArg(finalArgs, ["resolution"]);
+        baseBody.guidanceScale = guidanceScale ?? undefined;
+        baseBody.width = width ? Math.round(width) : undefined;
+        baseBody.height = height ? Math.round(height) : undefined;
+        baseBody.resolution = resolution || undefined;
+        baseBody.numInferenceSteps = steps ? Math.round(steps) : undefined;
+        baseBody.seed = seed !== null ? Math.round(seed) : null;
+        if (imageUrl) baseBody.imageUrl = imageUrl;
+      }
+      return prepareImageModelRequests({
+        models: [targetModel],
+        baseBody,
+        prompt,
+        negativePrompt: negativePrompt || undefined,
+      })[0];
     });
     const imageRequestByModel = new Map(
       imageRequests.map((request) => [request.model, request])
@@ -1984,7 +2031,7 @@ ${defaultPrompt}`;
         }
         const parsedImages = (
           await Promise.all(
-            images.map(async (image) => {
+            images.map(async (image): Promise<ChatImageAsset | null> => {
               const data =
                 typeof image?.data === "string" && image.data
                   ? image.data
@@ -2003,6 +2050,7 @@ ${defaultPrompt}`;
                   dataUrl: dataUrlFromBase64(data, mimeType),
                   mimeType,
                   model: targetModel,
+                  provider: targetProvider,
                 };
               }
               if (typeof image?.url === "string") {
@@ -2012,6 +2060,7 @@ ${defaultPrompt}`;
                   dataUrl,
                   mimeType,
                   model: targetModel,
+                  provider: targetProvider,
                 };
               }
               return null;
@@ -2020,7 +2069,7 @@ ${defaultPrompt}`;
         ).filter(
           (
             item
-          ): item is { id: string; dataUrl: string; mimeType: string; model: string } =>
+          ): item is ChatImageAsset =>
             !!item
         );
         if (!parsedImages.length) {
@@ -2146,21 +2195,27 @@ ${defaultPrompt}`;
     args: Record<string, unknown>,
     signal?: AbortSignal
   ) => {
-    if (!apiKey.trim()) {
-      throw new Error("Missing API key for video tool.");
-    }
     const prompt = getStringArg(args, ["prompt"]);
     if (!prompt) {
       throw new Error("Tool call missing prompt.");
     }
     const modelOverride = getStringArg(args, ["model"]) || toolVideoModel;
+    const targetModel = videoModelById.get(modelOverride);
+    if (!targetModel || !isChatVideoModelSupported(targetModel)) {
+      throw new Error(`Video model ${modelOverride || "(none)"} is not available to chat.`);
+    }
+    const targetProvider = videoProviderByModelId.get(modelOverride) ?? provider;
+    const targetApiKey = videoApiKeyForProvider(targetProvider);
+    if (!targetApiKey) {
+      throw new Error(`Missing ${imageProviderLabel(targetProvider)} API key for video tool.`);
+    }
     const sourceImage =
       getStringArg(args, ["image_url", "image"]) ||
       latestGeneratedImageRef.current ||
       videoImage ||
       "";
 
-    if (provider === "navy") {
+    if (targetProvider === "navy") {
       const size = getStringArg(args, ["size"]);
       const seconds = getNumberArg(args, ["seconds"]);
       const seed = getNumberArg(args, ["seed"]);
@@ -2168,7 +2223,7 @@ ${defaultPrompt}`;
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-api-key": apiKey,
+          "x-user-api-key": targetApiKey,
         },
         body: JSON.stringify({
           model: modelOverride,
@@ -2201,7 +2256,7 @@ ${defaultPrompt}`;
           `/api/navy/video?id=${encodeURIComponent(jobId)}`,
           {
             headers: {
-              "x-user-api-key": apiKey,
+              "x-user-api-key": targetApiKey,
             },
             signal,
           }
@@ -2213,7 +2268,12 @@ ${defaultPrompt}`;
           );
         }
         if (!pollPayload?.done) {
-          await abortableDelay(NAVY_JOB_POLL_INTERVAL_MS, signal);
+          const delayMs = resolveNavyJobPollDelayMs({
+            payload: pollPayload,
+            responseStatus: pollResponse.status,
+            currentDelayMs: NAVY_JOB_POLL_INTERVAL_MS,
+          });
+          await abortableDelay(delayMs, signal);
           continue;
         }
         if (typeof pollPayload?.error === "string" && pollPayload.error.length) {
@@ -2231,7 +2291,7 @@ ${defaultPrompt}`;
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-api-key": apiKey,
+          "x-user-api-key": targetApiKey,
         },
         body: JSON.stringify({ url: videoUrl }),
         signal,
@@ -2265,6 +2325,113 @@ ${defaultPrompt}`;
       };
     }
 
+    if (targetProvider === "nanogpt") {
+      const requiresSourceImage =
+        targetModel.supports?.imageToVideo === true &&
+        targetModel.supports.textToVideo === false;
+      if (requiresSourceImage && !sourceImage) {
+        throw new Error(`${targetModel.label} requires a source image.`);
+      }
+      const createResponse = await fetch("/api/nanogpt/video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": targetApiKey,
+        },
+        body: JSON.stringify(
+          buildNanoGptVideoToolRequest({
+            model: targetModel,
+            prompt,
+            sourceImage,
+            args,
+          })
+        ),
+        signal,
+      });
+      const createPayload = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(createPayload?.error ?? "Unable to start NanoGPT video generation.");
+      }
+      const jobId =
+        typeof createPayload?.id === "string"
+          ? createPayload.id
+          : typeof createPayload?.runId === "string"
+            ? createPayload.runId
+            : "";
+      if (!jobId) {
+        throw new Error("No NanoGPT video job id returned.");
+      }
+
+      let completed = false;
+      let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
+      for (
+        let attempt = 0;
+        !completed && attempt < NAVY_JOB_POLL_MAX_ATTEMPTS;
+        attempt += 1
+      ) {
+        await abortableDelay(delayMs, signal);
+        const pollResponse = await fetch(
+          `/api/nanogpt/video?id=${encodeURIComponent(jobId)}`,
+          {
+            headers: { "x-user-api-key": targetApiKey },
+            signal,
+          }
+        );
+        const pollPayload = await pollResponse.json();
+        if (!pollResponse.ok) {
+          throw new Error(pollPayload?.error ?? "Unable to check NanoGPT video status.");
+        }
+        completed = pollPayload?.done === true;
+        if (!completed) {
+          delayMs = resolveNavyJobPollDelayMs({
+            payload: pollPayload,
+            responseStatus: pollResponse.status,
+            currentDelayMs: delayMs,
+          });
+        }
+      }
+      if (!completed) {
+        throw new Error("NanoGPT video generation timed out before completion.");
+      }
+
+      const downloadResponse = await fetch("/api/nanogpt/video/download", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": targetApiKey,
+        },
+        body: JSON.stringify({ id: jobId }),
+        signal,
+      });
+      if (!downloadResponse.ok) {
+        let message = "Unable to download generated NanoGPT video.";
+        try {
+          const payload = await downloadResponse.json();
+          if (typeof payload?.error === "string" && payload.error) {
+            message = payload.error;
+          }
+        } catch {
+          // Keep the concise fallback when the route returns a non-JSON error.
+        }
+        throw new Error(message);
+      }
+      const blob = await downloadResponse.blob();
+      const mimeType = blob.type || "video/mp4";
+      return {
+        media: [
+          {
+            id: createId(),
+            kind: "video" as const,
+            dataUrl: await blobToDataUrl(blob),
+            mimeType,
+            model: modelOverride,
+          },
+        ],
+        model: modelOverride,
+        prompt,
+      };
+    }
+
     if (!sourceImage) {
       throw new Error("Chutes video generation requires an image URL or data URI.");
     }
@@ -2274,7 +2441,7 @@ ${defaultPrompt}`;
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-user-api-key": apiKey,
+        "x-user-api-key": targetApiKey,
       },
       body: JSON.stringify({
         prompt,
@@ -2707,11 +2874,24 @@ ${defaultPrompt}`;
           latestGeneratedImageRef.current =
             result.images[0]?.dataUrl ?? latestGeneratedImageRef.current;
           if (saveToGallery && onSaveImages) {
-            await onSaveImages({
-              images: result.images,
-              prompt: result.prompt,
-              model: result.model,
-            });
+            const imagesByProvider = new Map<Provider, ChatImageAsset[]>();
+            for (const image of result.images) {
+              const targetProvider = image.provider ?? provider;
+              imagesByProvider.set(targetProvider, [
+                ...(imagesByProvider.get(targetProvider) ?? []),
+                image,
+              ]);
+            }
+            for (const [targetProvider, images] of imagesByProvider) {
+              await onSaveImages({
+                images,
+                prompt: result.prompt,
+                model: Array.from(
+                  new Set(images.map((image) => image.model).filter(Boolean))
+                ).join(", ") || result.model,
+                provider: targetProvider,
+              });
+            }
           }
           refreshNavyUsageAfterMediaTool();
           const imageStatus = result.errors.length

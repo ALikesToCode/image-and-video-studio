@@ -5,9 +5,10 @@ import {
     CHUTES_IMAGE_MODELS,
     CHUTES_TTS_MODELS,
     CHUTES_VIDEO_MODELS,
-    NANOGPT_IMAGE_MODELS,
     type ModelOption,
+    type Provider,
 } from "@/lib/constants";
+import { isChatVideoModelSupported, type ChatImageAsset } from "@/lib/chat-tooling";
 
 type ChatViewProps = {
     initialInput?: string | null;
@@ -49,6 +50,8 @@ export function ChatView({ initialInput }: ChatViewProps) {
         navyImageModels,
         navyVideoModels,
         navyTtsModels,
+        nanoGptImageModels,
+        nanoGptVideoModels,
         navyUsage,
         navyUsageError,
         navyUsageLoading,
@@ -86,23 +89,34 @@ export function ChatView({ initialInput }: ChatViewProps) {
     const chatModel = isNavyChat ? navyChatModel : chutesChatModel;
     const setChatModel = isNavyChat ? setNavyChatModel : setChutesChatModel;
     const chutesImageToolModels = useMemo(
-        () => appendUniqueModels(CHUTES_IMAGE_MODELS, NANOGPT_IMAGE_MODELS),
-        []
+        () => appendUniqueModels(CHUTES_IMAGE_MODELS, nanoGptImageModels),
+        [nanoGptImageModels]
     );
     const navyImageToolModels = useMemo(
-        () => appendUniqueModels(navyImageModels, NANOGPT_IMAGE_MODELS),
-        [navyImageModels]
+        () => appendUniqueModels(navyImageModels, nanoGptImageModels),
+        [navyImageModels, nanoGptImageModels]
     );
     const imageModels = isNavyChat ? navyImageToolModels : chutesImageToolModels;
-    const videoModels = isNavyChat ? navyVideoModels : CHUTES_VIDEO_MODELS;
+    const videoModels = useMemo(
+        () =>
+            appendUniqueModels(
+                isNavyChat ? navyVideoModels : CHUTES_VIDEO_MODELS,
+                nanoGptVideoModels
+            ).filter(isChatVideoModelSupported),
+        [isNavyChat, navyVideoModels, nanoGptVideoModels]
+    );
     const audioModels = isNavyChat ? navyTtsModels : CHUTES_TTS_MODELS;
     const toolImageModel = isNavyChat ? navyToolImageModel : chutesToolImageModel;
     const setToolImageModel = isNavyChat ? setNavyToolImageModel : setChutesToolImageModel;
     const modelsLoading = isNavyChat ? navyChatModelsLoading : chutesChatModelsLoading;
     const modelsError = isNavyChat ? navyChatModelsError : chutesChatModelsError;
     const onRefreshModels = isNavyChat ? refreshNavyChatModels : refreshChutesChatModels;
-    const handleSaveImages = (payload: { images: { id: string; dataUrl: string; mimeType: string }[]; prompt: string; model: string }) =>
-        saveChatImages({ ...payload, provider: chatProvider });
+    const handleSaveImages = (payload: {
+        images: ChatImageAsset[];
+        prompt: string;
+        model: string;
+        provider: Provider;
+    }) => saveChatImages(payload);
 
     useEffect(() => {
         if (!isNavyChat) return;
@@ -138,6 +152,7 @@ export function ChatView({ initialInput }: ChatViewProps) {
                 imageModels={imageModels}
                 imageApiKeys={apiKeys}
                 videoModels={videoModels}
+                videoApiKeys={apiKeys}
                 audioModels={audioModels}
                 toolImageModel={toolImageModel}
                 setToolImageModel={setToolImageModel}
