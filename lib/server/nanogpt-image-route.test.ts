@@ -95,6 +95,57 @@ test("NanoGPT image route posts normalized capability-safe requests", async () =
   }
 });
 
+test("NanoGPT image route forwards only documented catalog parameters", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | null = null;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return Response.json({ data: [{ b64_json: "bmFubw==" }] });
+  };
+
+  try {
+    const response = await nanoGptImagePost(
+      new Request("https://studio.test/api/nanogpt/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "nano-secret",
+        },
+        body: JSON.stringify({
+          model: "catalog/image-model",
+          prompt: "A cinematic harbor",
+          parameters: {
+            resolution: "1024x1024",
+            aspect_ratio: "16:9",
+            quality: "high",
+            output_format: "webp",
+            seed: 17,
+            arbitrary_provider_field: "must-not-pass",
+          },
+          modelCapabilities: {
+            supportedResolutions: ["1024x1024"],
+            maxOutputImages: 1,
+          },
+        }),
+      })
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(requestBody, {
+      model: "catalog/image-model",
+      prompt: "A cinematic harbor",
+      n: 1,
+      resolution: "1024x1024",
+      aspect_ratio: "16:9",
+      quality: "high",
+      output_format: "webp",
+      seed: 17,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("NanoGPT image route clamps outputs and references to discovered limits", async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | null = null;

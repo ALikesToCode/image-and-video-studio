@@ -24,6 +24,11 @@ type ImageRequest = {
   prompt?: string;
   size?: string;
   resolution?: string;
+  aspectRatio?: string;
+  aspect_ratio?: string;
+  quality?: string;
+  outputFormat?: string;
+  output_format?: string;
   width?: number;
   height?: number;
   n?: number;
@@ -37,6 +42,7 @@ type ImageRequest = {
   image_url?: string | string[];
   input_references?: Array<string | { image_url?: { url?: string } }>;
   modelCapabilities?: ImageModelCapabilities;
+  parameters?: Record<string, unknown>;
   compatibilityMode?: "legacy";
 };
 
@@ -59,6 +65,18 @@ const asPositiveInt = (value: unknown) => {
   return Math.round(value);
 };
 
+const parameterRecord = (body: ImageRequest) =>
+  body.parameters &&
+  typeof body.parameters === "object" &&
+  !Array.isArray(body.parameters)
+    ? body.parameters
+    : {};
+
+const normalizeShortString = (value: unknown, maxLength = 64) =>
+  typeof value === "string" && value.trim() && value.trim().length <= maxLength
+    ? value.trim()
+    : undefined;
+
 const normalizeSize = (body: ImageRequest) => {
   if (typeof body.size === "string" && body.size.trim()) {
     return body.size.trim();
@@ -66,6 +84,11 @@ const normalizeSize = (body: ImageRequest) => {
   if (typeof body.resolution === "string" && body.resolution.trim()) {
     return body.resolution.trim();
   }
+  const catalogResolution = normalizeShortString(
+    parameterRecord(body).resolution,
+    64,
+  );
+  if (catalogResolution) return catalogResolution;
   const width = asPositiveInt(body.width);
   const height = asPositiveInt(body.height);
   if (width && height) return `${width}x${height}`;
@@ -329,8 +352,28 @@ export async function POST(req: Request) {
     n: clampImageCount(body, capabilities),
   };
   if (size) normalizedPayload.resolution = size;
-  if (typeof body.seed === "number" && Number.isFinite(body.seed)) {
-    normalizedPayload.seed = Math.round(body.seed);
+  const catalogParameters = parameterRecord(body);
+  const aspectRatio = normalizeShortString(
+    body.aspectRatio ?? body.aspect_ratio ?? catalogParameters.aspect_ratio,
+    32,
+  );
+  const quality = normalizeShortString(body.quality ?? catalogParameters.quality);
+  const outputFormat = normalizeShortString(
+    body.outputFormat ?? body.output_format ?? catalogParameters.output_format,
+    32,
+  );
+  const seed =
+    typeof body.seed === "number" && Number.isFinite(body.seed)
+      ? body.seed
+      : typeof catalogParameters.seed === "number" &&
+          Number.isFinite(catalogParameters.seed)
+        ? catalogParameters.seed
+        : undefined;
+  if (aspectRatio) normalizedPayload.aspect_ratio = aspectRatio;
+  if (quality) normalizedPayload.quality = quality;
+  if (outputFormat) normalizedPayload.output_format = outputFormat;
+  if (seed !== undefined) {
+    normalizedPayload.seed = Math.round(seed);
   }
   if (inputReferences.length) {
     normalizedPayload.input_references = inputReferences;
