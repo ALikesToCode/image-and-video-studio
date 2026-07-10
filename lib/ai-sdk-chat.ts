@@ -127,12 +127,7 @@ const AUDIO_TOOL_SCHEMA = {
     input: {
       type: "string",
       minLength: 1,
-      description: "Speech text for OpenAI-compatible TTS models.",
-    },
-    text: {
-      type: "string",
-      minLength: 1,
-      description: "Speech text for Chutes voice models.",
+      description: "The exact text to synthesize as speech.",
     },
     model: { type: "string", minLength: 1 },
     voice: { type: "string", minLength: 1 },
@@ -144,10 +139,7 @@ const AUDIO_TOOL_SCHEMA = {
     speaker: { type: "integer", minimum: 0 },
     max_duration_ms: { type: "integer", minimum: 100, maximum: 600000 },
   },
-  anyOf: [
-    { type: "object", required: ["input"] },
-    { type: "object", required: ["text"] },
-  ],
+  required: ["input"],
 } as const;
 
 const TOOL_DEFINITIONS = {
@@ -163,7 +155,7 @@ const TOOL_DEFINITIONS = {
   },
   generate_audio: {
     description:
-      "Use only when the user wants speech audio created now, not when audio is only source material or context. Use the configured voice model, input for OpenAI-compatible TTS, and text for Chutes voice models.",
+      "Use only when the user wants speech audio created now, not when audio is only source material or context. Put the exact speech text in input and use the configured voice model.",
     schema: AUDIO_TOOL_SCHEMA,
   },
 } as const;

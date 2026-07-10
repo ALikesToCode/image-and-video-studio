@@ -146,6 +146,45 @@ test("AI SDK tools are server-owned and restricted to the supported allowlist", 
   assert.equal("execute" in tools.generate_audio, false);
 });
 
+test("AI SDK media tools expose provider-compatible object schemas", async () => {
+  const tools = buildAIChatTools([
+    "generate_image",
+    "generate_video",
+    "generate_audio",
+  ]);
+  const unsupportedTopLevelKeywords = [
+    "oneOf",
+    "anyOf",
+    "allOf",
+    "enum",
+    "const",
+    "not",
+  ];
+
+  for (const name of [
+    "generate_image",
+    "generate_video",
+    "generate_audio",
+  ] as const) {
+    const schema = await asSchema(tools[name].inputSchema).jsonSchema;
+    assert.equal(schema.type, "object", `${name} must use an object schema`);
+    for (const keyword of unsupportedTopLevelKeywords) {
+      assert.equal(
+        keyword in schema,
+        false,
+        `${name} must not use top-level ${keyword}`
+      );
+    }
+  }
+
+  const audioSchema = await asSchema(
+    tools.generate_audio.inputSchema
+  ).jsonSchema;
+  assert.deepEqual(audioSchema.required, ["input"]);
+  assert.equal("input" in (audioSchema.properties ?? {}), true);
+  assert.equal("text" in (audioSchema.properties ?? {}), false);
+});
+
 test("AI SDK media tools describe execution intent, not prompt-writing tasks", () => {
   const tools = buildAIChatTools([
     "generate_image",
