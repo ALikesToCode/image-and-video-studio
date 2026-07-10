@@ -11,6 +11,7 @@ import {
     CHUTES_VIDEO_MODELS,
     CHUTES_TTS_MODELS,
     NANOGPT_IMAGE_MODELS,
+    NANOGPT_VIDEO_MODELS,
     OPENROUTER_IMAGE_MODELS,
     NAVY_IMAGE_MODELS,
     NAVY_IMAGE_QUALITIES,
@@ -176,6 +177,8 @@ const STORAGE_KEYS = {
     navyImageModels: "studio_navy_image_models",
     navyVideoModels: "studio_navy_video_models",
     navyTtsModels: "studio_navy_tts_models",
+    nanoGptImageModels: "studio_nanogpt_image_models",
+    nanoGptVideoModels: "studio_nanogpt_video_models",
     chatProvider: "studio_chat_provider",
     chutesChatModels: "studio_chutes_chat_models",
     chutesChatModel: "studio_chutes_chat_model",
@@ -221,7 +224,7 @@ type GenerateOptions = {
     prompt?: string;
 };
 
-const MAX_CACHED_MODELS = 200;
+const MAX_CACHED_MODELS = 500;
 const MAX_SAVED_MEDIA = 250;
 const MAX_JOB_HISTORY = 20;
 const MAX_REFERENCES = 24;
@@ -379,6 +382,37 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                     : typeof record.max_reference_images === "number" && Number.isFinite(record.max_reference_images)
                         ? record.max_reference_images
                         : undefined;
+            const supportedResolutions = readNullableStringArray(
+                record,
+                "supportedResolutions",
+                "supported_resolutions"
+            );
+            const maxOutputImages =
+                typeof record.maxOutputImages === "number" && Number.isFinite(record.maxOutputImages)
+                    ? record.maxOutputImages
+                    : undefined;
+            const fixedOutputImages =
+                typeof record.fixedOutputImages === "number" && Number.isFinite(record.fixedOutputImages)
+                    ? record.fixedOutputImages
+                    : undefined;
+            const inputImageConstraints =
+                record.inputImageConstraints &&
+                    typeof record.inputImageConstraints === "object" &&
+                    !Array.isArray(record.inputImageConstraints)
+                    ? record.inputImageConstraints as ModelOption["inputImageConstraints"]
+                    : undefined;
+            const dynamicParameters =
+                record.dynamicParameters &&
+                    typeof record.dynamicParameters === "object" &&
+                    !Array.isArray(record.dynamicParameters)
+                    ? record.dynamicParameters as ModelOption["dynamicParameters"]
+                    : undefined;
+            const parameterDefaults =
+                record.parameterDefaults &&
+                    typeof record.parameterDefaults === "object" &&
+                    !Array.isArray(record.parameterDefaults)
+                    ? record.parameterDefaults as ModelOption["parameterDefaults"]
+                    : undefined;
             return {
                 id,
                 label,
@@ -405,6 +439,12 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                 ...(supportsImageOutput !== undefined ? { supportsImageOutput } : {}),
                 ...(supportsStreaming !== undefined ? { supportsStreaming } : {}),
                 ...(maxReferenceImages !== undefined ? { maxReferenceImages } : {}),
+                ...(supportedResolutions !== undefined ? { supportedResolutions } : {}),
+                ...(maxOutputImages !== undefined ? { maxOutputImages } : {}),
+                ...(fixedOutputImages !== undefined ? { fixedOutputImages } : {}),
+                ...(inputImageConstraints !== undefined ? { inputImageConstraints } : {}),
+                ...(dynamicParameters !== undefined ? { dynamicParameters } : {}),
+                ...(parameterDefaults !== undefined ? { parameterDefaults } : {}),
                 ...(record.pricing !== undefined ? { pricing: record.pricing } : {}),
                 ...(record.supports && typeof record.supports === "object" ? { supports: record.supports as ModelOption["supports"] } : {}),
             };
@@ -459,7 +499,11 @@ const getBoolean = (value: unknown, fallback: boolean) =>
     typeof value === "boolean" ? value : fallback;
 
 const isProvider = (value: unknown): value is Provider =>
-    value === "gemini" || value === "navy" || value === "chutes" || value === "openrouter";
+    value === "gemini" ||
+    value === "navy" ||
+    value === "chutes" ||
+    value === "openrouter" ||
+    value === "nanogpt";
 
 const isChatProvider = (value: unknown): value is ChatProvider =>
     value === "chutes" || value === "navy";
@@ -668,6 +712,8 @@ interface StudioContextType {
     navyImageModels: ModelOption[];
     navyVideoModels: ModelOption[];
     navyTtsModels: ModelOption[];
+    nanoGptImageModels: ModelOption[];
+    nanoGptVideoModels: ModelOption[];
     modelSuggestions: ModelOption[];
 
     // Status
@@ -775,6 +821,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [navyImageModels, setNavyImageModels] = useState<ModelOption[]>(NAVY_IMAGE_MODELS);
     const [navyVideoModels, setNavyVideoModels] = useState<ModelOption[]>(NAVY_VIDEO_MODELS);
     const [navyTtsModels, setNavyTtsModels] = useState<ModelOption[]>(NAVY_TTS_MODELS);
+    const [nanoGptImageModels, setNanoGptImageModels] = useState<ModelOption[]>(NANOGPT_IMAGE_MODELS);
+    const [nanoGptVideoModels, setNanoGptVideoModels] = useState<ModelOption[]>(NANOGPT_VIDEO_MODELS);
 
     // --- Settings ---
     const [prompt, setPrompt] = useState("");
@@ -855,7 +903,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const lastProviderModeRef = useRef(`${provider}:${mode}`);
 
     // --- Computed ---
-    const supportsVideo = provider === "gemini" || provider === "navy" || provider === "chutes";
+    const supportsVideo = provider === "gemini" || provider === "navy" || provider === "chutes" || provider === "nanogpt";
     const supportsTts = provider === "navy" || provider === "chutes";
     const idbAvailable = useMemo(() => isIndexedDbAvailable(), []);
 
@@ -961,6 +1009,23 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         throw new Error("No models returned by NavyAI.");
     }, [apiKeys.navy]);
 
+    const refreshNanoGptCatalog = useCallback(async (targetMode: "image" | "video") => {
+        const response = await fetch(`/api/nanogpt/models?mode=${targetMode}`);
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload?.error ?? "Failed to fetch NanoGPT models.");
+        }
+        const models = sanitizeModelOptions(payload?.models ?? []);
+        if (!models.length) {
+            throw new Error(`NanoGPT returned no ${targetMode} models.`);
+        }
+        if (targetMode === "image") {
+            setNanoGptImageModels(models);
+        } else {
+            setNanoGptVideoModels(models);
+        }
+    }, []);
+
     const modelSuggestions = useMemo(() => {
         if (provider === "gemini") {
             return mode === "image" ? GEMINI_IMAGE_MODELS : GEMINI_VIDEO_MODELS;
@@ -975,12 +1040,23 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             return openRouterImageModels;
         }
         if (provider === "nanogpt") {
-            return NANOGPT_IMAGE_MODELS;
+            if (mode === "image") return nanoGptImageModels;
+            if (mode === "video") return nanoGptVideoModels;
+            return [];
         }
         if (mode === "video") return navyVideoModels;
         if (mode === "tts") return navyTtsModels;
         return navyImageModels;
-    }, [provider, mode, openRouterImageModels, navyImageModels, navyVideoModels, navyTtsModels]);
+    }, [
+        provider,
+        mode,
+        openRouterImageModels,
+        navyImageModels,
+        navyVideoModels,
+        navyTtsModels,
+        nanoGptImageModels,
+        nanoGptVideoModels,
+    ]);
 
     const runningJobs = jobs.filter((job) => job.status === "running");
     const queuedJobs = jobs.filter((job) => job.status === "queued");
@@ -2097,7 +2173,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [apiKeys.navy]);
 
     const refreshModels = useCallback(async () => {
-        if (provider !== "openrouter" && provider !== "navy") return;
+        if (provider !== "openrouter" && provider !== "navy" && provider !== "nanogpt") return;
         if (provider === "openrouter" && !apiKey.trim()) {
             setModelsError("Add the provider API key before refreshing models.");
             return;
@@ -2119,15 +2195,26 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 if (!response.ok) throw new Error(payload?.error ?? "Failed to fetch models from openrouter");
                 const models = extractOpenRouterImageModels(payload);
                 setOpenRouterImageModels(models);
-            } else {
+            } else if (provider === "navy") {
                 await refreshNavyCatalog();
+            } else if (mode === "image" || mode === "video") {
+                await refreshNanoGptCatalog(mode);
+            } else {
+                throw new Error("NanoGPT model discovery is available for image and video modes.");
             }
         } catch (error) {
             setModelsError(error instanceof Error ? error.message : "Unknown error refreshing models");
         } finally {
             setModelsLoading(false);
         }
-    }, [apiKey, provider, apiKeys.openrouter, refreshNavyCatalog]);
+    }, [
+        apiKey,
+        provider,
+        mode,
+        apiKeys.openrouter,
+        refreshNavyCatalog,
+        refreshNanoGptCatalog,
+    ]);
 
     const refreshChutesChatModels = useCallback(async () => {
         setChutesChatModelsLoading(true);
@@ -2211,6 +2298,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storedNavyTtsModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.navyTtsModels, []);
         if (storedNavyTtsModels.length) {
             setNavyTtsModels(mergeModelOptions(NAVY_TTS_MODELS, sanitizeModelOptions(storedNavyTtsModels)));
+        }
+        const storedNanoGptImageModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.nanoGptImageModels, []);
+        if (storedNanoGptImageModels.length) {
+            setNanoGptImageModels(sanitizeModelOptions(storedNanoGptImageModels));
+        }
+        const storedNanoGptVideoModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.nanoGptVideoModels, []);
+        if (storedNanoGptVideoModels.length) {
+            setNanoGptVideoModels(sanitizeModelOptions(storedNanoGptVideoModels));
         }
 
         const storedChutesChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.chutesChatModels, []);
@@ -2473,6 +2568,29 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [apiKeys.navy, hydrated, refreshNavyCatalog]);
 
     useEffect(() => {
+        if (!hydrated || provider !== "nanogpt") return;
+        if (mode !== "image" && mode !== "video") return;
+        let active = true;
+        setModelsLoading(true);
+        setModelsError(null);
+        void refreshNanoGptCatalog(mode)
+            .catch((error) => {
+                if (!active) return;
+                setModelsError(
+                    error instanceof Error
+                        ? error.message
+                        : "Unable to refresh NanoGPT models."
+                );
+            })
+            .finally(() => {
+                if (active) setModelsLoading(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, [hydrated, provider, mode, refreshNanoGptCatalog]);
+
+    useEffect(() => {
         if (!hydrated) return;
         const selectionKey = `${provider}:${mode}`;
         const selections = sanitizeModelSelections(
@@ -2618,6 +2736,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (!hydrated) return;
         writeLocalStorage(STORAGE_KEYS.navyTtsModels, JSON.stringify(navyTtsModels));
     }, [navyTtsModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.nanoGptImageModels, JSON.stringify(nanoGptImageModels));
+    }, [nanoGptImageModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(STORAGE_KEYS.nanoGptVideoModels, JSON.stringify(nanoGptVideoModels));
+    }, [nanoGptVideoModels, hydrated]);
 
     useEffect(() => {
         if (!hydrated || !idbAvailable) return;
@@ -2801,6 +2929,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         navyImageModels,
         navyVideoModels,
         navyTtsModels,
+        nanoGptImageModels,
+        nanoGptVideoModels,
         modelSuggestions,
         statusMessage, setStatusMessage,
         errorMessage, setErrorMessage,

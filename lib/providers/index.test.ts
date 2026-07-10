@@ -48,6 +48,21 @@ test("static capability registry exposes NanoGPT image models", () => {
   );
 });
 
+test("static capability registry keeps a NanoGPT video fallback", () => {
+  const nanoGptVideoModels = filterModelCapabilities(STATIC_MODEL_CAPABILITIES, {
+    provider: "nanogpt",
+    mode: "video",
+    outputModality: "video",
+  });
+
+  assert.deepEqual(
+    nanoGptVideoModels.map((model) => model.id),
+    ["veo3-1-fast-video"],
+  );
+  assert.equal(nanoGptVideoModels[0]?.asyncJob, true);
+  assert.equal(nanoGptVideoModels[0]?.maxReferenceImages, 1);
+});
+
 test("dynamic capability merge overrides static capability metadata", () => {
   const dynamic: ModelCapability = {
     provider: "openrouter",
