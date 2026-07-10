@@ -7,7 +7,7 @@ import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
 import { ReferenceStrip } from "../reference-strip";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Download, Video as VideoIcon, Upload, X, Settings2 } from "lucide-react";
+import { AlertTriangle, Sparkles, Download, Video as VideoIcon, Upload, X, Settings2 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -21,6 +21,7 @@ import {
     getModelReferenceLimit,
     modelAcceptsImageReferences,
     modelAcceptsSourceImage,
+    validateModelImageInputs,
 } from "@/lib/model-media-capabilities";
 
 export function VideoGenView() {
@@ -62,12 +63,22 @@ export function VideoGenView() {
     };
 
     const handleFile = (file: File) => {
-        if (!file.type.startsWith("image/")) return;
+        const validationError = validateModelImageInputs(
+            selectedModel,
+            [{ name: file.name, mimeType: file.type, size: file.size }],
+            "source image"
+        );
+        if (validationError) {
+            context.setErrorMessage(validationError);
+            return;
+        }
         const reader = new FileReader();
         reader.onload = (e) => {
             const result = e.target?.result as string;
             setVideoImage(result);
+            context.setErrorMessage(null);
         };
+        reader.onerror = () => context.setErrorMessage("Unable to read the source image.");
         reader.readAsDataURL(file);
     };
 
@@ -142,6 +153,23 @@ export function VideoGenView() {
                 </Dialog>
 
                 <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-5 sm:space-y-8">
+                    {context.errorMessage ? (
+                        <div
+                            role="alert"
+                            className="mx-auto flex max-w-3xl items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+                        >
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                            <p>{context.errorMessage}</p>
+                        </div>
+                    ) : null}
+                    {context.provider === "nanogpt" && context.hiddenNanoGptStandaloneVideoModelCount > 0 ? (
+                        <div className="mx-auto flex max-w-3xl items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                            <p>
+                                {context.hiddenNanoGptStandaloneVideoModelCount} NanoGPT model{context.hiddenNanoGptStandaloneVideoModelCount === 1 ? " is" : "s are"} hidden because they require source video or audio input. This studio currently lists text-to-video and image-to-video workflows only.
+                            </p>
+                        </div>
+                    ) : null}
                     <div className="mx-auto max-w-3xl">
                         {acceptsReferences ? (
                             <>

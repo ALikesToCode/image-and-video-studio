@@ -64,9 +64,22 @@ import {
 } from "@/lib/studio-generation";
 import {
     buildModelParameterPayload,
+    modelParameterPreferenceKey,
+    readModelParameterPreference,
     resolveModelParameterValues,
+    sanitizeModelParameterDefaults,
+    sanitizeModelParameterDescriptors,
     type ModelParameterValues,
 } from "@/lib/model-capability-settings";
+import {
+    getStandaloneVideoModelSupport,
+    imageInputMetadataFromDataUrl,
+    modelAcceptsImageReferences,
+    modelAcceptsSourceImage,
+    sanitizeModelInputImageConstraints,
+    selectModelReferenceImagesForSubmission,
+    validateModelImageInputs,
+} from "@/lib/model-media-capabilities";
 import {
     parseNavyModelHealthResponse,
     selectLiveCatalogBucket,
@@ -412,24 +425,22 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                 typeof record.fixedOutputImages === "number" && Number.isFinite(record.fixedOutputImages)
                     ? record.fixedOutputImages
                     : undefined;
-            const inputImageConstraints =
-                record.inputImageConstraints &&
-                    typeof record.inputImageConstraints === "object" &&
-                    !Array.isArray(record.inputImageConstraints)
-                    ? record.inputImageConstraints as ModelOption["inputImageConstraints"]
-                    : undefined;
-            const dynamicParameters =
-                record.dynamicParameters &&
-                    typeof record.dynamicParameters === "object" &&
-                    !Array.isArray(record.dynamicParameters)
-                    ? record.dynamicParameters as ModelOption["dynamicParameters"]
-                    : undefined;
-            const parameterDefaults =
-                record.parameterDefaults &&
-                    typeof record.parameterDefaults === "object" &&
-                    !Array.isArray(record.parameterDefaults)
-                    ? record.parameterDefaults as ModelOption["parameterDefaults"]
-                    : undefined;
+            const inputImageConstraints = sanitizeModelInputImageConstraints(
+                record.inputImageConstraints
+            );
+            const sanitizedDynamicParameters = sanitizeModelParameterDescriptors(
+                record.dynamicParameters
+            );
+            const dynamicParameters = Object.keys(sanitizedDynamicParameters).length
+                ? sanitizedDynamicParameters
+                : undefined;
+            const sanitizedParameterDefaults = sanitizeModelParameterDefaults(
+                record.parameterDefaults,
+                sanitizedDynamicParameters
+            );
+            const parameterDefaults = Object.keys(sanitizedParameterDefaults).length
+                ? sanitizedParameterDefaults
+                : undefined;
             return {
                 id,
                 label,
@@ -582,9 +593,18 @@ const sanitizeStoredModelParameterValues = (
     if (!isRecord(value)) return {};
     const result: Record<string, ModelParameterValues> = {};
     for (const [modelId, rawValues] of Object.entries(value).slice(0, MAX_CACHED_MODELS)) {
-        if (!modelId.trim() || !isRecord(rawValues)) continue;
+        if (
+            !modelId.trim() ||
+            modelId === "__proto__" ||
+            modelId === "constructor" ||
+            modelId === "prototype" ||
+            !isRecord(rawValues)
+        ) continue;
         const values: ModelParameterValues = {};
         for (const [key, rawValue] of Object.entries(rawValues).slice(0, 64)) {
+            if (key === "__proto__" || key === "constructor" || key === "prototype") {
+                continue;
+            }
             if (
                 rawValue === null ||
                 typeof rawValue === "string" ||
@@ -781,6 +801,7 @@ interface StudioContextType {
     navyTtsModels: ModelOption[];
     nanoGptImageModels: ModelOption[];
     nanoGptVideoModels: ModelOption[];
+    hiddenNanoGptStandaloneVideoModelCount: number;
     modelSuggestions: ModelOption[];
 
     // Status
@@ -1104,6 +1125,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    const standaloneNanoGptVideoModels = useMemo(
+        () =>
+            nanoGptVideoModels.filter(
+                (entry) => getStandaloneVideoModelSupport(entry).supported
+            ),
+        [nanoGptVideoModels]
+    );
+    const hiddenNanoGptStandaloneVideoModelCount =
+        nanoGptVideoModels.length - standaloneNanoGptVideoModels.length;
+
     const modelSuggestions = useMemo(() => {
         if (provider === "gemini") {
             return mode === "image" ? GEMINI_IMAGE_MODELS : GEMINI_VIDEO_MODELS;
@@ -1119,7 +1150,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
         if (provider === "nanogpt") {
             if (mode === "image") return nanoGptImageModels;
-            if (mode === "video") return nanoGptVideoModels;
+            if (mode === "video") return standaloneNanoGptVideoModels;
             return [];
         }
         if (mode === "video") return navyVideoModels;
@@ -1133,7 +1164,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         navyVideoModels,
         navyTtsModels,
         nanoGptImageModels,
-        nanoGptVideoModels,
+        standaloneNanoGptVideoModels,
     ]);
     const selectedModelOption = useMemo(
         () => modelSuggestions.find((entry) => entry.id === model),
@@ -1143,21 +1174,34 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         () =>
             resolveModelParameterValues(
                 selectedModelOption,
-                modelParameterValuesByModel[model]
+                readModelParameterPreference(
+                    modelParameterValuesByModel,
+                    provider,
+                    mode,
+                    model
+                )
             ),
-        [selectedModelOption, modelParameterValuesByModel, model]
+        [selectedModelOption, modelParameterValuesByModel, model, provider, mode]
     );
     const setModelParameterValue = useCallback(
         (key: string, value: ModelParameterValue) => {
-            setModelParameterValuesByModel((previous) => ({
-                ...previous,
-                [model]: resolveModelParameterValues(selectedModelOption, {
-                    ...previous[model],
-                    [key]: value,
-                }),
-            }));
+            setModelParameterValuesByModel((previous) => {
+                const preferenceKey = modelParameterPreferenceKey(provider, mode, model);
+                return {
+                    ...previous,
+                    [preferenceKey]: resolveModelParameterValues(selectedModelOption, {
+                        ...readModelParameterPreference(
+                            previous,
+                            provider,
+                            mode,
+                            model
+                        ),
+                        [key]: value,
+                    }),
+                };
+            });
         },
-        [model, selectedModelOption]
+        [model, mode, provider, selectedModelOption]
     );
 
     useEffect(() => {
@@ -1309,8 +1353,20 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     };
 
     const addReferenceFile = useCallback(async (file: File, role: ReferenceRole = "general") => {
-        if (!file.type.startsWith("image/")) {
-            setErrorMessage("Only image references are supported.");
+        const validationError = validateModelImageInputs(
+            selectedModelOption,
+            [
+                ...selectedReferences.map((reference) => ({
+                    name: reference.label,
+                    mimeType: reference.mimeType,
+                    size: reference.size,
+                })),
+                { name: file.name, mimeType: file.type, size: file.size },
+            ],
+            "reference image"
+        );
+        if (validationError) {
+            setErrorMessage(validationError);
             return;
         }
         const id = createId();
@@ -1334,11 +1390,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             }
             setReferences((prev) => [entry, ...prev].slice(0, MAX_REFERENCES));
             setSelectedReferenceIds((prev) => [id, ...prev.filter((entryId) => entryId !== id)]);
+            setErrorMessage(null);
         } catch (error) {
             URL.revokeObjectURL(objectUrl);
             setErrorMessage(error instanceof Error ? error.message : "Reference save failed.");
         }
-    }, [idbAvailable]);
+    }, [idbAvailable, selectedModelOption, selectedReferences]);
 
     const removeReference = useCallback(async (id: string) => {
         setReferences((prev) => {
@@ -1356,12 +1413,32 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const toggleReferenceSelection = useCallback((id: string) => {
-        setSelectedReferenceIds((prev) =>
-            prev.includes(id)
-                ? prev.filter((entryId) => entryId !== id)
-                : [...prev, id].slice(-MAX_REFERENCES)
+        if (selectedReferenceIds.includes(id)) {
+            setSelectedReferenceIds((previous) =>
+                previous.filter((entryId) => entryId !== id)
+            );
+            return;
+        }
+        const nextIds = [...selectedReferenceIds, id].slice(-MAX_REFERENCES);
+        const selected = new Set(nextIds);
+        const validationError = validateModelImageInputs(
+            selectedModelOption,
+            references
+                .filter((reference) => selected.has(reference.id))
+                .map((reference) => ({
+                    name: reference.label,
+                    mimeType: reference.mimeType,
+                    size: reference.size,
+                })),
+            "reference image"
         );
-    }, []);
+        if (validationError) {
+            setErrorMessage(validationError);
+            return;
+        }
+        setErrorMessage(null);
+        setSelectedReferenceIds(nextIds);
+    }, [references, selectedModelOption, selectedReferenceIds]);
 
     const clearSelectedReferences = useCallback(() => {
         setSelectedReferenceIds([]);
@@ -1912,10 +1989,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 let billing = job.billing;
 
                 if (!generationId) {
-                    const maxReferenceImages =
+                    const submittedSourceImage =
+                        selectedNanoGptModel?.supports?.sourceImage === true
+                            ? sourceImage
+                            : null;
+                    const submittedReferenceImages =
                         selectedNanoGptModel?.supports?.referenceImages === true
-                            ? selectedNanoGptModel.maxReferenceImages ?? 1
-                            : 0;
+                            ? selectModelReferenceImagesForSubmission(
+                                selectedNanoGptModel,
+                                submittedSourceImage,
+                                referenceImages.map((reference) => reference.dataUrl)
+                            )
+                            : [];
                     const submitResponse = await fetch("/api/nanogpt/video", {
                         method: "POST",
                         headers: requestHeaders,
@@ -1923,13 +2008,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             prompt: job.prompt,
                             model: job.model,
                             parameters,
-                            sourceImage:
-                                selectedNanoGptModel?.supports?.sourceImage === true
-                                    ? sourceImage
-                                    : undefined,
-                            referenceImages: referenceImages
-                                .slice(0, maxReferenceImages)
-                                .map((reference) => reference.dataUrl),
+                            sourceImage: submittedSourceImage ?? undefined,
+                            referenceImages: submittedReferenceImages,
                         }),
                     });
                     const submitPayload = await submitResponse.json();
@@ -2268,6 +2348,64 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
         if (!apiKey.trim()) { setErrorMessage("API Key required"); return; }
         if (!activePrompt.trim()) { setErrorMessage("Prompt required"); return; }
+        if (activeMode === "video" && provider === "nanogpt") {
+            const catalogModel = nanoGptVideoModels.find(
+                (entry) => entry.id === model
+            );
+            const support = catalogModel
+                ? getStandaloneVideoModelSupport(catalogModel)
+                : null;
+            if (!support?.supported) {
+                setErrorMessage(
+                    support?.reason ??
+                    "No compatible NanoGPT video model is selected. Refresh the model catalog and choose a text-to-video or image-to-video model."
+                );
+                return;
+            }
+        }
+        const modelsToRun =
+            activeMode === "image" && imagePipelineEnabled
+                ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
+                : [model];
+        const selectedImageInputs = selectedReferences.map((reference) => ({
+            name: reference.label,
+            mimeType: reference.mimeType,
+            size: reference.size,
+        }));
+        const inputValidationError = modelsToRun
+            .map((modelId) => {
+                const candidateModel = modelSuggestions.find(
+                    (entry) => entry.id === modelId
+                );
+                const submittedImageInputs =
+                    activeMode === "image"
+                        ? modelAcceptsImageReferences(candidateModel)
+                            ? selectedImageInputs
+                            : []
+                        : activeMode === "video"
+                            ? [
+                                ...(videoImage && modelAcceptsSourceImage(candidateModel)
+                                    ? [{
+                                        name: "Source image",
+                                        ...imageInputMetadataFromDataUrl(videoImage),
+                                    }]
+                                    : []),
+                                ...(modelAcceptsImageReferences(candidateModel)
+                                    ? selectedImageInputs
+                                    : []),
+                            ]
+                            : [];
+                return validateModelImageInputs(
+                    candidateModel,
+                    submittedImageInputs,
+                    "image input"
+                );
+            })
+            .find((error): error is string => typeof error === "string");
+        if (inputValidationError) {
+            setErrorMessage(inputValidationError);
+            return;
+        }
         if (activeMode === "video" && provider === "chutes" && !videoImage && selectedReferences.length === 0) {
             setErrorMessage("Chutes video generation requires a source image or selected reference.");
             return;
@@ -2294,10 +2432,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             setVideoDuration(effectiveVideoDuration);
             setStatusMessage("Veo reference, 1080p, and 4K workflows use 8-second renders.");
         }
-        const modelsToRun =
-            activeMode === "image" && imagePipelineEnabled
-                ? (resolvedImageModelOrder.length ? resolvedImageModelOrder : [model])
-                : [model];
         const normalizedImageRetryAttempts = normalizeImageRetryAttempts(imageRetryAttempts);
         const normalizedNavyImageSize = navyImageSize.trim().toLowerCase();
         if (
@@ -2352,7 +2486,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     selectedModel,
                     resolveModelParameterValues(
                         selectedModel,
-                        modelParameterValuesByModel[jobModel]
+                        readModelParameterPreference(
+                            modelParameterValuesByModel,
+                            provider,
+                            activeMode,
+                            jobModel
+                        )
                     )
                 ),
                 videoImage: videoImage || undefined,
@@ -3395,6 +3534,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         navyTtsModels,
         nanoGptImageModels,
         nanoGptVideoModels,
+        hiddenNanoGptStandaloneVideoModelCount,
         modelSuggestions,
         statusMessage, setStatusMessage,
         errorMessage, setErrorMessage,

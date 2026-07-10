@@ -1,10 +1,140 @@
 import type {
   ModelOption,
   ModelParameterDescriptor,
+  ModelParameterType,
   ModelParameterValue,
 } from "./constants.ts";
 
 export type ModelParameterValues = Record<string, ModelParameterValue>;
+
+const PARAMETER_TYPES = new Set<ModelParameterType>([
+  "select",
+  "switch",
+  "boolean",
+  "number",
+  "text",
+  "string",
+]);
+
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const scalarParameterValue = (value: unknown): ModelParameterValue | undefined => {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+};
+
+const optionalText = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+export const sanitizeModelParameterDescriptors = (
+  value: unknown,
+): NonNullable<ModelOption["dynamicParameters"]> => {
+  if (!isRecord(value)) return {};
+  const descriptors: NonNullable<ModelOption["dynamicParameters"]> = {};
+  for (const [key, rawDescriptor] of Object.entries(value).slice(0, 64)) {
+    if (UNSAFE_KEYS.has(key) || !key.trim() || !isRecord(rawDescriptor)) continue;
+    const rawType = optionalText(rawDescriptor.type)?.toLowerCase();
+    if (!rawType || !PARAMETER_TYPES.has(rawType as ModelParameterType)) {
+      continue;
+    }
+    const descriptor: ModelParameterDescriptor = {
+      type: rawType as ModelParameterDescriptor["type"],
+    };
+    for (const field of ["label", "description", "placeholder"] as const) {
+      const text = optionalText(rawDescriptor[field]);
+      if (text) descriptor[field] = text;
+    }
+    for (const field of ["min", "max", "step"] as const) {
+      const number = rawDescriptor[field];
+      if (typeof number === "number" && Number.isFinite(number)) {
+        descriptor[field] = number;
+      }
+    }
+    if (Array.isArray(rawDescriptor.options)) {
+      const options = rawDescriptor.options
+        .slice(0, 100)
+        .map((rawOption) => {
+          if (!isRecord(rawOption)) return null;
+          const optionValue = scalarParameterValue(rawOption.value);
+          if (optionValue === undefined || optionValue === null) return null;
+          return {
+            value: optionValue,
+            label: optionalText(rawOption.label) ?? String(optionValue),
+          };
+        })
+        .filter((option): option is NonNullable<typeof option> => !!option);
+      if (options.length) descriptor.options = options;
+    }
+    if (descriptor.type === "select" && !descriptor.options?.length) continue;
+    if (
+      typeof descriptor.min === "number" &&
+      typeof descriptor.max === "number" &&
+      descriptor.min > descriptor.max
+    ) {
+      delete descriptor.min;
+      delete descriptor.max;
+    }
+    if (typeof descriptor.step === "number" && descriptor.step <= 0) {
+      delete descriptor.step;
+    }
+    if (isRecord(rawDescriptor.showWhen)) {
+      const showWhen: NonNullable<ModelParameterDescriptor["showWhen"]> = {};
+      for (const [conditionKey, rawCondition] of Object.entries(rawDescriptor.showWhen)) {
+        if (UNSAFE_KEYS.has(conditionKey) || !conditionKey.trim()) continue;
+        const condition = scalarParameterValue(rawCondition);
+        if (condition !== undefined) showWhen[conditionKey] = condition;
+      }
+      if (Object.keys(showWhen).length) descriptor.showWhen = showWhen;
+    }
+    const defaultValue = coerceModelParameterValue(
+      descriptor,
+      scalarParameterValue(rawDescriptor.default),
+    );
+    if (defaultValue !== undefined) descriptor.default = defaultValue;
+    descriptors[key] = descriptor;
+  }
+  return descriptors;
+};
+
+export const sanitizeModelParameterDefaults = (
+  value: unknown,
+  descriptors: NonNullable<ModelOption["dynamicParameters"]>,
+): NonNullable<ModelOption["parameterDefaults"]> => {
+  if (!isRecord(value)) return {};
+  const defaults: NonNullable<ModelOption["parameterDefaults"]> = {};
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    const defaultValue = coerceModelParameterValue(descriptor, value[key]);
+    if (defaultValue !== undefined) defaults[key] = defaultValue;
+  }
+  return defaults;
+};
+
+export const modelParameterPreferenceKey = (
+  provider: string,
+  mode: string,
+  modelId: string,
+) => `${provider}:${mode}:${modelId}`;
+
+export const readModelParameterPreference = (
+  preferences: Record<string, ModelParameterValues>,
+  provider: string,
+  mode: string,
+  modelId: string,
+): ModelParameterValues => {
+  const scopedKey = modelParameterPreferenceKey(provider, mode, modelId);
+  if (Object.prototype.hasOwnProperty.call(preferences, scopedKey)) {
+    return preferences[scopedKey] ?? {};
+  }
+  if (Object.prototype.hasOwnProperty.call(preferences, modelId)) {
+    return preferences[modelId] ?? {};
+  }
+  return {};
+};
 
 const clamp = (value: number, descriptor: ModelParameterDescriptor) => {
   const minimum = descriptor.min;
