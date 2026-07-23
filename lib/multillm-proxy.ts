@@ -8,7 +8,7 @@ import {
 export const DEFAULT_MULTILLM_PROXY_BASE_URL =
   "https://multillm-proxy.cserules.workers.dev";
 
-export type MultiLlmMediaSource = "navyai" | "nanogpt";
+export type MultiLlmMediaSource = "navyai" | "nanogpt" | "linkapi";
 export type MultiLlmModelKind = "chat" | "image" | "video" | "audio";
 
 type ModelRecord = Record<string, unknown>;
@@ -16,6 +16,7 @@ type ModelRecord = Record<string, unknown>;
 const SOURCE_LABELS: Record<MultiLlmMediaSource, string> = {
   navyai: "NavyAI",
   nanogpt: "NanoGPT",
+  linkapi: "LinkAPI",
 };
 
 const isRecord = (value: unknown): value is ModelRecord =>
@@ -227,7 +228,7 @@ export const normalizeModelOptions = (
             imageGeneration: true,
             asyncJobs: options.source === "navyai",
             size: true,
-            aspectRatio: true,
+            aspectRatio: options.source !== "linkapi",
           }
         : kind === "video"
           ? {
@@ -276,6 +277,9 @@ export const normalizeModelOptions = (
         : {}),
       ...(kind === "image" ? { supportsImageOutput: true } : {}),
       ...(supports ? { supports } : {}),
+      ...(kind === "image" && options.source === "linkapi"
+        ? { maxReferenceImages: 0 }
+        : {}),
       ...(kind === "video" ? { maxReferenceImages: 1 } : {}),
       metadataSource: "multillm-live-catalog",
       metadataStatus: "live",
@@ -291,9 +295,14 @@ export const parseMediaModelId = (value: unknown) => {
   const source = modelRef.slice(0, separator);
   const model = modelRef.slice(separator + 1).trim();
 
-  if ((source !== "navyai" && source !== "nanogpt") || !model) {
+  if (
+    (source !== "navyai" &&
+      source !== "nanogpt" &&
+      source !== "linkapi") ||
+    !model
+  ) {
     throw new Error(
-      "Media model must include a navyai: or nanogpt: source prefix."
+      "Media model must include a navyai:, nanogpt:, or linkapi: source prefix."
     );
   }
 

@@ -126,21 +126,27 @@ export async function POST(request: Request) {
     model,
     prompt: body.prompt.trim(),
     n: numberOfImages,
-    response_format: "b64_json",
+    response_format: source === "linkapi" ? "url" : "b64_json",
   };
   if (body.size) payload.size = body.size;
-  if (body.aspectRatio) {
+  if (body.aspectRatio && source !== "linkapi") {
     payload.aspect_ratio = body.aspectRatio;
     if (!body.size && source === "navyai") payload.size = body.aspectRatio;
   }
-  if (body.negativePrompt) payload.negative_prompt = body.negativePrompt;
-  if (body.quality && source === "navyai") payload.quality = body.quality;
-  if (body.style && source === "navyai") payload.style = body.style;
+  if (body.negativePrompt && source !== "linkapi") {
+    payload.negative_prompt = body.negativePrompt;
+  }
+  if (body.quality && (source === "navyai" || source === "linkapi")) {
+    payload.quality = body.quality;
+  }
+  if (body.style && (source === "navyai" || source === "linkapi")) {
+    payload.style = body.style;
+  }
   const imageInputs = [
     ...(body.imageDataUrl ? [body.imageDataUrl] : []),
     ...(Array.isArray(body.imageDataUrls) ? body.imageDataUrls : []),
   ].filter((value, index, values) => value && values.indexOf(value) === index);
-  if (imageInputs.length) {
+  if (imageInputs.length && source !== "linkapi") {
     payload[source === "navyai" ? "image_url" : "input_references"] =
       imageInputs.length === 1 ? imageInputs[0] : imageInputs;
   }

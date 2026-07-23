@@ -59,6 +59,15 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  if (source === "linkapi") {
+    return Response.json(
+      {
+        error:
+          "MultiLLM video models must use the navyai: or nanogpt: source prefix.",
+      },
+      { status: 400 }
+    );
+  }
 
   const payload: Record<string, unknown> = {
     ...(body.parameters &&

@@ -81,6 +81,20 @@ test("trusts capability-specific NanoGPT catalogs", () => {
   assert.deepEqual(models[0]?.outputModalities, ["video"]);
 });
 
+test("normalizes LinkAPI image models without claiming Studio edit support", () => {
+  const models = normalizeModelOptions(
+    { data: [{ id: "gpt-image-2-c" }] },
+    { source: "linkapi", kind: "image" }
+  );
+
+  assert.equal(models[0]?.id, "linkapi:gpt-image-2-c");
+  assert.equal(models[0]?.label, "LinkAPI · gpt-image-2-c");
+  assert.equal(models[0]?.supports?.imageGeneration, true);
+  assert.equal(models[0]?.supports?.asyncJobs, false);
+  assert.equal(models[0]?.supports?.aspectRatio, false);
+  assert.equal(models[0]?.maxReferenceImages, 0);
+});
+
 test("does not treat audio-input chat models as speech generators", () => {
   const models = normalizeModelOptions(
     {
@@ -113,6 +127,10 @@ test("parses only supported source-tagged media ids", () => {
   assert.deepEqual(parseMediaModelId("nanogpt:hidream"), {
     source: "nanogpt",
     model: "hidream",
+  });
+  assert.deepEqual(parseMediaModelId("linkapi:gpt-image-2-c"), {
+    source: "linkapi",
+    model: "gpt-image-2-c",
   });
   assert.throws(() => parseMediaModelId("hidream"), /source prefix/);
 });

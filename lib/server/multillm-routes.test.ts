@@ -69,6 +69,11 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
             ],
           });
         }
+        if (url === "https://proxy.test/linkapi/v1/models") {
+          return Response.json({
+            data: [{ id: "gpt-image-2-c" }],
+          });
+        }
         assert.equal(
           url,
           "https://proxy.test/nanogpt/v1/image-models?detailed=true"
@@ -85,9 +90,13 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
         };
 
         assert.equal(response.status, 200);
-        assert.equal(payload.models.length, 1);
-        assert.equal(payload.models[0].id, "navyai:flux");
-        assert.equal(payload.models[0].provider, "multillm");
+        assert.deepEqual(
+          payload.models.map(({ id, provider }) => ({ id, provider })),
+          [
+            { id: "navyai:flux", provider: "multillm" },
+            { id: "linkapi:gpt-image-2-c", provider: "multillm" },
+          ]
+        );
         assert.equal(payload.warnings.length, 1);
         assert.match(payload.warnings[0], /NanoGPT catalog unavailable/);
       }
@@ -140,6 +149,77 @@ test("MultiLLM image generation strips the source prefix and returns base64 data
         assert.deepEqual(await response.json(), {
           images: [{ data: "aGVsbG8=", mimeType: "image/png" }],
         });
+      }
+    );
+  });
+});
+
+test("MultiLLM generates LinkAPI gpt-image-2-c images through the proxy", async () => {
+  await withMultiLlmEnv(async () => {
+    let generationCalls = 0;
+    let downloadCalls = 0;
+    let upstreamBody: Record<string, unknown> = {};
+    await withFetch(
+      async (input, init) => {
+        const url = String(input);
+        if (
+          url ===
+          "https://proxy.test/linkapi/v1/images/generations"
+        ) {
+          generationCalls += 1;
+          assert.equal(
+            new Headers(init?.headers).get("authorization"),
+            "Bearer server-proxy-secret"
+          );
+          upstreamBody = JSON.parse(
+            String(init?.body)
+          ) as Record<string, unknown>;
+          return Response.json({
+            data: [{ url: "https://cdn.example.test/linkapi.png" }],
+          });
+        }
+
+        assert.equal(url, "https://cdn.example.test/linkapi.png");
+        downloadCalls += 1;
+        return new Response(Uint8Array.from([1, 2, 3]), {
+          headers: { "content-type": "image/png" },
+        });
+      },
+      async () => {
+        const response = await multiLlmImagePost(
+          new Request("https://studio.test/api/multillm/image", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "linkapi:gpt-image-2-c",
+              prompt: "A lighthouse in a storm",
+              numberOfImages: 2,
+              size: "1024x1024",
+              aspectRatio: "1:1",
+              quality: "standard",
+              style: "vivid",
+              negativePrompt: "text that LinkAPI does not accept",
+              imageDataUrl: "data:image/png;base64,aWdub3JlZA==",
+              sync: false,
+            }),
+          })
+        );
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(upstreamBody, {
+          model: "gpt-image-2-c",
+          prompt: "A lighthouse in a storm",
+          n: 2,
+          response_format: "url",
+          size: "1024x1024",
+          quality: "standard",
+          style: "vivid",
+        });
+        assert.deepEqual(await response.json(), {
+          images: [{ data: "AQID", mimeType: "image/png" }],
+        });
+        assert.equal(generationCalls, 1);
+        assert.equal(downloadCalls, 1);
       }
     );
   });
@@ -206,6 +286,37 @@ test("MultiLLM video polling never resubmits the generation job", async () => {
           sync: false,
           seconds: 8,
         });
+      }
+    );
+  });
+});
+
+test("MultiLLM rejects LinkAPI models on the video route", async () => {
+  await withMultiLlmEnv(async () => {
+    let fetched = false;
+    await withFetch(
+      async () => {
+        fetched = true;
+        throw new Error("fetch must not run");
+      },
+      async () => {
+        const response = await multiLlmVideoPost(
+          new Request("https://studio.test/api/multillm/video", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "linkapi:gpt-image-2-c",
+              prompt: "A lighthouse in a storm",
+            }),
+          })
+        );
+
+        assert.equal(response.status, 400);
+        assert.match(
+          ((await response.json()) as { error: string }).error,
+          /navyai: or nanogpt:/
+        );
+        assert.equal(fetched, false);
       }
     );
   });

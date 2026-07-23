@@ -807,6 +807,22 @@ export const MULTILLM_IMAGE_MODELS: ModelOption[] = [
         metadataSource: "multillm-fallback",
         metadataStatus: "fallback",
     },
+    {
+        id: "linkapi:gpt-image-2-c",
+        label: "LinkAPI · GPT Image 2 C",
+        provider: "multillm",
+        endpoint: "multillm-images-generations",
+        inputModalities: ["text"],
+        outputModalities: ["image"],
+        supportsImageOutput: true,
+        supports: {
+            imageGeneration: true,
+            size: true,
+        },
+        maxReferenceImages: 0,
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
 ];
 
 export const MULTILLM_VIDEO_MODELS: ModelOption[] = [

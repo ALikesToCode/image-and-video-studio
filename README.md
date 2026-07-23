@@ -19,7 +19,7 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
 - OpenRouter image-capable chat completion models with output modality discovery.
 - Chutes image, video, audio, and chat support with provider-specific settings isolated.
 - NanoGPT image generation/editing support for HiDream, Chroma, Z Image Turbo, Qwen Image, and Step Image Edit 2.
-- MultiLLM Proxy chat routing plus NavyAI/NanoGPT image, asynchronous video, and NavyAI audio generation through one base URL and credential.
+- MultiLLM Proxy chat routing plus NavyAI/NanoGPT/LinkAPI image, asynchronous video, and NavyAI audio generation through one base URL and credential.
 - Local reference strip for source images, style, character, product/object, first-frame, and last-frame references.
 - Local asset library with search, media filters, sorting, delete, clear, prompt copy, download, and JSON export.
 - Local storage status panel with quota estimate and persistent-storage request.
@@ -61,7 +61,7 @@ PROXY_BASE_URL=https://multillm-proxy.cserules.workers.dev
 MULTILLM_API_KEY=your-proxy-key
 ```
 
-Unified chat catalog entries keep their `provider:model` IDs. Media catalogs are source-tagged in the UI as `navyai:model` or `nanogpt:model` so the app can select the correct provider-specific route while using the same proxy credential.
+Unified chat catalog entries keep their `provider:model` IDs. Media catalogs are source-tagged in the UI as `navyai:model`, `nanogpt:model`, or `linkapi:model` so the app can select the correct provider-specific route while using the same proxy credential. The image fallback catalog includes `linkapi:gpt-image-2-c`.
 
 ## Running locally
 

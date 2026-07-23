@@ -1,0 +1,227 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e5]:
+      - banner:
+        - navigation [ref=e7]:
+          - link [ref=e674] [cursor=pointer]:
+            - /url: /
+            - generic [ref=e11]: LinkAPI
+          - generic [ref=e12]:
+            - link [ref=e676] [cursor=pointer]:
+              - /url: /
+              - text: Home
+            - link [ref=e677] [cursor=pointer]:
+              - /url: /dashboard
+              - text: Console
+            - link [ref=e678] [cursor=pointer]:
+              - /url: /pricing
+              - text: Model Square
+            - link [ref=e679] [cursor=pointer]:
+              - /url: https://docs.linkapi.ai/
+              - text: Docs
+            - button [ref=e680] [cursor=pointer]:
+              - generic [ref=e19]: Change language
+            - button [ref=e681] [cursor=pointer]:
+              - generic [ref=e21]: Toggle theme
+            - button [ref=e682] [cursor=pointer]:
+              - generic [ref=e23]: "21"
+            - button [ref=e683] [cursor=pointer]: Sign in
+      - generic [ref=e27]:
+        - banner [ref=e28]:
+          - heading [level=1] [ref=e684]: Model Square
+          - paragraph [ref=e30]: This site currently has 123 models enabled
+          - paragraph [ref=e31]: Discover curated AI models, compare pricing and capabilities, and choose the right model for every scenario.
+          - generic [ref=e32]:
+            - textbox [ref=e685]:
+              - /placeholder: Search model name, provider, endpoint, or tag...
+              - text: gpt-image-2-c
+            - button [ref=e686] [cursor=pointer]
+        - main [ref=e36]:
+          - generic [ref=e38]:
+            - generic [ref=e39]:
+              - button [ref=e687] [cursor=pointer]: Filter
+              - generic [ref=e41]:
+                - generic [ref=e42]: "1"
+                - generic [ref=e43]: model
+            - generic [ref=e44]:
+              - generic [ref=e45]:
+                - group [ref=e688]:
+                  - button [pressed] [ref=e689] [cursor=pointer]: Standard
+                  - button [ref=e690] [cursor=pointer]: Recharge
+                - group [ref=e691]:
+                  - button [pressed] [ref=e692] [cursor=pointer]: /1M
+                  - button [ref=e693] [cursor=pointer]: /1K
+              - button [ref=e694] [cursor=pointer]:
+                - generic [ref=e53]: Name
+              - group [ref=e695]:
+                - button [pressed] [ref=e55] [cursor=pointer]
+                - button [ref=e58] [cursor=pointer]
+          - generic [ref=e645]:
+            - generic [ref=e646]:
+              - generic [ref=e651]:
+                - heading [level=3] [ref=e697]: gpt-image-2-c
+                - generic [ref=e653]: ¥0.1 / request
+              - generic [ref=e655]:
+                - button [ref=e698] [cursor=pointer]: Details
+                - button [ref=e699] [cursor=pointer]
+            - paragraph [ref=e663]: No description available.
+            - generic [ref=e664]:
+              - generic [ref=e665]:
+                - generic [ref=e666]: all
+                - generic [ref=e700]: Per Request
+              - generic [ref=e669]:
+                - generic [ref=e670]: openai
+                - generic [ref=e671]: Generate image
+                - generic [ref=e672]: 1M
+                - generic [ref=e673]: "+2"
+    - region "Notifications alt+T"
+  - dialog "gpt-image-2-c" [ref=e704]:
+    - generic [ref=e705]:
+      - heading "gpt-image-2-c" [level=2]
+      - paragraph: Model details
+    - generic [ref=e707]:
+      - banner [ref=e708]:
+        - generic [ref=e709]:
+          - img "OpenAI" [ref=e710]
+          - heading "gpt-image-2-c" [level=1] [ref=e712]
+          - button "Copy model name" [ref=e713] [cursor=pointer]
+        - generic [ref=e714]:
+          - generic [ref=e715]: OpenAI
+          - generic [ref=e716]: ·
+          - generic "Per Request" [ref=e717]
+      - generic [ref=e719]:
+        - tablist [ref=e720]:
+          - tab "Overview" [ref=e721] [cursor=pointer]
+          - tab "Performance" [ref=e723] [cursor=pointer]
+          - tab "API" [selected] [ref=e725] [cursor=pointer]
+        - tabpanel "API" [ref=e818]:
+          - generic [ref=e819]:
+            - generic [ref=e820]:
+              - heading "Code samples" [level=3] [ref=e821]
+              - generic [ref=e825]:
+                - tablist [ref=e827]:
+                  - tab "openai" [ref=e828] [cursor=pointer]
+                  - tab "Generate image" [active] [selected] [ref=e829] [cursor=pointer]
+                  - tab "Edit image" [ref=e830] [cursor=pointer]
+                - tablist [ref=e832]:
+                  - tab "cURL" [selected] [ref=e833] [cursor=pointer]
+                  - tab "Python" [ref=e834] [cursor=pointer]
+                  - tab "TypeScript" [ref=e835] [cursor=pointer]
+                  - tab "JavaScript" [ref=e836] [cursor=pointer]
+              - generic [ref=e839]:
+                - textbox "bash" [ref=e841]:
+                  - textbox [ref=e844]:
+                    - generic [ref=e845]: curl https://linkapi.ai/v1/images/generations \
+                    - generic [ref=e1020]: "-H \"Authorization: Bearer $NEW_API_KEY\" \\"
+                    - generic [ref=e1021]: "-H \"Content-Type: application/json\" \\"
+                    - generic [ref=e1022]: "-d '{"
+                    - generic [ref=e1023]: "\"model\": \"gpt-image-2-c\","
+                    - generic [ref=e1024]: "\"messages\": ["
+                    - generic [ref=e1025]: "{"
+                    - generic [ref=e1026]: "\"role\": \"user\","
+                    - generic [ref=e1027]: "\"content\": \"Explain quantum entanglement in one paragraph.\""
+                    - generic [ref=e1028]: "}"
+                    - generic [ref=e1029]: "],"
+                    - generic [ref=e1030]: "\"temperature\": 0.7"
+                    - generic [ref=e1031]: "}'"
+                - button "Copy code" [ref=e859] [cursor=pointer]
+              - paragraph [ref=e860]:
+                - text: Replace
+                - code [ref=e861]: <YOUR_API_KEY>
+                - text: with the API key from your token settings.
+            - generic [ref=e862]:
+              - heading "Authentication" [level=3] [ref=e863]
+              - generic [ref=e870]:
+                - paragraph [ref=e871]:
+                  - text: All requests must include
+                  - code [ref=e872]: "Authorization: Bearer <TOKEN>"
+                  - text: header. Anthropic-formatted endpoints accept the
+                  - code [ref=e873]: x-api-key
+                  - text: header instead.
+                - paragraph [ref=e874]: Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.
+            - generic [ref=e875]:
+              - heading "Supported parameters" [level=3] [ref=e876]
+              - table [ref=e881]:
+                - rowgroup [ref=e882]:
+                  - row [ref=e883]:
+                    - columnheader "Parameter" [ref=e884]
+                    - columnheader "Type" [ref=e885]
+                    - columnheader "Default / range" [ref=e886]
+                    - columnheader "Description" [ref=e887]
+                - rowgroup [ref=e888]:
+                  - row [ref=e889]:
+                    - cell "prompt required" [ref=e890]:
+                      - generic [ref=e891]:
+                        - code [ref=e892]: prompt
+                        - generic [ref=e893]: required
+                    - cell "string" [ref=e894]
+                    - cell "—" [ref=e898]
+                    - cell "Text description of the desired image" [ref=e899]
+                  - row [ref=e902]:
+                    - cell [ref=e903]:
+                      - code [ref=e905]: size
+                    - cell "enum" [ref=e906]
+                    - cell "= 1024x1024" [ref=e910]:
+                      - generic [ref=e911]:
+                        - generic [ref=e912]: =
+                        - code [ref=e913]: 1024x1024
+                    - cell "Output image size" [ref=e914]
+                  - row [ref=e917]:
+                    - cell [ref=e918]:
+                      - code [ref=e920]: quality
+                    - cell "enum" [ref=e921]
+                    - cell "= standard" [ref=e925]:
+                      - generic [ref=e926]:
+                        - generic [ref=e927]: =
+                        - code [ref=e928]: standard
+                    - cell "Generation quality preset" [ref=e929]
+                  - row [ref=e932]:
+                    - cell [ref=e933]:
+                      - code [ref=e935]: style
+                    - cell "enum" [ref=e936]
+                    - cell "= vivid" [ref=e940]:
+                      - generic [ref=e941]:
+                        - generic [ref=e942]: =
+                        - code [ref=e943]: vivid
+                    - cell "Aesthetic style" [ref=e944]
+                  - row [ref=e947]:
+                    - cell [ref=e948]:
+                      - code [ref=e950]: "n"
+                    - cell "integer" [ref=e951]
+                    - cell "= 1 1 ~ 10" [ref=e955]:
+                      - generic [ref=e956]:
+                        - generic [ref=e957]: =
+                        - code [ref=e958]: "1"
+                        - generic [ref=e959]: 1 ~ 10
+                    - cell "Number of images to generate" [ref=e960]
+                  - row [ref=e963]:
+                    - cell [ref=e964]:
+                      - code [ref=e966]: response_format
+                    - cell "enum" [ref=e967]
+                    - cell "= url" [ref=e971]:
+                      - generic [ref=e972]:
+                        - generic [ref=e973]: =
+                        - code [ref=e974]: url
+                    - cell "How to deliver the resulting image" [ref=e975]
+            - generic [ref=e978]:
+              - heading "Rate limits" [level=3] [ref=e979]
+              - table [ref=e985]:
+                - rowgroup [ref=e986]:
+                  - row [ref=e987]:
+                    - columnheader "Group" [ref=e988]
+                    - columnheader "RPM" [ref=e989]
+                    - columnheader "TPM" [ref=e990]
+                    - columnheader "RPD" [ref=e991]
+                - rowgroup [ref=e992]:
+                  - row [ref=e993]:
+                    - cell "all" [ref=e994]
+                    - cell "100" [ref=e997]
+                    - cell "—" [ref=e1000]
+                    - cell "1.6K" [ref=e1003]
+                  - row [ref=e1006]:
+                    - cell "once" [ref=e1007]
+                    - cell "90" [ref=e1010]
+                    - cell "—" [ref=e1013]
+                    - cell "1.4K" [ref=e1016]
+              - paragraph [ref=e1019]: RPM = requests per minute, TPM = tokens per minute, RPD = requests per day. Limits apply per token group.
+    - button "Close" [ref=e815] [cursor=pointer]

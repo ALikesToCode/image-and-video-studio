@@ -1,0 +1,156 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e5]:
+      - banner:
+        - navigation [ref=e7]:
+          - link [ref=e674] [cursor=pointer]:
+            - /url: /
+            - generic [ref=e11]: LinkAPI
+          - generic [ref=e12]:
+            - link [ref=e676] [cursor=pointer]:
+              - /url: /
+              - text: Home
+            - link [ref=e677] [cursor=pointer]:
+              - /url: /dashboard
+              - text: Console
+            - link [ref=e678] [cursor=pointer]:
+              - /url: /pricing
+              - text: Model Square
+            - link [ref=e679] [cursor=pointer]:
+              - /url: https://docs.linkapi.ai/
+              - text: Docs
+            - button [ref=e680] [cursor=pointer]:
+              - generic [ref=e19]: Change language
+            - button [ref=e681] [cursor=pointer]:
+              - generic [ref=e21]: Toggle theme
+            - button [ref=e682] [cursor=pointer]:
+              - generic [ref=e23]: "21"
+            - button [ref=e683] [cursor=pointer]: Sign in
+      - generic [ref=e27]:
+        - banner [ref=e28]:
+          - heading [level=1] [ref=e684]: Model Square
+          - paragraph [ref=e30]: This site currently has 123 models enabled
+          - paragraph [ref=e31]: Discover curated AI models, compare pricing and capabilities, and choose the right model for every scenario.
+          - generic [ref=e32]:
+            - textbox [ref=e685]:
+              - /placeholder: Search model name, provider, endpoint, or tag...
+              - text: gpt-image-2-c
+            - button [ref=e686] [cursor=pointer]
+        - main [ref=e36]:
+          - generic [ref=e38]:
+            - generic [ref=e39]:
+              - button [ref=e687] [cursor=pointer]: Filter
+              - generic [ref=e41]:
+                - generic [ref=e42]: "1"
+                - generic [ref=e43]: model
+            - generic [ref=e44]:
+              - generic [ref=e45]:
+                - group [ref=e688]:
+                  - button [pressed] [ref=e689] [cursor=pointer]: Standard
+                  - button [ref=e690] [cursor=pointer]: Recharge
+                - group [ref=e691]:
+                  - button [pressed] [ref=e692] [cursor=pointer]: /1M
+                  - button [ref=e693] [cursor=pointer]: /1K
+              - button [ref=e694] [cursor=pointer]:
+                - generic [ref=e53]: Name
+              - group [ref=e695]:
+                - button [pressed] [ref=e55] [cursor=pointer]
+                - button [ref=e58] [cursor=pointer]
+          - generic [ref=e645]:
+            - generic [ref=e646]:
+              - generic [ref=e651]:
+                - heading [level=3] [ref=e697]: gpt-image-2-c
+                - generic [ref=e653]: ¥0.1 / request
+              - generic [ref=e655]:
+                - button [ref=e698] [cursor=pointer]: Details
+                - button [ref=e699] [cursor=pointer]
+            - paragraph [ref=e663]: No description available.
+            - generic [ref=e664]:
+              - generic [ref=e665]:
+                - generic [ref=e666]: all
+                - generic [ref=e700]: Per Request
+              - generic [ref=e669]:
+                - generic [ref=e670]: openai
+                - generic [ref=e671]: Generate image
+                - generic [ref=e672]: 1M
+                - generic [ref=e673]: "+2"
+    - region "Notifications alt+T"
+  - dialog "gpt-image-2-c" [ref=e704]:
+    - generic [ref=e705]:
+      - heading "gpt-image-2-c" [level=2]
+      - paragraph: Model details
+    - generic [ref=e707]:
+      - banner [ref=e708]:
+        - generic [ref=e709]:
+          - img "OpenAI" [ref=e710]
+          - heading "gpt-image-2-c" [level=1] [ref=e712]
+          - button "Copy model name" [active] [ref=e713] [cursor=pointer]
+        - generic [ref=e714]:
+          - generic [ref=e715]: OpenAI
+          - generic [ref=e716]: ·
+          - generic "Per Request" [ref=e717]
+      - generic [ref=e719]:
+        - tablist [ref=e720]:
+          - tab "Overview" [selected] [ref=e721] [cursor=pointer]
+          - tab "Performance" [ref=e723] [cursor=pointer]
+          - tab "API" [ref=e725] [cursor=pointer]
+        - tabpanel "Overview" [ref=e727]:
+          - generic [ref=e728]:
+            - generic [ref=e733]:
+              - generic [ref=e734]: TPS
+              - generic [ref=e735]: —
+            - generic [ref=e740]:
+              - generic [ref=e741]: Average latency
+              - generic [ref=e742]: —
+            - generic [ref=e747]:
+              - generic [ref=e748]: Success rate
+              - generic [ref=e749]: —
+          - generic [ref=e750]:
+            - heading "Pricing" [level=2] [ref=e751]
+            - generic [ref=e752]:
+              - heading "Base Price" [level=2] [ref=e753]
+              - generic [ref=e754]:
+                - generic [ref=e755]: Per request
+                - generic [ref=e756]: ¥0.1
+            - generic [ref=e757]:
+              - heading "Pricing by Group" [level=2] [ref=e758]
+              - generic [ref=e759]:
+                - generic [ref=e760]: Auto Group Chain
+                - generic [ref=e761]: →
+                - generic "once" [ref=e763]
+              - table [ref=e767]:
+                - rowgroup [ref=e768]:
+                  - row [ref=e769]:
+                    - columnheader "Group" [ref=e770]
+                    - columnheader "Ratio" [ref=e771]
+                    - columnheader "Price" [ref=e772]
+                - rowgroup [ref=e773]:
+                  - row [ref=e774]:
+                    - cell "all" [ref=e775]
+                    - cell "1x" [ref=e778]
+                    - cell "¥0.1" [ref=e781]
+                  - row [ref=e784]:
+                    - cell "once" [ref=e785]
+                    - cell "1x" [ref=e788]
+                    - cell "¥0.1" [ref=e791]
+          - generic [ref=e794]:
+            - heading "Model" [level=2] [ref=e795]
+            - generic [ref=e796]:
+              - generic [ref=e797]:
+                - generic [ref=e798]: Provider
+                - generic [ref=e799]: OpenAI
+              - generic [ref=e800]:
+                - generic [ref=e801]: Type
+                - generic "Per Request" [ref=e802]
+              - generic [ref=e804]:
+                - generic [ref=e805]: Groups
+                - generic [ref=e806]:
+                  - generic [ref=e807]: all
+                  - generic [ref=e808]: once
+              - generic [ref=e809]:
+                - generic [ref=e810]: Endpoints
+                - generic [ref=e811]:
+                  - generic [ref=e812]: openai
+                  - generic [ref=e813]: Generate image
+                  - generic [ref=e814]: Edit image
+    - button "Close" [ref=e815] [cursor=pointer]
