@@ -57,11 +57,22 @@ export function ChatView({ initialInput }: ChatViewProps) {
         nanoGptChatModelsLoading,
         nanoGptChatModelsError,
         refreshNanoGptChatModels,
+        multiLlmChatModels,
+        multiLlmChatModel,
+        setMultiLlmChatModel,
+        multiLlmToolImageModel,
+        setMultiLlmToolImageModel,
+        multiLlmChatModelsLoading,
+        multiLlmChatModelsError,
+        refreshMultiLlmChatModels,
         navyImageModels,
         navyVideoModels,
         navyTtsModels,
         nanoGptImageModels,
         nanoGptVideoModels,
+        multiLlmImageModels,
+        multiLlmVideoModels,
+        multiLlmAudioModels,
         navyUsage,
         navyUsageError,
         navyUsageLoading,
@@ -85,11 +96,14 @@ export function ChatView({ initialInput }: ChatViewProps) {
 
     const isNavyChat = chatProvider === "navy";
     const isNanoGptChat = chatProvider === "nanogpt";
+    const isMultiLlmChat = chatProvider === "multillm";
     const chatApiKey = isNavyChat
         ? apiKeys.navy
         : isNanoGptChat
             ? apiKeys.nanogpt
-            : apiKeys.chutes;
+            : isMultiLlmChat
+                ? apiKeys.multillm
+                : apiKeys.chutes;
     const navyChatModelsFiltered = useMemo(() => {
         if (!navyChatModels.length) return [];
         const exclude = new Set([
@@ -104,17 +118,23 @@ export function ChatView({ initialInput }: ChatViewProps) {
         ? resolvedNavyChatModels
         : isNanoGptChat
             ? nanoGptChatModels
-            : chutesChatModels;
+            : isMultiLlmChat
+                ? multiLlmChatModels
+                : chutesChatModels;
     const chatModel = isNavyChat
         ? navyChatModel
         : isNanoGptChat
             ? nanoGptChatModel
-            : chutesChatModel;
+            : isMultiLlmChat
+                ? multiLlmChatModel
+                : chutesChatModel;
     const setChatModel = isNavyChat
         ? setNavyChatModel
         : isNanoGptChat
             ? setNanoGptChatModel
-            : setChutesChatModel;
+            : isMultiLlmChat
+                ? setMultiLlmChatModel
+                : setChutesChatModel;
     const chutesImageToolModels = useMemo(
         () => appendUniqueModels(CHUTES_IMAGE_MODELS, nanoGptImageModels),
         [nanoGptImageModels]
@@ -135,9 +155,14 @@ export function ChatView({ initialInput }: ChatViewProps) {
         ? navyImageToolModels
         : isNanoGptChat
             ? nanoGptImageToolModels
-            : chutesImageToolModels;
+            : isMultiLlmChat
+                ? multiLlmImageModels
+                : chutesImageToolModels;
     const videoModels = useMemo(
         () => {
+            if (isMultiLlmChat) {
+                return multiLlmVideoModels.filter(isChatVideoModelSupported);
+            }
             if (isNanoGptChat) {
                 return appendUniqueModels(
                     nanoGptVideoModels,
@@ -149,9 +174,18 @@ export function ChatView({ initialInput }: ChatViewProps) {
                 nanoGptVideoModels
             ).filter(isChatVideoModelSupported);
         },
-        [isNanoGptChat, isNavyChat, navyVideoModels, nanoGptVideoModels]
+        [
+            isMultiLlmChat,
+            isNanoGptChat,
+            isNavyChat,
+            multiLlmVideoModels,
+            navyVideoModels,
+            nanoGptVideoModels,
+        ]
     );
-    const audioModels = isNanoGptChat
+    const audioModels = isMultiLlmChat
+        ? multiLlmAudioModels
+        : isNanoGptChat
         ? EMPTY_MODELS
         : isNavyChat
             ? navyTtsModels
@@ -160,27 +194,37 @@ export function ChatView({ initialInput }: ChatViewProps) {
         ? navyToolImageModel
         : isNanoGptChat
             ? nanoGptToolImageModel
-            : chutesToolImageModel;
+            : isMultiLlmChat
+                ? multiLlmToolImageModel
+                : chutesToolImageModel;
     const setToolImageModel = isNavyChat
         ? setNavyToolImageModel
         : isNanoGptChat
             ? setNanoGptToolImageModel
-            : setChutesToolImageModel;
+            : isMultiLlmChat
+                ? setMultiLlmToolImageModel
+                : setChutesToolImageModel;
     const modelsLoading = isNavyChat
         ? navyChatModelsLoading
         : isNanoGptChat
             ? nanoGptChatModelsLoading
-            : chutesChatModelsLoading;
+            : isMultiLlmChat
+                ? multiLlmChatModelsLoading
+                : chutesChatModelsLoading;
     const modelsError = isNavyChat
         ? navyChatModelsError
         : isNanoGptChat
             ? nanoGptChatModelsError
-            : chutesChatModelsError;
+            : isMultiLlmChat
+                ? multiLlmChatModelsError
+                : chutesChatModelsError;
     const onRefreshModels = isNavyChat
         ? refreshNavyChatModels
         : isNanoGptChat
             ? refreshNanoGptChatModels
-            : refreshChutesChatModels;
+            : isMultiLlmChat
+                ? refreshMultiLlmChatModels
+                : refreshChutesChatModels;
     const handleSaveImages = (payload: {
         images: ChatImageAsset[];
         prompt: string;
@@ -212,6 +256,7 @@ export function ChatView({ initialInput }: ChatViewProps) {
         <div className="h-full w-full flex flex-col">
             <ChutesChat
                 apiKey={chatApiKey}
+                allowServerApiKey={isMultiLlmChat}
                 provider={chatProvider}
                 setProvider={setChatProvider}
                 models={chatModels}

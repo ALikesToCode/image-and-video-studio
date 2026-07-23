@@ -5,6 +5,10 @@ import {
   CHUTES_VIDEO_MODELS,
   GEMINI_IMAGE_MODELS,
   GEMINI_VIDEO_MODELS,
+  MULTILLM_AUDIO_MODELS,
+  MULTILLM_CHAT_MODELS,
+  MULTILLM_IMAGE_MODELS,
+  MULTILLM_VIDEO_MODELS,
   NAVY_CHAT_MODELS,
   NAVY_IMAGE_MODELS,
   NAVY_TTS_MODELS,
@@ -112,6 +116,18 @@ export const STATIC_MODEL_CAPABILITIES: ModelCapability[] = [
   ...OPENROUTER_IMAGE_MODELS.map((model) => fromModelOption("openrouter", model, "image")),
   ...NANOGPT_IMAGE_MODELS.map((model) => fromModelOption("nanogpt", model, "image")),
   ...NANOGPT_VIDEO_MODELS.map((model) => fromModelOption("nanogpt", model, "video")),
+  ...MULTILLM_IMAGE_MODELS.map((model) =>
+    fromModelOption("multillm", model, "image")
+  ),
+  ...MULTILLM_VIDEO_MODELS.map((model) =>
+    fromModelOption("multillm", model, "video")
+  ),
+  ...MULTILLM_AUDIO_MODELS.map((model) =>
+    fromModelOption("multillm", model, "audio")
+  ),
+  ...MULTILLM_CHAT_MODELS.map((model) =>
+    fromModelOption("multillm", model, "chat")
+  ),
   ...CHUTES_IMAGE_MODELS.map((model) => fromModelOption("chutes", model, "image")),
   ...CHUTES_VIDEO_MODELS.map((model) => fromModelOption("chutes", model, "video")),
   ...CHUTES_TTS_MODELS.map((model) => fromModelOption("chutes", model, "audio")),

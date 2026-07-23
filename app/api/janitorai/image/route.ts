@@ -56,8 +56,9 @@ type ImagePayload = {
 type PassthroughImageResult = { imageUrl: string } | { dataUrl: string };
 
 type ProviderHandler = (req: Request) => Promise<Response>;
+type JanitorAiProvider = Exclude<Provider, "multillm">;
 
-const PROVIDER_MODELS: Record<Provider, string[]> = {
+const PROVIDER_MODELS: Record<JanitorAiProvider, string[]> = {
   gemini: GEMINI_IMAGE_MODELS.map((model) => model.id),
   navy: NAVY_IMAGE_MODELS.map((model) => model.id),
   chutes: CHUTES_IMAGE_MODELS.map((model) => model.id),
@@ -65,7 +66,7 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   nanogpt: NANOGPT_IMAGE_MODELS.map((model) => model.id),
 };
 
-const PROVIDER_HANDLERS: Record<Provider, ProviderHandler> = {
+const PROVIDER_HANDLERS: Record<JanitorAiProvider, ProviderHandler> = {
   gemini: geminiImagePost,
   navy: navyImagePost,
   chutes: chutesImagePost,
@@ -93,7 +94,7 @@ const integer = (value: unknown) =>
 const jsonResponse = (req: Request, payload: unknown, status = 200) =>
   janitorAiJsonResponse(req, payload, { status });
 
-const providerForModel = (model: string): Provider => {
+const providerForModel = (model: string): JanitorAiProvider => {
   if (PROVIDER_MODELS.gemini.includes(model)) return "gemini";
   if (PROVIDER_MODELS.navy.includes(model)) return "navy";
   if (PROVIDER_MODELS.openrouter.includes(model)) return "openrouter";
@@ -105,13 +106,16 @@ const providerForModel = (model: string): Provider => {
   return "chutes";
 };
 
-const availableModelsForProvider = (provider: Provider, model: string) => {
+const availableModelsForProvider = (
+  provider: JanitorAiProvider,
+  model: string
+) => {
   const models = PROVIDER_MODELS[provider];
   return models.includes(model) ? models : [model, ...models];
 };
 
 const buildBaseBody = (
-  provider: Provider,
+  provider: JanitorAiProvider,
   body: JanitorAiImageRequest
 ): Record<string, unknown> => {
   const width = positiveInteger(body.width);
@@ -253,7 +257,7 @@ const invokeProvider = async ({
   apiKey,
   body,
 }: {
-  provider: Provider;
+  provider: JanitorAiProvider;
   apiKey: string;
   body: Record<string, unknown>;
 }) => {

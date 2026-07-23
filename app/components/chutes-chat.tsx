@@ -63,6 +63,10 @@ import {
   NANOGPT_IMAGE_MODELS as STATIC_NANOGPT_IMAGE_MODELS,
   NANOGPT_LLM_MODELS as STATIC_NANOGPT_LLM_MODELS,
   NANOGPT_VIDEO_MODELS as STATIC_NANOGPT_VIDEO_MODELS,
+  MULTILLM_AUDIO_MODELS as STATIC_MULTILLM_AUDIO_MODELS,
+  MULTILLM_CHAT_MODELS as STATIC_MULTILLM_CHAT_MODELS,
+  MULTILLM_IMAGE_MODELS as STATIC_MULTILLM_IMAGE_MODELS,
+  MULTILLM_VIDEO_MODELS as STATIC_MULTILLM_VIDEO_MODELS,
   NAVY_CHAT_MODELS as STATIC_NAVY_CHAT_MODELS,
   NAVY_IMAGE_MODELS as STATIC_NAVY_IMAGE_MODELS,
   NAVY_TTS_MODELS as STATIC_NAVY_TTS_MODELS,
@@ -175,6 +179,7 @@ type QueuedChatTurn = {
 
 type ChutesChatProps = {
   apiKey: string;
+  allowServerApiKey?: boolean;
   provider: ChatProvider;
   setProvider: (value: ChatProvider) => void;
   models: ModelOption[];
@@ -407,20 +412,31 @@ const STATIC_MODEL_IDS = {
     ]),
     audio: new Set<string>(),
   },
+  multillm: {
+    chat: idsFor(STATIC_MULTILLM_CHAT_MODELS),
+    image: idsFor(STATIC_MULTILLM_IMAGE_MODELS),
+    video: idsFor(STATIC_MULTILLM_VIDEO_MODELS),
+    audio: idsFor(STATIC_MULTILLM_AUDIO_MODELS),
+  },
 } satisfies Record<ChatProvider, Record<"chat" | "image" | "video" | "audio", Set<string>>>;
 
 const isImageToolProvider = (value: unknown): value is Provider =>
-  value === "chutes" || value === "navy" || value === "nanogpt";
+  value === "chutes" ||
+  value === "navy" ||
+  value === "nanogpt" ||
+  value === "multillm";
 
 const imageEndpointForProvider = (provider: Provider) => {
   if (provider === "navy") return "/api/navy/image";
   if (provider === "nanogpt") return "/api/nanogpt/image";
+  if (provider === "multillm") return "/api/multillm/image";
   return "/api/chutes/image";
 };
 
 const imageProviderLabel = (provider: Provider) => {
   if (provider === "navy") return "NavyAI";
   if (provider === "nanogpt") return "NanoGPT";
+  if (provider === "multillm") return "MultiLLM";
   return "Chutes";
 };
 
@@ -429,7 +445,9 @@ const modelSupportsReasoning = (
   modelId: string,
   modelOption?: ModelOption,
 ) =>
-  (provider === "navy" || provider === "nanogpt") &&
+  (provider === "navy" ||
+    provider === "nanogpt" ||
+    provider === "multillm") &&
   (modelOption?.supportsReasoning === true || isDeepSeekV4Model(modelId));
 
 function NavyUsageFooter({
@@ -968,6 +986,7 @@ const sanitizeToolSettings = (value: unknown): ToolSettings => {
 
 export function ChutesChat({
   apiKey,
+  allowServerApiKey = false,
   provider,
   setProvider,
   models,
@@ -1053,6 +1072,7 @@ export function ChutesChat({
   );
   const providerLabel = chatProviderDisplayName(provider);
   const providerHeading = chatProviderHeading(provider);
+  const hasApiAccess = Boolean(apiKey.trim()) || allowServerApiKey;
   const staticModelIds = STATIC_MODEL_IDS[provider];
   const navyToolUsageFooter =
     provider === "navy" ? (
@@ -1150,7 +1170,9 @@ export function ChutesChat({
     .join(",");
   const attachmentUploadDisabled = !supportsImageAttachments && !supportsFileAttachments;
   const isDeepSeekV4ChatModel =
-    (provider === "navy" || provider === "nanogpt") &&
+    (provider === "navy" ||
+      provider === "nanogpt" ||
+      provider === "multillm") &&
     isDeepSeekV4Model(model);
   const chatModelSupportsReasoning = modelSupportsReasoning(provider, model, selectedChatModel);
   const chatModelToolCapability = chatModelToolSupport(selectedChatModel);
@@ -1630,7 +1652,9 @@ export function ChutesChat({
           ? enabledChatTools.filter((name) => options.activeTools?.includes(name))
           : enabledChatTools;
     const reasoningPayload =
-      (provider === "navy" || provider === "nanogpt") &&
+      (provider === "navy" ||
+        provider === "nanogpt" ||
+        provider === "multillm") &&
       chatModelSupportsReasoning
         ? {
             ...(isDeepSeekV4ChatModel
@@ -1658,7 +1682,9 @@ export function ChutesChat({
               items.filter((item) => !item.transient),
               {
                 includeReasoningContent:
-                  provider === "navy" || provider === "nanogpt",
+                  provider === "navy" ||
+                  provider === "nanogpt" ||
+                  provider === "multillm",
               }
             ),
           ],
@@ -1968,6 +1994,37 @@ export function ChutesChat({
     const imageRequests = modelsToRun.map((targetModel) => {
       const targetProvider = imageProviderByModelId.get(targetModel) ?? provider;
       const targetModelOption = imageModels.find((entry) => entry.id === targetModel);
+      if (targetProvider === "multillm") {
+        const size = getStringArg(finalArgs, ["size"]);
+        const aspectRatio = getStringArg(finalArgs, [
+          "aspect_ratio",
+          "aspectRatio",
+        ]);
+        const quality = getStringArg(finalArgs, ["quality"]);
+        const imageInput = getStringOrStringArrayArg(finalArgs, [
+          "image_url",
+          "image",
+        ]);
+        return {
+          model: targetModel,
+          prompt,
+          body: {
+            model: targetModel,
+            prompt,
+            negativePrompt: negativePrompt || undefined,
+            size: size || undefined,
+            aspectRatio: aspectRatio || undefined,
+            quality: quality || undefined,
+            imageDataUrl:
+              typeof imageInput === "string" ? imageInput : undefined,
+            imageDataUrls: Array.isArray(imageInput)
+              ? imageInput
+              : undefined,
+            numberOfImages: 1,
+            sync: false,
+          },
+        };
+      }
       if (targetProvider === "nanogpt" && targetModelOption) {
         const [prepared] = prepareImageModelRequests({
           models: [targetModel],
@@ -2033,7 +2090,10 @@ export function ChutesChat({
       const targetProvider = imageProviderByModelId.get(targetModel) ?? provider;
       const endpoint = imageEndpointForProvider(targetProvider);
       const imageApiKey = imageApiKeyForProvider(targetProvider);
-      if (!imageApiKey) {
+      if (
+        !imageApiKey &&
+        !(targetProvider === "multillm" && allowServerApiKey)
+      ) {
         throw new Error(`Missing ${imageProviderLabel(targetProvider)} API key for image tool.`);
       }
       const executeRequest = async () => {
@@ -2051,12 +2111,23 @@ export function ChutesChat({
           throw new Error(payload?.error ?? "Image tool failed.");
         }
 
-        if (targetProvider === "navy" && typeof payload?.id === "string" && payload.id) {
+        if (
+          (targetProvider === "navy" ||
+            targetProvider === "multillm") &&
+          typeof payload?.id === "string" &&
+          payload.id
+        ) {
           let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
           let didComplete = false;
+          const source =
+            targetModel.startsWith("nanogpt:") ? "nanogpt" : "navyai";
           for (let attempt = 0; attempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !didComplete; attempt += 1) {
+            const pollUrl =
+              targetProvider === "multillm"
+                ? `/api/multillm/image?id=${encodeURIComponent(payload.id)}&source=${source}`
+                : `/api/navy/image?id=${encodeURIComponent(payload.id)}`;
             const pollResponse = await fetch(
-              `/api/navy/image?id=${encodeURIComponent(payload.id)}`,
+              pollUrl,
               {
                 headers: {
                   "x-user-api-key": imageApiKey,
@@ -2277,7 +2348,10 @@ export function ChutesChat({
     }
     const targetProvider = videoProviderByModelId.get(modelOverride) ?? provider;
     const targetApiKey = videoApiKeyForProvider(targetProvider);
-    if (!targetApiKey) {
+    if (
+      !targetApiKey &&
+      !(targetProvider === "multillm" && allowServerApiKey)
+    ) {
       throw new Error(`Missing ${imageProviderLabel(targetProvider)} API key for video tool.`);
     }
     const sourceImage =
@@ -2285,6 +2359,170 @@ export function ChutesChat({
       latestGeneratedImageRef.current ||
       videoImage ||
       "";
+
+    if (targetProvider === "multillm") {
+      const source = modelOverride.startsWith("nanogpt:")
+        ? "nanogpt"
+        : "navyai";
+      const size = getStringArg(args, ["size", "resolution"]);
+      const aspectRatio =
+        getStringArg(args, ["aspect_ratio", "aspectRatio"]) ||
+        videoAspect;
+      const seconds =
+        getNumberArg(args, ["seconds", "duration"]) ??
+        (videoDuration ? Number(videoDuration) : undefined);
+      const createResponse = await fetch("/api/multillm/video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": targetApiKey,
+        },
+        body: JSON.stringify({
+          model: modelOverride,
+          prompt,
+          sourceImage: sourceImage || undefined,
+          size: size || undefined,
+          resolution: size || undefined,
+          aspectRatio: aspectRatio || undefined,
+          seconds,
+        }),
+        signal,
+      });
+      const contentType = createResponse.headers.get("content-type") ?? "";
+      if (contentType.startsWith("video/")) {
+        if (!createResponse.ok) {
+          throw new Error("MultiLLM video generation failed.");
+        }
+        const blob = await createResponse.blob();
+        const mimeType = blob.type || "video/mp4";
+        return {
+          media: [
+            {
+              id: createId(),
+              kind: "video" as const,
+              dataUrl: await blobToDataUrl(blob),
+              mimeType,
+            },
+          ],
+          model: modelOverride,
+          prompt,
+        };
+      }
+
+      const createPayload = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(
+          createPayload?.error ?? "Unable to start MultiLLM video generation."
+        );
+      }
+      let videoUrl =
+        typeof createPayload?.videoUrl === "string"
+          ? createPayload.videoUrl
+          : "";
+      const jobId =
+        typeof createPayload?.id === "string" ? createPayload.id : "";
+      if (!videoUrl && !jobId) {
+        throw new Error("No MultiLLM video result or job id returned.");
+      }
+
+      for (
+        let attempt = 0;
+        !videoUrl &&
+        attempt < NAVY_JOB_POLL_MAX_ATTEMPTS;
+        attempt += 1
+      ) {
+        const pollResponse = await fetch(
+          `/api/multillm/video?id=${encodeURIComponent(jobId)}&source=${source}`,
+          {
+            headers: {
+              "x-user-api-key": targetApiKey,
+            },
+            signal,
+          }
+        );
+        const pollPayload = await pollResponse.json();
+        if (!pollResponse.ok) {
+          throw new Error(
+            pollPayload?.error ?? "Unable to check MultiLLM video status."
+          );
+        }
+        if (pollPayload?.done) {
+          if (
+            typeof pollPayload?.error === "string" &&
+            pollPayload.error
+          ) {
+            throw new Error(pollPayload.error);
+          }
+          if (
+            typeof pollPayload?.videoUrl === "string" &&
+            pollPayload.videoUrl
+          ) {
+            videoUrl = pollPayload.videoUrl;
+          }
+          break;
+        }
+        const delayMs = resolveNavyJobPollDelayMs({
+          payload: pollPayload,
+          responseStatus: pollResponse.status,
+          currentDelayMs: NAVY_JOB_POLL_INTERVAL_MS,
+        });
+        await abortableDelay(delayMs, signal);
+      }
+      if (!videoUrl) {
+        throw new Error(
+          "MultiLLM video generation timed out before a result was available."
+        );
+      }
+
+      if (jobId) {
+        const downloadResponse = await fetch(
+          "/api/multillm/video/download",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-api-key": targetApiKey,
+            },
+            body: JSON.stringify({ id: jobId, source }),
+            signal,
+          }
+        );
+        if (!downloadResponse.ok) {
+          const payload = await downloadResponse.json().catch(() => null);
+          throw new Error(
+            payload?.error ?? "Unable to download MultiLLM video."
+          );
+        }
+        const blob = await downloadResponse.blob();
+        const mimeType = blob.type || "video/mp4";
+        videoUrl = await blobToDataUrl(blob);
+        return {
+          media: [
+            {
+              id: createId(),
+              kind: "video" as const,
+              dataUrl: videoUrl,
+              mimeType,
+            },
+          ],
+          model: modelOverride,
+          prompt,
+        };
+      }
+
+      return {
+        media: [
+          {
+            id: createId(),
+            kind: "video" as const,
+            dataUrl: videoUrl,
+            mimeType: "video/mp4",
+          },
+        ],
+        model: modelOverride,
+        prompt,
+      };
+    }
 
     if (targetProvider === "navy") {
       const size = getStringArg(args, ["size"]);
@@ -2594,7 +2832,7 @@ export function ChutesChat({
     args: Record<string, unknown>,
     signal?: AbortSignal
   ) => {
-    if (!apiKey.trim()) {
+    if (!apiKey.trim() && !allowServerApiKey) {
       throw new Error("Missing API key for audio tool.");
     }
     const prompt = getStringArg(args, ["input", "text", "prompt"]);
@@ -2602,6 +2840,49 @@ export function ChutesChat({
       throw new Error("Tool call missing input text.");
     }
     const modelOverride = getStringArg(args, ["model"]) || toolAudioModel;
+
+    if (provider === "multillm") {
+      const speed = getNumberArg(args, ["speed"]);
+      const voice = getStringArg(args, ["voice"]) || "alloy";
+      const responseFormat = getStringArg(args, ["response_format"]);
+      const response = await fetch("/api/multillm/audio", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          model: modelOverride,
+          input: prompt,
+          voice,
+          speed: speed ?? undefined,
+          responseFormat: responseFormat || undefined,
+        }),
+        signal,
+      });
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type") ?? "";
+        if (contentType.includes("application/json")) {
+          const payload = await response.json();
+          throw new Error(payload?.error ?? "Audio tool failed.");
+        }
+        throw new Error((await response.text()) || "Audio tool failed.");
+      }
+      const blob = await response.blob();
+      const mimeType = blob.type || "audio/mpeg";
+      return {
+        media: [
+          {
+            id: createId(),
+            kind: "audio" as const,
+            dataUrl: await blobToDataUrl(blob),
+            mimeType,
+          },
+        ],
+        model: modelOverride,
+        prompt,
+      };
+    }
 
     if (provider === "navy") {
       const speed = getNumberArg(args, ["speed"]);
@@ -3079,7 +3360,7 @@ export function ChutesChat({
     attachments: ChatAttachmentAsset[] = [],
     submittedTurnIntent: ChatTurnIntent = "auto"
   ) => {
-    if (!apiKey.trim()) {
+    if (!hasApiAccess) {
       setChatError(`Add your ${providerLabel} API key in settings.`);
       const nextQueuedTurn = takeNextQueuedTurn();
       if (nextQueuedTurn) {
@@ -3320,7 +3601,7 @@ export function ChutesChat({
     const trimmed = input.trim();
     const attachmentsToSend = pendingAttachments;
     if (!trimmed && !attachmentsToSend.length) return;
-    if (!apiKey.trim()) {
+    if (!hasApiAccess) {
       setChatError(`Add your ${providerLabel} API key in settings.`);
       return;
     }
@@ -4535,7 +4816,10 @@ export function ChutesChat({
             <Button
               size="icon"
               onClick={() => void submitMessage()}
-              disabled={(!input.trim() && !pendingAttachments.length) || !apiKey.trim()}
+              disabled={
+                (!input.trim() && !pendingAttachments.length) ||
+                !hasApiAccess
+              }
               title={busy ? "Queue request" : "Send request"}
               aria-label={busy ? "Queue request" : "Send request"}
               className={cn(

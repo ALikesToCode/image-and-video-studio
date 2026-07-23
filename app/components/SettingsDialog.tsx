@@ -100,7 +100,7 @@ export function SettingsDialog() {
                 <DialogHeader>
                     <DialogTitle>Settings</DialogTitle>
                     <DialogDescription>
-                        Configure API keys and review provider account status. Keys are stored locally in your browser.
+                        Configure browser-held API keys and review provider account status.
                     </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -110,7 +110,7 @@ export function SettingsDialog() {
                             Privacy & Storage
                         </div>
                         <p className="text-xs text-muted-foreground">
-                            API keys stay in this browser. Requests are proxied through app API routes so provider CORS and downloads work, but keys and generated assets are not persisted on the server.
+                            Browser-entered API keys stay in this browser. Requests are proxied through app API routes so provider CORS and downloads work. A deployment may optionally provide its MultiLLM key as a server-side environment secret.
                         </p>
                         <div className="mt-3 space-y-2">
                             <Label>API key storage mode</Label>
@@ -194,7 +194,7 @@ export function SettingsDialog() {
                             Provider
                         </Label>
                         <div className="sm:col-span-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                            {(["gemini", "navy", "openrouter", "chutes", "nanogpt"] as const).map(
+                            {(["gemini", "navy", "openrouter", "chutes", "nanogpt", "multillm"] as const).map(
                                 (entry) => (
                                     <Button
                                         key={entry}
@@ -307,6 +307,26 @@ export function SettingsDialog() {
                                 spellCheck={false}
                             />
                             <Button type="button" variant="outline" onClick={() => forgetProviderKey("nanogpt")}>
+                                Forget
+                            </Button>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+                        <Label htmlFor="apiKeyMultiLlm" className="sm:text-right">
+                            MultiLLM Key
+                        </Label>
+                        <div className="flex gap-2 sm:col-span-3">
+                            <Input
+                                id="apiKeyMultiLlm"
+                                type="password"
+                                value={apiKeys.multillm}
+                                onChange={handleKeyChange("multillm")}
+                                className="font-mono text-sm"
+                                placeholder="Optional when configured server-side"
+                                autoComplete="off"
+                                spellCheck={false}
+                            />
+                            <Button type="button" variant="outline" onClick={() => forgetProviderKey("multillm")}>
                                 Forget
                             </Button>
                         </div>

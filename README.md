@@ -1,13 +1,13 @@
 # Image & Video Studio
 
-Browser-based local-first workspace for image, video, audio/TTS, and chat-assisted media creation. The app is BYOK: provider API keys are entered in the UI and stay in browser-controlled storage.
+Browser-based local-first workspace for image, video, audio/TTS, and chat-assisted media creation. The app supports browser-held provider keys and an optional server-side MultiLLM Proxy key.
 
 ## Privacy model
 
 - API keys default to `sessionStorage`, can be kept in memory-only manual mode, and can be persisted in `localStorage` only by explicit opt-in.
 - Generated media, uploaded references, and resumable provider job metadata are stored locally in browser storage, primarily IndexedDB.
 - App API routes proxy provider requests for CORS, streaming, and media download compatibility.
-- The server/edge runtime does not persist API keys, generated assets, chat history, or user accounts.
+- The server/edge runtime does not persist API keys, generated assets, chat history, or user accounts. Deployments may inject the MultiLLM Proxy key as an environment secret.
 - Provider calls still leave your browser and go through the configured edge route to the selected provider.
 
 ## Features
@@ -19,6 +19,7 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
 - OpenRouter image-capable chat completion models with output modality discovery.
 - Chutes image, video, audio, and chat support with provider-specific settings isolated.
 - NanoGPT image generation/editing support for HiDream, Chroma, Z Image Turbo, Qwen Image, and Step Image Edit 2.
+- MultiLLM Proxy chat routing plus NavyAI/NanoGPT image, asynchronous video, and NavyAI audio generation through one base URL and credential.
 - Local reference strip for source images, style, character, product/object, first-frame, and last-frame references.
 - Local asset library with search, media filters, sorting, delete, clear, prompt copy, download, and JSON export.
 - Local storage status panel with quota estimate and persistent-storage request.
@@ -49,8 +50,18 @@ Open Settings in the app and add keys for the providers you want to use:
 - OpenRouter API key
 - Chutes API key
 - NanoGPT API key
+- MultiLLM Proxy API key (optional when `MULTILLM_API_KEY` is configured on the server)
 
 Keys are sent to app API routes with `x-user-api-key` where practical. Route handlers also keep backward-compatible body-key fallback for older local state, sanitize provider errors, and avoid logging keys. Old `studio_api_key_*` localStorage keys are detected in Settings and must be explicitly migrated or discarded.
+
+For server-side MultiLLM authentication, copy `.env.example` to `.env.local` and set:
+
+```bash
+PROXY_BASE_URL=https://multillm-proxy.cserules.workers.dev
+MULTILLM_API_KEY=your-proxy-key
+```
+
+Unified chat catalog entries keep their `provider:model` IDs. Media catalogs are source-tagged in the UI as `navyai:model` or `nanogpt:model` so the app can select the correct provider-specific route while using the same proxy credential.
 
 ## Running locally
 
@@ -93,4 +104,4 @@ The Worker entrypoint and assets output are configured in `wrangler.jsonc`. Open
 - Provider-hosted video URLs can expire; download generated videos into the local gallery promptly.
 - JSON gallery export is local-only and includes data URLs; large exports can be big.
 - Browser storage quota and persistent-storage behavior vary by browser and private browsing mode.
-- Resumable polling depends on the provider returning a stable remote job or operation ID and the matching browser-stored API key still being present.
+- Resumable polling depends on the provider returning a stable remote job or operation ID and either the matching browser-stored key or the server-side MultiLLM key still being available.

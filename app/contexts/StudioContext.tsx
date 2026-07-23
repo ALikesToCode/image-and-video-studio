@@ -12,6 +12,10 @@ import {
     CHUTES_TTS_MODELS,
     NANOGPT_IMAGE_MODELS,
     NANOGPT_VIDEO_MODELS,
+    MULTILLM_AUDIO_MODELS,
+    MULTILLM_CHAT_MODELS,
+    MULTILLM_IMAGE_MODELS,
+    MULTILLM_VIDEO_MODELS,
     OPENROUTER_IMAGE_MODELS,
     NAVY_IMAGE_MODELS,
     NAVY_IMAGE_QUALITIES,
@@ -221,6 +225,12 @@ const STORAGE_KEYS = {
     nanoGptChatModels: "studio_nanogpt_chat_models",
     nanoGptChatModel: "studio_nanogpt_chat_model",
     nanoGptToolImageModel: "studio_nanogpt_tool_image_model",
+    multiLlmChatModels: "studio_multillm_chat_models",
+    multiLlmChatModel: "studio_multillm_chat_model",
+    multiLlmToolImageModel: "studio_multillm_tool_image_model",
+    multiLlmImageModels: "studio_multillm_image_models",
+    multiLlmVideoModels: "studio_multillm_video_models",
+    multiLlmAudioModels: "studio_multillm_audio_models",
 };
 
 type StoredSettings = Partial<{
@@ -565,7 +575,8 @@ const isProvider = (value: unknown): value is Provider =>
     value === "navy" ||
     value === "chutes" ||
     value === "openrouter" ||
-    value === "nanogpt";
+    value === "nanogpt" ||
+    value === "multillm";
 
 const isMode = (value: unknown): value is Mode =>
     value === "image" || value === "video" || value === "tts";
@@ -831,6 +842,13 @@ interface StudioContextType {
     setNanoGptToolImageModel: (s: string) => void;
     nanoGptChatModelsLoading: boolean;
     nanoGptChatModelsError: string | null;
+    multiLlmChatModels: ModelOption[];
+    multiLlmChatModel: string;
+    setMultiLlmChatModel: (s: string) => void;
+    multiLlmToolImageModel: string;
+    setMultiLlmToolImageModel: (s: string) => void;
+    multiLlmChatModelsLoading: boolean;
+    multiLlmChatModelsError: string | null;
 
     // Data / Models
     openRouterImageModels: ModelOption[];
@@ -839,6 +857,9 @@ interface StudioContextType {
     navyTtsModels: ModelOption[];
     nanoGptImageModels: ModelOption[];
     nanoGptVideoModels: ModelOption[];
+    multiLlmImageModels: ModelOption[];
+    multiLlmVideoModels: ModelOption[];
+    multiLlmAudioModels: ModelOption[];
     hiddenNanoGptStandaloneVideoModelCount: number;
     modelSuggestions: ModelOption[];
 
@@ -921,6 +942,7 @@ interface StudioContextType {
     refreshChutesChatModels: () => Promise<void>;
     refreshNavyChatModels: () => Promise<void>;
     refreshNanoGptChatModels: () => Promise<void>;
+    refreshMultiLlmChatModels: () => Promise<void>;
     saveChatImages: (payload: {
         images: { id: string; dataUrl: string; mimeType: string; model?: string }[];
         prompt: string;
@@ -951,6 +973,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         chutes: "",
         openrouter: "",
         nanogpt: "",
+        multillm: "",
     });
     const [keyStorageMode, setKeyStorageMode] = useState<KeyStorageMode>("session");
     const [legacyProviderKeys, setLegacyProviderKeys] = useState<LegacyProviderKey[]>([]);
@@ -964,6 +987,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [navyTtsModels, setNavyTtsModels] = useState<ModelOption[]>(NAVY_TTS_MODELS);
     const [nanoGptImageModels, setNanoGptImageModels] = useState<ModelOption[]>(NANOGPT_IMAGE_MODELS);
     const [nanoGptVideoModels, setNanoGptVideoModels] = useState<ModelOption[]>(NANOGPT_VIDEO_MODELS);
+    const [multiLlmImageModels, setMultiLlmImageModels] = useState<ModelOption[]>(MULTILLM_IMAGE_MODELS);
+    const [multiLlmVideoModels, setMultiLlmVideoModels] = useState<ModelOption[]>(MULTILLM_VIDEO_MODELS);
+    const [multiLlmAudioModels, setMultiLlmAudioModels] = useState<ModelOption[]>(MULTILLM_AUDIO_MODELS);
 
     // --- Settings ---
     const [prompt, setPrompt] = useState("");
@@ -1018,6 +1044,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [nanoGptToolImageModel, setNanoGptToolImageModel] = useState(NANOGPT_IMAGE_MODELS[0]?.id ?? "");
     const [nanoGptChatModelsLoading, setNanoGptChatModelsLoading] = useState(false);
     const [nanoGptChatModelsError, setNanoGptChatModelsError] = useState<string | null>(null);
+    const [multiLlmChatModels, setMultiLlmChatModels] = useState<ModelOption[]>(MULTILLM_CHAT_MODELS);
+    const [multiLlmChatModel, setMultiLlmChatModel] = useState(MULTILLM_CHAT_MODELS[0]?.id ?? "");
+    const [multiLlmToolImageModel, setMultiLlmToolImageModel] = useState(MULTILLM_IMAGE_MODELS[0]?.id ?? "");
+    const [multiLlmChatModelsLoading, setMultiLlmChatModelsLoading] = useState(false);
+    const [multiLlmChatModelsError, setMultiLlmChatModelsError] = useState<string | null>(null);
 
     // --- App Logic State ---
     const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
@@ -1062,8 +1093,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const lastProviderModeRef = useRef(`${provider}:${mode}`);
 
     // --- Computed ---
-    const supportsVideo = provider === "gemini" || provider === "navy" || provider === "chutes" || provider === "nanogpt";
-    const supportsTts = provider === "navy" || provider === "chutes";
+    const supportsVideo =
+        provider === "gemini" ||
+        provider === "navy" ||
+        provider === "chutes" ||
+        provider === "nanogpt" ||
+        provider === "multillm";
+    const supportsTts =
+        provider === "navy" ||
+        provider === "chutes" ||
+        provider === "multillm";
     const idbAvailable = useMemo(() => isIndexedDbAvailable(), []);
 
     const setApiKeyForProvider = useCallback((target: Provider, key: string) => {
@@ -1106,6 +1145,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             chutes: "",
             openrouter: "",
             nanogpt: "",
+            multillm: "",
         });
         setLegacyProviderKeys([]);
     }, []);
@@ -1169,6 +1209,38 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    const refreshMultiLlmCatalog = useCallback(
+        async (kind: "chat" | "image" | "video" | "audio") => {
+            const key = apiKeys.multillm.trim();
+            const response = await fetch(
+                `/api/multillm/models?kind=${encodeURIComponent(kind)}`,
+                {
+                    headers: key ? { "x-user-api-key": key } : undefined,
+                    cache: "no-store",
+                }
+            );
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(
+                    errorMessageFromPayload(
+                        payload,
+                        `Unable to fetch MultiLLM ${kind} models.`
+                    )
+                );
+            }
+            const models = sanitizeModelOptions(payload?.models ?? []);
+            if (!models.length) {
+                throw new Error(`MultiLLM returned no ${kind} models.`);
+            }
+            if (kind === "chat") setMultiLlmChatModels(models);
+            if (kind === "image") setMultiLlmImageModels(models);
+            if (kind === "video") setMultiLlmVideoModels(models);
+            if (kind === "audio") setMultiLlmAudioModels(models);
+            return models;
+        },
+        [apiKeys.multillm]
+    );
+
     const standaloneNanoGptVideoModels = useMemo(
         () =>
             nanoGptVideoModels.filter(
@@ -1197,6 +1269,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (mode === "video") return standaloneNanoGptVideoModels;
             return [];
         }
+        if (provider === "multillm") {
+            if (mode === "image") return multiLlmImageModels;
+            if (mode === "video") return multiLlmVideoModels;
+            return multiLlmAudioModels;
+        }
         if (mode === "video") return navyVideoModels;
         if (mode === "tts") return navyTtsModels;
         return navyImageModels;
@@ -1209,6 +1286,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         navyTtsModels,
         nanoGptImageModels,
         standaloneNanoGptVideoModels,
+        multiLlmImageModels,
+        multiLlmVideoModels,
+        multiLlmAudioModels,
     ]);
     const selectedModelOption = useMemo(
         () => modelSuggestions.find((entry) => entry.id === model),
@@ -1589,6 +1669,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             imageUrl,
                             sync: false,
                         };
+                    } else if (job.provider === "multillm") {
+                        body = {
+                            ...body,
+                            ...imageSizing,
+                            numberOfImages: job.imageCount,
+                            quality: job.navyImageQuality,
+                            negativePrompt: job.negativePrompt,
+                            imageDataUrls: referenceImages.map(
+                                (reference) => reference.dataUrl
+                            ),
+                            parameters: job.modelParameters,
+                            sync: false,
+                        };
                     } else if (job.provider === "nanogpt") {
                         const selectedNanoGptModel = nanoGptImageModels.find(
                             (entry) => entry.id === job.model
@@ -1653,9 +1746,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     }
 
                     let payload: Record<string, unknown> = {};
-                    if (job.provider === "navy" && job.remoteJobId) {
+                    if (
+                        (job.provider === "navy" ||
+                            job.provider === "multillm") &&
+                        job.remoteJobId
+                    ) {
                         updateJob(job.id, {
-                            progress: `Resuming Navy image job ${job.remoteJobId}...`,
+                            progress: `Resuming ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job ${job.remoteJobId}...`,
                         });
                         payload = { id: job.remoteJobId };
                     } else {
@@ -1673,7 +1770,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         }
                     }
 
-                    if (job.provider === "navy") {
+                    if (
+                        job.provider === "navy" ||
+                        job.provider === "multillm"
+                    ) {
                         let navyPayload = payload;
                         const existingJobId = job.remoteJobId;
                         const submittedJobId =
@@ -1688,11 +1788,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             let didComplete = Boolean(navyPayload?.done);
                             for (let pollAttempt = 0; pollAttempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !didComplete; pollAttempt += 1) {
                                 updateJob(job.id, {
-                                    progress: `Waiting for Navy image render${attemptLabel} (${pollAttempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
+                                    progress: `Waiting for ${job.provider === "navy" ? "Navy" : "MultiLLM"} image render${attemptLabel} (${pollAttempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
                                 });
                                 await sleep(delayMs);
+                                const source =
+                                    job.model.startsWith("nanogpt:")
+                                        ? "nanogpt"
+                                        : "navyai";
+                                const pollUrl =
+                                    job.provider === "multillm"
+                                        ? `/api/multillm/image?id=${encodeURIComponent(submittedJobId)}&source=${source}`
+                                        : `/api/navy/image?id=${encodeURIComponent(submittedJobId)}`;
                                 const pollResponse = await fetch(
-                                    `/api/navy/image?id=${encodeURIComponent(submittedJobId)}`,
+                                    pollUrl,
                                     {
                                         headers: {
                                             "x-user-api-key": job.apiKey,
@@ -1701,7 +1809,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                                 );
                                 navyPayload = await pollResponse.json();
                                 if (!pollResponse.ok && pollResponse.status !== 429) {
-                                    throw new Error(errorMessageFromPayload(navyPayload, "Unable to poll Navy image job."));
+                                    throw new Error(
+                                        errorMessageFromPayload(
+                                            navyPayload,
+                                            `Unable to poll ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job.`
+                                        )
+                                    );
                                 }
                                 didComplete = Boolean(navyPayload?.done);
                                 delayMs = resolveNavyJobPollDelayMs({
@@ -1712,12 +1825,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                                 if (!didComplete && (pollResponse.status === 429 || navyPayload?.status === "rate_limited")) {
                                     updateJob(job.id, {
                                         remoteStatus: "rate_limited",
-                                        progress: `Navy is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
+                                        progress: `${job.provider === "navy" ? "Navy" : "MultiLLM"} is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
                                     });
                                 }
                             }
                             if (!didComplete) {
-                                throw new Error("Timed out waiting for the Navy image job.");
+                                throw new Error(
+                                    `Timed out waiting for the ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job.`
+                                );
                             }
                         }
 
@@ -2018,6 +2133,141 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         url: remoteVideoUrl,
                     }),
                 });
+            } else if (job.provider === "multillm") {
+                const source = job.model.startsWith("nanogpt:")
+                    ? "nanogpt"
+                    : "navyai";
+                let generationId = job.remoteJobId ?? "";
+                let resolvedResponse: Response | null = null;
+
+                if (!generationId) {
+                    const submitResponse = await fetch("/api/multillm/video", {
+                        method: "POST",
+                        headers: requestHeaders,
+                        body: JSON.stringify({
+                            prompt: job.prompt,
+                            model: job.model,
+                            aspectRatio: job.videoAspect,
+                            resolution: job.videoResolution,
+                            seconds: Number(job.videoDuration),
+                            sourceImage: sourceImage ?? undefined,
+                            referenceImages: referenceImages.map(
+                                (reference) => reference.dataUrl
+                            ),
+                            negativePrompt: job.negativePrompt,
+                            parameters: job.modelParameters,
+                        }),
+                    });
+                    const contentType =
+                        submitResponse.headers.get("content-type") ?? "";
+                    if (contentType.startsWith("video/")) {
+                        if (!submitResponse.ok) {
+                            throw new Error("MultiLLM video generation failed.");
+                        }
+                        resolvedResponse = submitResponse;
+                    } else {
+                        const submitPayload = await submitResponse.json();
+                        if (!submitResponse.ok) {
+                            throw new Error(
+                                errorMessageFromPayload(
+                                    submitPayload,
+                                    "MultiLLM video generation failed."
+                                )
+                            );
+                        }
+                        if (typeof submitPayload?.videoUrl === "string") {
+                            resolvedResponse = Response.json({
+                                url: submitPayload.videoUrl,
+                            });
+                        }
+                        generationId =
+                            typeof submitPayload?.id === "string"
+                                ? submitPayload.id
+                                : "";
+                        if (generationId) {
+                            updateJob(job.id, {
+                                remoteJobId: generationId,
+                                remoteStatus:
+                                    typeof submitPayload?.status === "string"
+                                        ? submitPayload.status
+                                        : "pending",
+                            });
+                        }
+                    }
+                }
+
+                if (generationId) {
+                    let completed = false;
+                    let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
+                    for (
+                        let attempt = 0;
+                        attempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !completed;
+                        attempt += 1
+                    ) {
+                        updateJob(job.id, {
+                            progress: `Waiting for MultiLLM render (${attempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
+                        });
+                        await sleep(delayMs);
+                        const pollResponse = await fetch(
+                            `/api/multillm/video?id=${encodeURIComponent(generationId)}&source=${source}`,
+                            {
+                                headers: {
+                                    "x-user-api-key": job.apiKey,
+                                },
+                            }
+                        );
+                        const pollPayload = await pollResponse.json();
+                        if (!pollResponse.ok) {
+                            throw new Error(
+                                errorMessageFromPayload(
+                                    pollPayload,
+                                    "Unable to poll MultiLLM video job."
+                                )
+                            );
+                        }
+                        if (
+                            pollPayload?.done &&
+                            typeof pollPayload?.error === "string"
+                        ) {
+                            throw new Error(pollPayload.error);
+                        }
+                        completed = pollPayload?.done === true;
+                        updateJob(job.id, {
+                            remoteStatus:
+                                typeof pollPayload?.status === "string"
+                                    ? pollPayload.status
+                                    : undefined,
+                        });
+                        delayMs = resolveNavyJobPollDelayMs({
+                            payload: pollPayload,
+                            responseStatus: pollResponse.status,
+                            currentDelayMs: delayMs,
+                        });
+                    }
+                    if (!completed) {
+                        throw new Error(
+                            "Timed out waiting for the MultiLLM video render."
+                        );
+                    }
+                    resolvedResponse = await fetch(
+                        "/api/multillm/video/download",
+                        {
+                            method: "POST",
+                            headers: requestHeaders,
+                            body: JSON.stringify({
+                                id: generationId,
+                                source,
+                            }),
+                        }
+                    );
+                }
+
+                if (!resolvedResponse) {
+                    throw new Error(
+                        "MultiLLM returned neither a video nor a job id."
+                    );
+                }
+                response = resolvedResponse;
             } else if (job.provider === "nanogpt") {
                 const selectedNanoGptModel = nanoGptVideoModels.find(
                     (entry) => entry.id === job.model
@@ -2362,6 +2612,68 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 return;
             }
 
+            if (job.provider === "multillm") {
+                const response = await fetch("/api/multillm/audio", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-user-api-key": job.apiKey,
+                    },
+                    body: JSON.stringify({
+                        model: job.model,
+                        input: job.prompt,
+                        voice: job.ttsVoice,
+                        speed: Number(job.ttsSpeed),
+                        responseFormat: job.ttsFormat,
+                    }),
+                });
+                if (!response.ok) {
+                    const contentType =
+                        response.headers.get("content-type") ?? "";
+                    if (contentType.includes("application/json")) {
+                        const payload = await response.json();
+                        throw new Error(
+                            errorMessageFromPayload(
+                                payload,
+                                "MultiLLM audio generation failed."
+                            )
+                        );
+                    }
+                    throw new Error(
+                        (await response.text()) ||
+                        "MultiLLM audio generation failed."
+                    );
+                }
+
+                const blob = await response.blob();
+                const mimeType = blob.type || "audio/mpeg";
+                const audioDataUrl = URL.createObjectURL(blob);
+                setAudioUrl(audioDataUrl);
+                setAudioMimeType(mimeType);
+                const galleryEntries = await addMediaToGallery(
+                    [{ url: audioDataUrl, mimeType, blob }],
+                    {
+                        prompt: job.prompt,
+                        model: job.model,
+                        provider: job.provider,
+                        saveToGallery: job.saveToGallery,
+                        kind: "audio",
+                    }
+                );
+                setLastOutput({
+                    mode: "tts",
+                    prompt: job.prompt,
+                    model: job.model,
+                    provider: job.provider,
+                    ttsVoice: job.ttsVoice,
+                    mediaIds: galleryEntries.length
+                        ? galleryEntries.map((entry) => entry.id)
+                        : undefined,
+                });
+                completeJob(job.id, { audioUrl: audioDataUrl });
+                return;
+            }
+
             throw new Error("Audio generation not implemented for this provider");
         } catch (error) {
             failJob(job.id, error instanceof Error ? error.message : "Audio generation failed");
@@ -2404,7 +2716,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const activeMode = options.mode ?? mode;
         const activePrompt = options.prompt ?? prompt;
 
-        if (!apiKey.trim()) { setErrorMessage("API Key required"); return; }
+        if (!apiKey.trim() && provider !== "multillm") {
+            setErrorMessage("API Key required");
+            return;
+        }
         if (!activePrompt.trim()) { setErrorMessage("Prompt required"); return; }
         if (activeMode === "video" && provider === "nanogpt") {
             const catalogModel = nanoGptVideoModels.find(
@@ -2511,12 +2826,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const normalizedNavyImageSize = navyImageSize.trim().toLowerCase();
         if (
             activeMode === "image" &&
-            provider === "navy" &&
+            (provider === "navy" || provider === "multillm") &&
             normalizedNavyImageSize &&
             normalizedNavyImageSize !== AUTO_IMAGE_OPTION
         ) {
             if (!isValidNavyImagePixelSize(normalizedNavyImageSize)) {
-                setErrorMessage("Navy image size must be auto or WIDTHxHEIGHT.");
+                setErrorMessage(
+                    `${provider === "navy" ? "Navy" : "MultiLLM"} image size must be auto or WIDTHxHEIGHT.`
+                );
                 return;
             }
             const gptImage2Model = modelsToRun.find(isGptImage2Model);
@@ -2796,7 +3113,12 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [apiKeys.nanogpt]);
 
     const refreshModels = useCallback(async () => {
-        if (provider !== "openrouter" && provider !== "navy" && provider !== "nanogpt") return;
+        if (
+            provider !== "openrouter" &&
+            provider !== "navy" &&
+            provider !== "nanogpt" &&
+            provider !== "multillm"
+        ) return;
         if (provider === "openrouter" && !apiKey.trim()) {
             setModelsError("Add the provider API key before refreshing models.");
             return;
@@ -2820,6 +3142,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 setOpenRouterImageModels(models);
             } else if (provider === "navy") {
                 await refreshNavyCatalog();
+            } else if (provider === "multillm") {
+                await refreshMultiLlmCatalog(
+                    mode === "tts" ? "audio" : mode
+                );
             } else if (mode === "image" || mode === "video") {
                 await refreshNanoGptCatalog(mode);
             } else {
@@ -2837,6 +3163,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         apiKeys.openrouter,
         refreshNavyCatalog,
         refreshNanoGptCatalog,
+        refreshMultiLlmCatalog,
     ]);
 
     const refreshChutesChatModels = useCallback(async () => {
@@ -2903,6 +3230,22 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     }, [apiKeys.nanogpt]);
 
+    const refreshMultiLlmChatModels = useCallback(async () => {
+        setMultiLlmChatModelsLoading(true);
+        setMultiLlmChatModelsError(null);
+        try {
+            await refreshMultiLlmCatalog("chat");
+        } catch (error) {
+            setMultiLlmChatModelsError(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to refresh MultiLLM chat models."
+            );
+        } finally {
+            setMultiLlmChatModelsLoading(false);
+        }
+    }, [refreshMultiLlmCatalog]);
+
     // --- Effects (Persistence) ---
 
     // Hydration
@@ -2958,6 +3301,33 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         if (storedNanoGptVideoModels.length) {
             setNanoGptVideoModels(sanitizeModelOptions(storedNanoGptVideoModels));
         }
+        const storedMultiLlmImageModels = readLocalStorage<ModelOption[]>(
+            STORAGE_KEYS.multiLlmImageModels,
+            []
+        );
+        if (storedMultiLlmImageModels.length) {
+            setMultiLlmImageModels(
+                sanitizeModelOptions(storedMultiLlmImageModels)
+            );
+        }
+        const storedMultiLlmVideoModels = readLocalStorage<ModelOption[]>(
+            STORAGE_KEYS.multiLlmVideoModels,
+            []
+        );
+        if (storedMultiLlmVideoModels.length) {
+            setMultiLlmVideoModels(
+                sanitizeModelOptions(storedMultiLlmVideoModels)
+            );
+        }
+        const storedMultiLlmAudioModels = readLocalStorage<ModelOption[]>(
+            STORAGE_KEYS.multiLlmAudioModels,
+            []
+        );
+        if (storedMultiLlmAudioModels.length) {
+            setMultiLlmAudioModels(
+                sanitizeModelOptions(storedMultiLlmAudioModels)
+            );
+        }
 
         const storedChutesChatModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.chutesChatModels, []);
         if (storedChutesChatModels.length) {
@@ -2989,6 +3359,32 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         const storedNanoGptToolImageModel = readLocalStorage<string>(STORAGE_KEYS.nanoGptToolImageModel, "");
         if (storedNanoGptToolImageModel) {
             setNanoGptToolImageModel(storedNanoGptToolImageModel);
+        }
+        const storedMultiLlmChatModels = readLocalStorage<ModelOption[]>(
+            STORAGE_KEYS.multiLlmChatModels,
+            []
+        );
+        if (storedMultiLlmChatModels.length) {
+            setMultiLlmChatModels(
+                mergeModelOptions(
+                    MULTILLM_CHAT_MODELS,
+                    sanitizeModelOptions(storedMultiLlmChatModels)
+                )
+            );
+        }
+        const storedMultiLlmChatModel = readLocalStorage<string>(
+            STORAGE_KEYS.multiLlmChatModel,
+            ""
+        );
+        if (storedMultiLlmChatModel) {
+            setMultiLlmChatModel(storedMultiLlmChatModel);
+        }
+        const storedMultiLlmToolImageModel = readLocalStorage<string>(
+            STORAGE_KEYS.multiLlmToolImageModel,
+            ""
+        );
+        if (storedMultiLlmToolImageModel) {
+            setMultiLlmToolImageModel(storedMultiLlmToolImageModel);
         }
 
         if (isRecord(storedSettings)) {
@@ -3288,6 +3684,33 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [chatProvider, hydrated, refreshNanoGptChatModels]);
 
     useEffect(() => {
+        if (!hydrated || provider !== "multillm") return;
+        let active = true;
+        setModelsLoading(true);
+        setModelsError(null);
+        void refreshMultiLlmCatalog(mode === "tts" ? "audio" : mode)
+            .catch((error) => {
+                if (!active) return;
+                setModelsError(
+                    error instanceof Error
+                        ? error.message
+                        : "Unable to refresh MultiLLM models."
+                );
+            })
+            .finally(() => {
+                if (active) setModelsLoading(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, [hydrated, provider, mode, refreshMultiLlmCatalog]);
+
+    useEffect(() => {
+        if (!hydrated || chatProvider !== "multillm") return;
+        void refreshMultiLlmChatModels();
+    }, [chatProvider, hydrated, refreshMultiLlmChatModels]);
+
+    useEffect(() => {
         if (!hydrated) return;
         const selectionKey = `${provider}:${mode}`;
         const selections = sanitizeModelSelections(
@@ -3447,6 +3870,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [nanoGptVideoModels, hydrated]);
 
     useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(
+            STORAGE_KEYS.multiLlmImageModels,
+            JSON.stringify(multiLlmImageModels)
+        );
+    }, [multiLlmImageModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(
+            STORAGE_KEYS.multiLlmVideoModels,
+            JSON.stringify(multiLlmVideoModels)
+        );
+    }, [multiLlmVideoModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(
+            STORAGE_KEYS.multiLlmAudioModels,
+            JSON.stringify(multiLlmAudioModels)
+        );
+    }, [multiLlmAudioModels, hydrated]);
+
+    useEffect(() => {
         if (!hydrated || !idbAvailable) return;
         for (const job of jobs) {
             if (shouldPersistRemoteGenerationJob(job)) {
@@ -3519,6 +3966,30 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             JSON.stringify(nanoGptToolImageModel)
         );
     }, [nanoGptToolImageModel, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) return;
+        writeLocalStorage(
+            STORAGE_KEYS.multiLlmChatModels,
+            JSON.stringify(multiLlmChatModels)
+        );
+    }, [multiLlmChatModels, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated || !multiLlmChatModel) return;
+        writeLocalStorage(
+            STORAGE_KEYS.multiLlmChatModel,
+            JSON.stringify(multiLlmChatModel)
+        );
+    }, [multiLlmChatModel, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated || !multiLlmToolImageModel) return;
+        writeLocalStorage(
+            STORAGE_KEYS.multiLlmToolImageModel,
+            JSON.stringify(multiLlmToolImageModel)
+        );
+    }, [multiLlmToolImageModel, hydrated]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -3680,12 +4151,20 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         nanoGptToolImageModel, setNanoGptToolImageModel,
         nanoGptChatModelsLoading,
         nanoGptChatModelsError,
+        multiLlmChatModels,
+        multiLlmChatModel, setMultiLlmChatModel,
+        multiLlmToolImageModel, setMultiLlmToolImageModel,
+        multiLlmChatModelsLoading,
+        multiLlmChatModelsError,
         openRouterImageModels,
         navyImageModels,
         navyVideoModels,
         navyTtsModels,
         nanoGptImageModels,
         nanoGptVideoModels,
+        multiLlmImageModels,
+        multiLlmVideoModels,
+        multiLlmAudioModels,
         hiddenNanoGptStandaloneVideoModelCount,
         modelSuggestions,
         statusMessage, setStatusMessage,
@@ -3716,7 +4195,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         supportsVideo, supportsTts,
         clearKey, clearGallery,
         refreshModels, refreshChutesChatModels, refreshNavyChatModels,
-        refreshNanoGptChatModels,
+        refreshNanoGptChatModels, refreshMultiLlmChatModels,
         saveChatImages,
         handleGenerate,
         generateImage: generateImages,

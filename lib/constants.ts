@@ -1,6 +1,12 @@
-export type Provider = "gemini" | "navy" | "chutes" | "openrouter" | "nanogpt";
+export type Provider =
+    | "gemini"
+    | "navy"
+    | "chutes"
+    | "openrouter"
+    | "nanogpt"
+    | "multillm";
 export type Mode = "image" | "video" | "tts";
-export type ChatProvider = "chutes" | "navy" | "nanogpt";
+export type ChatProvider = "chutes" | "navy" | "nanogpt" | "multillm";
 export type ModelEndpoint =
     | "gemini-generate-content"
     | "imagen-predict"
@@ -11,6 +17,10 @@ export type ModelEndpoint =
     | "navy-audio-speech"
     | "nanogpt-images-generations"
     | "nanogpt-video-generation"
+    | "multillm-chat-completions"
+    | "multillm-images-generations"
+    | "multillm-video-generation"
+    | "multillm-audio-speech"
     | "chutes-image"
     | "chutes-video"
     | "chutes-audio"
@@ -743,6 +753,99 @@ export const CHUTES_TTS_MODELS: ModelOption[] = [
     },
 ];
 
+export const MULTILLM_CHAT_MODELS: ModelOption[] = [
+    {
+        id: "opencode:deepseek-v4-flash",
+        label: "OpenCode · DeepSeek V4 Flash",
+        provider: "multillm",
+        endpoint: "multillm-chat-completions",
+        inputModalities: ["text"],
+        outputModalities: ["text"],
+        supportsStreaming: true,
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
+    {
+        id: "opencode:mimo-v2.5",
+        label: "OpenCode · MiMo V2.5",
+        provider: "multillm",
+        endpoint: "multillm-chat-completions",
+        inputModalities: ["text"],
+        outputModalities: ["text"],
+        supportsStreaming: true,
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
+    {
+        id: "navyai:gpt-5",
+        label: "NavyAI · GPT-5",
+        provider: "multillm",
+        endpoint: "multillm-chat-completions",
+        inputModalities: ["text"],
+        outputModalities: ["text"],
+        supportsStreaming: true,
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
+];
+
+export const MULTILLM_IMAGE_MODELS: ModelOption[] = [
+    {
+        id: "navyai:flux",
+        label: "NavyAI · Flux",
+        provider: "multillm",
+        endpoint: "multillm-images-generations",
+        inputModalities: ["text"],
+        outputModalities: ["image"],
+        supportsImageOutput: true,
+        supports: {
+            imageGeneration: true,
+            asyncJobs: true,
+            size: true,
+            aspectRatio: true,
+        },
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
+];
+
+export const MULTILLM_VIDEO_MODELS: ModelOption[] = [
+    {
+        id: "navyai:veo-3.1",
+        label: "NavyAI · Veo 3.1",
+        provider: "multillm",
+        endpoint: "multillm-video-generation",
+        inputModalities: ["text", "image"],
+        outputModalities: ["video"],
+        supports: {
+            video: true,
+            textToVideo: true,
+            imageToVideo: true,
+            sourceImage: true,
+            asyncJobs: true,
+            aspectRatio: true,
+            size: true,
+        },
+        maxReferenceImages: 1,
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
+];
+
+export const MULTILLM_AUDIO_MODELS: ModelOption[] = [
+    {
+        id: "navyai:tts-1",
+        label: "NavyAI · TTS 1",
+        provider: "multillm",
+        endpoint: "multillm-audio-speech",
+        inputModalities: ["text"],
+        outputModalities: ["audio"],
+        supports: { tts: true },
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
+];
+
 export const AUTO_IMAGE_OPTION = "auto";
 export const IMAGE_ASPECTS = ["1:1", "3:4", "4:3", "9:16", "16:9"];
 export const EXTENDED_IMAGE_ASPECTS = [
@@ -826,5 +929,10 @@ export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
         image: NANOGPT_IMAGE_MODELS[0].id,
         video: NANOGPT_VIDEO_MODELS[0].id,
         tts: NANOGPT_IMAGE_MODELS[0].id,
+    },
+    multillm: {
+        image: MULTILLM_IMAGE_MODELS[0].id,
+        video: MULTILLM_VIDEO_MODELS[0].id,
+        tts: MULTILLM_AUDIO_MODELS[0].id,
     },
 };

@@ -21,7 +21,13 @@ const HTTP_DATE_PATTERN =
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 
-type ImageProvider = "gemini" | "navy" | "chutes" | "openrouter" | "nanogpt";
+type ImageProvider =
+  | "gemini"
+  | "navy"
+  | "chutes"
+  | "openrouter"
+  | "nanogpt"
+  | "multillm";
 
 const PROVIDER_ENV_KEYS: Record<ImageProvider, string[]> = {
   gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
@@ -29,6 +35,7 @@ const PROVIDER_ENV_KEYS: Record<ImageProvider, string[]> = {
   chutes: ["CHUTES_API_KEY"],
   openrouter: ["OPENROUTER_API_KEY"],
   nanogpt: ["NANOGPT_API_KEY", "NANO_GPT_API_KEY"],
+  multillm: ["MULTILLM_API_KEY"],
 };
 
 const CORS_ALLOWED_SUFFIXES = ["janitorai.com"];

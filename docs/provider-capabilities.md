@@ -1,6 +1,6 @@
 # Provider Capabilities
 
-Last verified against the provider documentation and the application routes on 2026-07-10.
+Last verified against the provider documentation and the application routes on 2026-07-23.
 
 The capability foundation lives in `lib/providers`. Static entries in `lib/constants.ts` are fallbacks; provider catalogs replace or enrich them when live discovery succeeds. Unknown catalog values remain `null` or absent and are never treated as zero or `false`.
 
@@ -55,6 +55,16 @@ Official references: [overview](https://api.navy/docs), [models](https://api.nav
 - Chutes image, video, audio, and chat routes are separate provider adapters in the app API layer.
 - Model-specific settings are validated before request submission.
 - Generated image URL downloads are bounded through safe media fetching.
+
+## MultiLLM Proxy
+
+- Unified text discovery uses `GET /v1/models`; chat requests use the OpenAI-compatible `POST /v1/chat/completions` stream with the catalog's `provider:model` IDs.
+- NavyAI media discovery uses `GET /navyai/v1/models`. NanoGPT image and video discovery use `GET /nanogpt/v1/image-models` and `GET /nanogpt/v1/video-models`.
+- The studio source-tags media IDs as `navyai:model` or `nanogpt:model`. The tag is removed before forwarding the request and is retained locally only to select the correct provider-specific proxy route.
+- Image generation normalizes URL, base64, binary, and asynchronous NavyAI job responses. Hosted image downloads use bounded HTTPS/content-type/size validation.
+- NavyAI and NanoGPT video submissions are polled by job ID until a terminal state. Processing jobs are never automatically resubmitted. Completed job downloads are re-resolved server-side and bounded before reaching the browser.
+- Audio generation uses the provider-specific OpenAI-compatible speech endpoint and streams the returned audio body without buffering it in application state.
+- `MULTILLM_API_KEY` can remain a server-side environment secret. A browser-held key is also supported through the same key-storage modes as the direct providers. `PROXY_BASE_URL` or `MULTILLM_PROXY_BASE_URL` can override the default deployment origin.
 
 ## NanoGPT
 

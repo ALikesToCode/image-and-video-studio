@@ -202,6 +202,7 @@ export function ImgGenSettings({
 }: ImgGenSettingsProps) {
     const [modelFilter, setModelFilter] = useState("");
     const isOpenRouter = provider === "openrouter";
+    const isMultiLlm = provider === "multillm";
     const isImagenModel = model.startsWith("imagen-");
     const isOpenRouterGemini = isOpenRouter && model.includes("gemini");
     const isFluxFamilyModel = model.toLowerCase().includes("flux");
@@ -219,9 +220,12 @@ export function ImgGenSettings({
     const showImageSize =
         provider === "gemini"
             ? model.includes("gemini-3-pro") || isImagenModel
-            : provider === "navy" || (isOpenRouter && isOpenRouterGemini);
+            : provider === "navy" || isMultiLlm || (isOpenRouter && isOpenRouterGemini);
     const showImageAspect =
-        provider === "gemini" || isOpenRouterGemini || provider === "navy";
+        provider === "gemini" ||
+        isOpenRouterGemini ||
+        provider === "navy" ||
+        isMultiLlm;
     const availableImageSizes = isImagenModel ? IMAGEN_SIZES : IMAGE_SIZES;
     const galleryDisabled = false;
     const usagePercent =
@@ -350,6 +354,7 @@ export function ImgGenSettings({
                             <SelectItem value="openrouter">OpenRouter</SelectItem>
                             <SelectItem value="nanogpt">NanoGPT</SelectItem>
                             <SelectItem value="chutes">Chutes</SelectItem>
+                            <SelectItem value="multillm">MultiLLM Proxy</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -554,7 +559,7 @@ export function ImgGenSettings({
                 {/* Dynamic Options */}
                 {mode === "image" && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {provider === "navy" ? (
+                        {provider === "navy" || provider === "multillm" ? (
                             <>
                                 <div className="space-y-2">
                                     <Label>Size</Label>

@@ -51,6 +51,7 @@ const PROVIDER_LABELS = {
     chutes: "Chutes",
     openrouter: "OpenRouter",
     nanogpt: "NanoGPT",
+    multillm: "MultiLLM Proxy",
 } as const;
 
 export function ImageGenView() {

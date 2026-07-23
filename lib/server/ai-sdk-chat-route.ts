@@ -19,8 +19,12 @@ import {
   isDeepSeekV4Model,
   normalizeReasoningEffort,
 } from "../chat-tooling.ts";
+import {
+  getMultiLlmProxyBaseUrl,
+  resolveMultiLlmApiKey,
+} from "../multillm-proxy.ts";
 
-type StudioChatProvider = "navy" | "chutes" | "nanogpt";
+type StudioChatProvider = "navy" | "chutes" | "nanogpt" | "multillm";
 
 type StudioChatRequest = {
   apiKey?: string;
@@ -39,6 +43,7 @@ const PROVIDER_BASE_URLS: Record<StudioChatProvider, string> = {
   navy: "https://api.navy/v1",
   chutes: "https://llm.chutes.ai/v1",
   nanogpt: "https://nano-gpt.com/api/v1",
+  multillm: "",
 };
 
 const NATIVE_IMAGE_URLS = {
@@ -46,7 +51,10 @@ const NATIVE_IMAGE_URLS = {
 };
 
 const isStudioChatProvider = (value: unknown): value is StudioChatProvider =>
-  value === "navy" || value === "chutes" || value === "nanogpt";
+  value === "navy" ||
+  value === "chutes" ||
+  value === "nanogpt" ||
+  value === "multillm";
 
 const isRecoverableChatStatus = (status: number) =>
   status === 400 || status === 422;
@@ -117,6 +125,7 @@ const createRecoveringChatFetch = (allowGeneralRecoveries: boolean) =>
 
 const recoveringNavyFetch = createRecoveringChatFetch(true);
 const recoveringNanoGptFetch = createRecoveringChatFetch(false);
+const recoveringMultiLlmFetch = createRecoveringChatFetch(true);
 
 const maxOutputTokens = (value: unknown) => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 1024;
@@ -171,10 +180,10 @@ export async function handleAIStudioChatRequest(request: Request) {
     .map((message) => message.content)
     .join("\n\n");
   const messages = modelMessages.filter((message) => message.role !== "system");
-  const apiKey = getUserApiKey(
-    request,
-    body as unknown as Record<string, unknown>
-  );
+  const apiKey =
+    body.provider === "multillm"
+      ? resolveMultiLlmApiKey(request, body.apiKey)
+      : getUserApiKey(request, body as unknown as Record<string, unknown>);
   if (!apiKey || !model || !Array.isArray(body.messages) || !messages.length) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
@@ -187,28 +196,36 @@ export async function handleAIStudioChatRequest(request: Request) {
     body.reasoningEffort === undefined || isDeepSeekV4Model(model)
       ? undefined
       : normalizeReasoningEffort(body.reasoningEffort);
-  const provider = createOpenAICompatible({
-    name: providerId,
-    apiKey,
-    baseURL: PROVIDER_BASE_URLS[providerId],
-    includeUsage: providerId === "navy" || providerId === "nanogpt",
-    fetch:
-      providerId === "navy"
-        ? recoveringNavyFetch
-        : providerId === "nanogpt"
-          ? recoveringNanoGptFetch
-        : undefined,
-    supportedUrls: () => NATIVE_IMAGE_URLS,
-    transformRequestBody: (providerBody) =>
-      normalizeAIChatRequestBody({
-        model,
-        body: providerBody,
-        thinking: body.thinking,
-        reasoningEffort: body.reasoningEffort,
-      }),
-  });
 
   try {
+    const provider = createOpenAICompatible({
+      name: providerId,
+      apiKey,
+      baseURL:
+        providerId === "multillm"
+          ? `${getMultiLlmProxyBaseUrl()}/v1`
+          : PROVIDER_BASE_URLS[providerId],
+      includeUsage:
+        providerId === "navy" ||
+        providerId === "nanogpt" ||
+        providerId === "multillm",
+      fetch:
+        providerId === "navy"
+          ? recoveringNavyFetch
+          : providerId === "nanogpt"
+            ? recoveringNanoGptFetch
+            : providerId === "multillm"
+              ? recoveringMultiLlmFetch
+              : undefined,
+      supportedUrls: () => NATIVE_IMAGE_URLS,
+      transformRequestBody: (providerBody) =>
+        normalizeAIChatRequestBody({
+          model,
+          body: providerBody,
+          thinking: body.thinking,
+          reasoningEffort: body.reasoningEffort,
+        }),
+    });
     const result = streamText({
       model: provider.chatModel(model),
       ...(instructions ? { instructions } : {}),

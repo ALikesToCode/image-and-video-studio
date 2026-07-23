@@ -794,7 +794,8 @@ export const resolveImageSizingOptions = (
   if (
     (provider === "gemini" ||
       provider === "openrouter" ||
-      provider === "navy") &&
+      provider === "navy" ||
+      provider === "multillm") &&
     !isAutoImageOption(imageAspect)
   ) {
     sizing.aspectRatio = imageAspect;
@@ -807,7 +808,10 @@ export const resolveImageSizingOptions = (
     sizing.imageSize = imageSize;
   }
 
-  if (provider === "navy" && !isAutoImageOption(navyImageSize)) {
+  if (
+    (provider === "navy" || provider === "multillm") &&
+    !isAutoImageOption(navyImageSize)
+  ) {
     sizing.size = navyImageSize;
   }
 

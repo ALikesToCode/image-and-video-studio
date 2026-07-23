@@ -945,3 +945,57 @@ test("Studio chat only repairs double-encoded valid tool JSON", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Studio chat routes MultiLLM through the configured proxy and server key", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.MULTILLM_API_KEY;
+  const originalBaseUrl = process.env.PROXY_BASE_URL;
+  const requests: Array<{ url: string; authorization: string | null }> = [];
+  process.env.MULTILLM_API_KEY = "server-multillm-secret";
+  process.env.PROXY_BASE_URL = "https://proxy.example.test";
+  globalThis.fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      authorization: new Headers(init?.headers).get("authorization"),
+    });
+    return upstreamStream([
+      completionChunk(
+        { role: "assistant", content: "Proxy response." },
+        "stop"
+      ),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "multillm",
+          model: "opencode:deepseek-v4-flash",
+          messages: [{ role: "user", content: "Hello." }],
+          enabledTools: [],
+        }),
+      })
+    );
+    const chunks = await readUIChunks(response);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      requests[0]?.url,
+      "https://proxy.example.test/v1/chat/completions"
+    );
+    assert.equal(
+      requests[0]?.authorization,
+      "Bearer server-multillm-secret"
+    );
+    assert.ok(chunks.some((chunk) => chunk.type === "text-delta"));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.MULTILLM_API_KEY;
+    else process.env.MULTILLM_API_KEY = originalKey;
+    if (originalBaseUrl === undefined) delete process.env.PROXY_BASE_URL;
+    else process.env.PROXY_BASE_URL = originalBaseUrl;
+  }
+});

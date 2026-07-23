@@ -8,6 +8,11 @@ export const CHAT_PROVIDER_OPTIONS: ReadonlyArray<{
   { id: "chutes", label: "Chutes", heading: "Chutes Agent" },
   { id: "navy", label: "NavyAI", heading: "NavyAI Chat" },
   { id: "nanogpt", label: "NanoGPT", heading: "NanoGPT Chat" },
+  {
+    id: "multillm",
+    label: "MultiLLM Proxy",
+    heading: "MultiLLM Chat",
+  },
 ];
 
 const CHAT_PROVIDER_IDS = new Set<ChatProvider>(

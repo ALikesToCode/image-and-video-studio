@@ -2,7 +2,7 @@ import type { PersistedGenerationJob } from "./types.ts";
 
 type RemoteGenerationJobLike = Pick<
   PersistedGenerationJob,
-  "status" | "remoteJobId" | "remoteOperationName"
+  "status" | "provider" | "remoteJobId" | "remoteOperationName"
 >;
 
 const isActiveStatus = (status: PersistedGenerationJob["status"]) =>
@@ -18,7 +18,9 @@ export const shouldPersistRemoteGenerationJob = (
 export const shouldRestoreRemoteGenerationJob = (
   job: RemoteGenerationJobLike,
   apiKey: string | undefined
-) => shouldPersistRemoteGenerationJob(job) && Boolean(apiKey?.trim());
+) =>
+  shouldPersistRemoteGenerationJob(job) &&
+  (Boolean(apiKey?.trim()) || job.provider === "multillm");
 
 export const restorePersistedGenerationJob = (
   job: PersistedGenerationJob,

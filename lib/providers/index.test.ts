@@ -30,6 +30,29 @@ test("capability filtering hides models that do not support the requested mode",
   assert.ok(navyAudioModels.every((model) => model.modes.includes("audio")));
 });
 
+test("static capability registry exposes MultiLLM media fallbacks", () => {
+  const videoModels = filterModelCapabilities(STATIC_MODEL_CAPABILITIES, {
+    provider: "multillm",
+    mode: "video",
+    outputModality: "video",
+  });
+  const audioModels = filterModelCapabilities(STATIC_MODEL_CAPABILITIES, {
+    provider: "multillm",
+    mode: "audio",
+    outputModality: "audio",
+  });
+
+  assert.deepEqual(
+    videoModels.map((model) => model.id),
+    ["navyai:veo-3.1"]
+  );
+  assert.equal(videoModels[0]?.asyncJob, true);
+  assert.deepEqual(
+    audioModels.map((model) => model.id),
+    ["navyai:tts-1"]
+  );
+});
+
 test("static capability registry exposes NanoGPT image models", () => {
   const nanoGptImageModels = filterModelCapabilities(STATIC_MODEL_CAPABILITIES, {
     provider: "nanogpt",

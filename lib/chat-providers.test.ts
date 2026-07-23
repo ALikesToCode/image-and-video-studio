@@ -15,13 +15,15 @@ import {
   NANOGPT_VIDEO_MODELS,
 } from "./constants.ts";
 
-test("chat provider options expose NanoGPT alongside existing providers", () => {
+test("chat provider options expose NanoGPT and MultiLLM", () => {
   assert.deepEqual(
     CHAT_PROVIDER_OPTIONS.map((option) => option.id),
-    ["chutes", "navy", "nanogpt"],
+    ["chutes", "navy", "nanogpt", "multillm"],
   );
   assert.equal(chatProviderDisplayName("nanogpt"), "NanoGPT");
+  assert.equal(chatProviderDisplayName("multillm"), "MultiLLM Proxy");
   assert.equal(isChatProvider("nanogpt"), true);
+  assert.equal(isChatProvider("multillm"), true);
   assert.equal(isChatProvider("openrouter"), false);
 });
 
