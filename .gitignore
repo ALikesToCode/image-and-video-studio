@@ -45,6 +45,8 @@ yarn-error.log*
 
 # local automation artifacts
 .codex
+.playwright/
+.playwright-cli/
 .playwright-mcp/
 
 # typescript
