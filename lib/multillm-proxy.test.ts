@@ -95,6 +95,58 @@ test("normalizes LinkAPI image models without claiming Studio edit support", () 
   assert.equal(models[0]?.maxReferenceImages, 0);
 });
 
+test("keeps all LinkAPI image catalog entries and identifies Gemini image chat models", () => {
+  const models = normalizeModelOptions(
+    {
+      data: [
+        {
+          model_name: "gemini-3.1-flash-image-preview",
+          supported_endpoint_types: ["gemini", "openai"],
+        },
+        {
+          model_name: "gemini-3.1-flash-lite-image",
+          supported_endpoint_types: ["gemini", "openai"],
+        },
+        {
+          model_name: "gpt-image-2-c",
+          supported_endpoint_types: ["openai", "Generate image"],
+        },
+        {
+          model_name: "nai-diffusion-4-full",
+          supported_endpoint_types: ["openai"],
+        },
+      ],
+    },
+    { source: "linkapi", kind: "image" }
+  );
+
+  assert.deepEqual(
+    models.map(({ id, endpoint }) => ({ id, endpoint })),
+    [
+      {
+        id: "linkapi:gemini-3.1-flash-image-preview",
+        endpoint: "multillm-image-chat-completions",
+      },
+      {
+        id: "linkapi:gemini-3.1-flash-lite-image",
+        endpoint: "multillm-image-chat-completions",
+      },
+      {
+        id: "linkapi:gpt-image-2-c",
+        endpoint: "multillm-images-generations",
+      },
+      {
+        id: "linkapi:nai-diffusion-4-full",
+        endpoint: "multillm-images-generations",
+      },
+    ]
+  );
+  assert.deepEqual(models[0]?.inputModalities, ["text", "image"]);
+  assert.deepEqual(models[0]?.outputModalities, ["text", "image"]);
+  assert.equal(models[0]?.supports?.referenceImages, true);
+  assert.equal(models[0]?.maxReferenceImages, 5);
+});
+
 test("does not treat audio-input chat models as speech generators", () => {
   const models = normalizeModelOptions(
     {
@@ -176,6 +228,28 @@ test("normalizes base64 image responses", () => {
   assert.deepEqual(
     extractImageItems({
       data: [{ b64_json: "aGVsbG8=", mime_type: "image/webp" }],
+    }),
+    [{ data: "aGVsbG8=", mimeType: "image/webp" }]
+  );
+});
+
+test("normalizes image outputs from OpenAI-compatible chat completions", () => {
+  assert.deepEqual(
+    extractImageItems({
+      choices: [
+        {
+          message: {
+            images: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: "data:image/webp;base64,aGVsbG8=",
+                },
+              },
+            ],
+          },
+        },
+      ],
     }),
     [{ data: "aGVsbG8=", mimeType: "image/webp" }]
   );

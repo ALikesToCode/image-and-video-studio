@@ -6,6 +6,7 @@ import {
   filterModelOptions,
   hasModelMetadata,
   isFetchedOnlyModel,
+  mergeModelOptionLists,
 } from "./model-options.ts";
 import type { ModelOption } from "./constants.ts";
 
@@ -64,4 +65,59 @@ test("model metadata helpers identify fetched-only and annotated models", () => 
   assert.equal(isFetchedOnlyModel(models[1], new Set(["veo-3.1"])), false);
   assert.equal(hasModelMetadata(models[0]), true);
   assert.equal(hasModelMetadata({ id: "plain", label: "Plain" }), false);
+});
+
+test("mergeModelOptionLists retains fallbacks while live metadata wins", () => {
+  const merged = mergeModelOptionLists(
+    [
+      [
+        {
+          id: "linkapi:gpt-image-2-c",
+          label: "LinkAPI fallback",
+          metadataStatus: "fallback",
+        },
+        {
+          id: "linkapi:gemini-3.1-flash-image-preview",
+          label: "Gemini fallback",
+        },
+      ],
+      [
+        {
+          id: "linkapi:gpt-image-2-c",
+          label: "LinkAPI · GPT Image 2 C",
+          metadataStatus: "live",
+        },
+        {
+          id: "nanogpt:new-image-model",
+          label: "NanoGPT · New Image Model",
+        },
+      ],
+    ],
+    3,
+  );
+
+  assert.deepEqual(
+    merged.map(({ id, label, metadataStatus }) => ({
+      id,
+      label,
+      metadataStatus,
+    })),
+    [
+      {
+        id: "linkapi:gpt-image-2-c",
+        label: "LinkAPI · GPT Image 2 C",
+        metadataStatus: "live",
+      },
+      {
+        id: "linkapi:gemini-3.1-flash-image-preview",
+        label: "Gemini fallback",
+        metadataStatus: undefined,
+      },
+      {
+        id: "nanogpt:new-image-model",
+        label: "NanoGPT · New Image Model",
+        metadataStatus: undefined,
+      },
+    ],
+  );
 });

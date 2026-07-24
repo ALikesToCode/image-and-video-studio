@@ -77,6 +77,7 @@ import {
     sanitizeModelParameterDescriptors,
     type ModelParameterValues,
 } from "@/lib/model-capability-settings";
+import { mergeModelOptionLists } from "@/lib/model-options";
 import {
     getStandaloneVideoModelSupport,
     imageInputMetadataFromDataUrl,
@@ -526,20 +527,7 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
 };
 
 const mergeModelOptions = (...modelLists: ModelOption[][]): ModelOption[] => {
-    const merged = new Map<string, ModelOption>();
-    const order: string[] = [];
-    for (const models of modelLists) {
-        for (const model of models) {
-            if (!merged.has(model.id)) {
-                order.push(model.id);
-            }
-            merged.set(model.id, { ...merged.get(model.id), ...model });
-        }
-    }
-    return order
-        .map((id) => merged.get(id))
-        .filter((model): model is ModelOption => !!model)
-        .slice(0, MAX_CACHED_MODELS);
+    return mergeModelOptionLists(modelLists, MAX_CACHED_MODELS);
 };
 
 
@@ -1232,10 +1220,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (!models.length) {
                 throw new Error(`MultiLLM returned no ${kind} models.`);
             }
-            if (kind === "chat") setMultiLlmChatModels(models);
-            if (kind === "image") setMultiLlmImageModels(models);
-            if (kind === "video") setMultiLlmVideoModels(models);
-            if (kind === "audio") setMultiLlmAudioModels(models);
+            if (kind === "chat") {
+                setMultiLlmChatModels(mergeModelOptions(MULTILLM_CHAT_MODELS, models));
+            }
+            if (kind === "image") {
+                setMultiLlmImageModels(mergeModelOptions(MULTILLM_IMAGE_MODELS, models));
+            }
+            if (kind === "video") {
+                setMultiLlmVideoModels(mergeModelOptions(MULTILLM_VIDEO_MODELS, models));
+            }
+            if (kind === "audio") {
+                setMultiLlmAudioModels(mergeModelOptions(MULTILLM_AUDIO_MODELS, models));
+            }
             return models;
         },
         [apiKeys.multillm]
@@ -3307,7 +3303,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         );
         if (storedMultiLlmImageModels.length) {
             setMultiLlmImageModels(
-                sanitizeModelOptions(storedMultiLlmImageModels)
+                mergeModelOptions(
+                    MULTILLM_IMAGE_MODELS,
+                    sanitizeModelOptions(storedMultiLlmImageModels)
+                )
             );
         }
         const storedMultiLlmVideoModels = readLocalStorage<ModelOption[]>(
@@ -3316,7 +3315,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         );
         if (storedMultiLlmVideoModels.length) {
             setMultiLlmVideoModels(
-                sanitizeModelOptions(storedMultiLlmVideoModels)
+                mergeModelOptions(
+                    MULTILLM_VIDEO_MODELS,
+                    sanitizeModelOptions(storedMultiLlmVideoModels)
+                )
             );
         }
         const storedMultiLlmAudioModels = readLocalStorage<ModelOption[]>(
@@ -3325,7 +3327,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         );
         if (storedMultiLlmAudioModels.length) {
             setMultiLlmAudioModels(
-                sanitizeModelOptions(storedMultiLlmAudioModels)
+                mergeModelOptions(
+                    MULTILLM_AUDIO_MODELS,
+                    sanitizeModelOptions(storedMultiLlmAudioModels)
+                )
             );
         }
 

@@ -42,6 +42,7 @@ const modelIdentity = (record: ModelRecord) =>
   asString(record.id) ||
   asString(record.model) ||
   asString(record.model_id) ||
+  asString(record.model_name) ||
   asString(record.slug);
 
 const modelLabel = (record: ModelRecord, fallback: string) =>
@@ -49,7 +50,13 @@ const modelLabel = (record: ModelRecord, fallback: string) =>
   asString(record.display_name) ||
   asString(record.displayName) ||
   asString(record.name) ||
+  asString(record.model_name) ||
   fallback;
+
+export const isLinkApiChatImageModel = (model: string) =>
+  /^gemini-[a-z0-9._-]*image(?:[a-z0-9._-]*)$/i.test(
+    model.replace(/^linkapi:/i, "")
+  );
 
 const scopedModelKeys: Record<Exclude<MultiLlmModelKind, "chat">, string[]> = {
   image: ["image", "images", "image_models", "imageModels"],
@@ -104,6 +111,7 @@ const modelMetadata = (record: ModelRecord) => {
     ...asStringList(record.task),
     ...asStringList(record.input_modalities),
     ...asStringList(record.output_modalities),
+    ...asStringList(record.supported_endpoint_types),
     ...asStringList(architecture.modality),
     ...asStringList(architecture.input_modalities),
     ...asStringList(architecture.output_modalities),
@@ -112,6 +120,7 @@ const modelMetadata = (record: ModelRecord) => {
     ...asStringList(capabilities.output_modalities),
     asString(record.id).toLowerCase(),
     asString(record.name).toLowerCase(),
+    asString(record.model_name).toLowerCase(),
     asString(record.description).toLowerCase(),
   ].join(" ");
 };
@@ -157,15 +166,22 @@ export const modelSupportsKind = (
     );
   }
 
-  if (endpoint && !endpoint.includes("images/generations")) return false;
+  const usesImageEndpoint = endpoint.includes("images/generations");
+  const usesImageCapableChatEndpoint =
+    (endpoint.includes("chat/completions") ||
+      endpoint.includes("generatecontent")) &&
+    /\b(image|flux|dall-e|imagen|hidream|diffusion)\b/.test(metadata);
+  if (endpoint && !usesImageEndpoint && !usesImageCapableChatEndpoint) {
+    return false;
+  }
   const hasImageCapability =
-    endpoint.includes("images/generations") ||
+    usesImageEndpoint ||
     truthyCapability(record, [
       "supports_image_output",
       "supports_images",
       "supports_image_generation",
     ]) ||
-    /\b(image|flux|dall-e|imagen|hidream|stable diffusion)\b/.test(metadata);
+    /\b(image|flux|dall-e|imagen|hidream|diffusion)\b/.test(metadata);
 
   return (
     hasImageCapability &&
@@ -202,6 +218,10 @@ export const normalizeModelOptions = (
       ? `${SOURCE_LABELS[options.source]} · ${modelLabel(record, rawId)}`
       : modelLabel(record, rawId);
     const kind = options.kind ?? "chat";
+    const usesLinkApiImageChat =
+      kind === "image" &&
+      options.source === "linkapi" &&
+      isLinkApiChatImageModel(rawId);
     const inputModalities = [
       ...asStringList(record.input_modalities),
       ...(isRecord(record.architecture)
@@ -218,7 +238,9 @@ export const normalizeModelOptions = (
       kind === "chat"
         ? "multillm-chat-completions"
         : kind === "image"
-          ? "multillm-images-generations"
+          ? usesLinkApiImageChat
+            ? "multillm-image-chat-completions"
+            : "multillm-images-generations"
           : kind === "video"
             ? "multillm-video-generation"
             : "multillm-audio-speech";
@@ -228,7 +250,11 @@ export const normalizeModelOptions = (
             imageGeneration: true,
             asyncJobs: options.source === "navyai",
             size: true,
-            aspectRatio: options.source !== "linkapi",
+            aspectRatio:
+              options.source !== "linkapi" || usesLinkApiImageChat,
+            ...(usesLinkApiImageChat
+              ? { imageEdit: true, referenceImages: true }
+              : {}),
           }
         : kind === "video"
           ? {
@@ -251,13 +277,15 @@ export const normalizeModelOptions = (
       inputModalities:
         inputModalities.length > 0
           ? [...new Set(inputModalities)]
-          : kind === "video"
+          : kind === "video" || usesLinkApiImageChat
             ? ["text", "image"]
             : ["text"],
       outputModalities:
         outputModalities.length > 0
           ? [...new Set(outputModalities)]
-          : [kind === "chat" ? "text" : kind],
+          : usesLinkApiImageChat
+            ? ["text", "image"]
+            : [kind === "chat" ? "text" : kind],
       ...(kind === "chat"
         ? {
             supportsStreaming: true,
@@ -278,7 +306,7 @@ export const normalizeModelOptions = (
       ...(kind === "image" ? { supportsImageOutput: true } : {}),
       ...(supports ? { supports } : {}),
       ...(kind === "image" && options.source === "linkapi"
-        ? { maxReferenceImages: 0 }
+        ? { maxReferenceImages: usesLinkApiImageChat ? 5 : 0 }
         : {}),
       ...(kind === "video" ? { maxReferenceImages: 1 } : {}),
       metadataSource: "multillm-live-catalog",
@@ -370,36 +398,105 @@ export type NormalizedImageItem = {
   mimeType: string;
 };
 
+const imageItemFromValue = (value: unknown): NormalizedImageItem | null => {
+  if (typeof value === "string") {
+    const dataUrl = /^data:(image\/[^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/i.exec(
+      value.trim()
+    );
+    if (dataUrl) {
+      return { data: dataUrl[2], mimeType: dataUrl[1].toLowerCase() };
+    }
+    if (/^https?:\/\//i.test(value.trim())) {
+      return { url: value.trim(), mimeType: "image/png" };
+    }
+    return null;
+  }
+  if (!isRecord(value)) return null;
+
+  const inlineData = isRecord(value.inlineData)
+    ? value.inlineData
+    : isRecord(value.inline_data)
+      ? value.inline_data
+      : {};
+  const nestedImageUrl = isRecord(value.image_url)
+    ? value.image_url
+    : isRecord(value.imageUrl)
+      ? value.imageUrl
+      : {};
+  const mimeType =
+    asString(value.mimeType) ||
+    asString(value.mime_type) ||
+    asString(inlineData.mimeType) ||
+    asString(inlineData.mime_type) ||
+    "image/png";
+  const data =
+    asString(value.b64_json) ||
+    asString(value.data) ||
+    asString(value.base64) ||
+    asString(inlineData.data);
+  if (data) {
+    const dataUrlItem = data.startsWith("data:")
+      ? imageItemFromValue(data)
+      : null;
+    return dataUrlItem ?? { data, mimeType };
+  }
+
+  const url =
+    asString(value.url) ||
+    asString(nestedImageUrl.url) ||
+    asString(value.image_url) ||
+    asString(value.imageUrl);
+  if (!url) return null;
+  const dataUrlItem = url.startsWith("data:")
+    ? imageItemFromValue(url)
+    : null;
+  if (dataUrlItem) return dataUrlItem;
+  return /^https?:\/\//i.test(url) ? { url, mimeType } : null;
+};
+
 export const extractImageItems = (payload: unknown): NormalizedImageItem[] => {
   if (!isRecord(payload)) return [];
   const result = isRecord(payload.result) ? payload.result : {};
-  const candidates = [
+  const candidateGroups: unknown[][] = [
     payload.images,
     payload.data,
     result.images,
     result.data,
-  ].find(Array.isArray);
+  ].filter(Array.isArray) as unknown[][];
 
-  if (!Array.isArray(candidates)) return [];
-  return candidates
-    .map((entry) => {
-      if (!isRecord(entry)) return null;
-      const data =
-        asString(entry.b64_json) ||
-        asString(entry.data) ||
-        asString(entry.base64);
-      const url = asString(entry.url);
-      if (!data && !url) return null;
-      return {
-        ...(data ? { data } : {}),
-        ...(url ? { url } : {}),
-        mimeType:
-          asString(entry.mimeType) ||
-          asString(entry.mime_type) ||
-          "image/png",
-      };
-    })
-    .filter((entry): entry is NormalizedImageItem => entry !== null);
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  for (const choice of choices) {
+    if (!isRecord(choice) || !isRecord(choice.message)) continue;
+    if (Array.isArray(choice.message.images)) {
+      candidateGroups.push(choice.message.images);
+    }
+    if (Array.isArray(choice.message.content)) {
+      candidateGroups.push(choice.message.content);
+    }
+  }
+
+  const nativeCandidates = Array.isArray(payload.candidates)
+    ? payload.candidates
+    : [];
+  for (const candidate of nativeCandidates) {
+    if (!isRecord(candidate) || !isRecord(candidate.content)) continue;
+    if (Array.isArray(candidate.content.parts)) {
+      candidateGroups.push(candidate.content.parts);
+    }
+  }
+
+  const deduplicated = new Map<string, NormalizedImageItem>();
+  for (const group of candidateGroups) {
+    for (const candidate of group) {
+      const item = imageItemFromValue(candidate);
+      if (!item) continue;
+      const key = item.data
+        ? `data:${item.mimeType}:${item.data}`
+        : `url:${item.url}`;
+      if (!deduplicated.has(key)) deduplicated.set(key, item);
+    }
+  }
+  return [...deduplicated.values()];
 };
 
 const nestedRecord = (value: unknown, key: string) =>

@@ -2,6 +2,26 @@ import type { ModelOption } from "./constants";
 
 const normalizeQuery = (query: string) => query.trim().toLowerCase();
 
+export const mergeModelOptionLists = (
+  modelLists: ModelOption[][],
+  maxItems = Number.POSITIVE_INFINITY,
+): ModelOption[] => {
+  const merged = new Map<string, ModelOption>();
+  const order: string[] = [];
+
+  for (const models of modelLists) {
+    for (const model of models) {
+      if (!merged.has(model.id)) order.push(model.id);
+      merged.set(model.id, { ...merged.get(model.id), ...model });
+    }
+  }
+
+  return order
+    .map((id) => merged.get(id))
+    .filter((model): model is ModelOption => Boolean(model))
+    .slice(0, maxItems);
+};
+
 export const optionSearchText = (model: ModelOption) =>
   [
     model.label,

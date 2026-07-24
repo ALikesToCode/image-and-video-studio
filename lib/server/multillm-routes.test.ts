@@ -71,7 +71,11 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
         }
         if (url === "https://proxy.test/linkapi/v1/models") {
           return Response.json({
-            data: [{ id: "gpt-image-2-c" }],
+            data: [
+              { id: "gpt-image-2-c" },
+              { id: "gemini-3.1-flash-image-preview" },
+              { id: "gemini-3.1-flash-lite-image" },
+            ],
           });
         }
         assert.equal(
@@ -95,6 +99,14 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
           [
             { id: "navyai:flux", provider: "multillm" },
             { id: "linkapi:gpt-image-2-c", provider: "multillm" },
+            {
+              id: "linkapi:gemini-3.1-flash-image-preview",
+              provider: "multillm",
+            },
+            {
+              id: "linkapi:gemini-3.1-flash-lite-image",
+              provider: "multillm",
+            },
           ]
         );
         assert.equal(payload.warnings.length, 1);
@@ -220,6 +232,89 @@ test("MultiLLM generates LinkAPI gpt-image-2-c images through the proxy", async 
         });
         assert.equal(generationCalls, 1);
         assert.equal(downloadCalls, 1);
+      }
+    );
+  });
+});
+
+test("MultiLLM generates LinkAPI Gemini image models through chat completions", async () => {
+  await withMultiLlmEnv(async () => {
+    let upstreamBody: Record<string, unknown> = {};
+    await withFetch(
+      async (input, init) => {
+        assert.equal(
+          String(input),
+          "https://proxy.test/linkapi/v1/chat/completions"
+        );
+        assert.equal(
+          new Headers(init?.headers).get("authorization"),
+          "Bearer server-proxy-secret"
+        );
+        upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({
+          choices: [
+            {
+              message: {
+                images: [
+                  {
+                    image_url: {
+                      url: "data:image/webp;base64,AQID",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      },
+      async () => {
+        const response = await multiLlmImagePost(
+          new Request("https://studio.test/api/multillm/image", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "linkapi:gemini-3.1-flash-image-preview",
+              prompt: "A lighthouse in a storm",
+              negativePrompt: "text",
+              numberOfImages: 2,
+              size: "1024x1024",
+              aspectRatio: "16:9",
+              quality: "standard",
+              imageDataUrl: "data:image/png;base64,aW5wdXQ=",
+            }),
+          })
+        );
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(upstreamBody, {
+          model: "gemini-3.1-flash-image-preview",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "A lighthouse in a storm\n\nAvoid: text",
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: "data:image/png;base64,aW5wdXQ=",
+                  },
+                },
+              ],
+            },
+          ],
+          modalities: ["image", "text"],
+          n: 2,
+          image_config: {
+            image_size: "1024x1024",
+            aspect_ratio: "16:9",
+          },
+        });
+        assert.deepEqual(await response.json(), {
+          images: [{ data: "AQID", mimeType: "image/webp" }],
+        });
       }
     );
   });

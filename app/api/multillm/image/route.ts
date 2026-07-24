@@ -2,6 +2,7 @@ import {
   extractImageItems,
   extractJobId,
   getMultiLlmProxyBaseUrl,
+  isLinkApiChatImageModel,
   multiLlmAuthorizationHeaders,
   parseMediaModelId,
   readUpstreamError,
@@ -117,36 +118,93 @@ export async function POST(request: Request) {
     4,
     Math.max(1, Math.floor(body.numberOfImages ?? 1))
   );
-  const payload: Record<string, unknown> = {
-    ...(body.parameters &&
-    typeof body.parameters === "object" &&
-    !Array.isArray(body.parameters)
-      ? body.parameters
-      : {}),
-    model,
-    prompt: body.prompt.trim(),
-    n: numberOfImages,
-    response_format: source === "linkapi" ? "url" : "b64_json",
-  };
-  if (body.size) payload.size = body.size;
-  if (body.aspectRatio && source !== "linkapi") {
-    payload.aspect_ratio = body.aspectRatio;
-    if (!body.size && source === "navyai") payload.size = body.aspectRatio;
-  }
-  if (body.negativePrompt && source !== "linkapi") {
-    payload.negative_prompt = body.negativePrompt;
-  }
-  if (body.quality && (source === "navyai" || source === "linkapi")) {
-    payload.quality = body.quality;
-  }
-  if (body.style && (source === "navyai" || source === "linkapi")) {
-    payload.style = body.style;
-  }
   const imageInputs = [
     ...(body.imageDataUrl ? [body.imageDataUrl] : []),
     ...(Array.isArray(body.imageDataUrls) ? body.imageDataUrls : []),
   ].filter((value, index, values) => value && values.indexOf(value) === index);
-  if (imageInputs.length && source !== "linkapi") {
+  const usesLinkApiImageChat =
+    source === "linkapi" && isLinkApiChatImageModel(model);
+  const prompt =
+    usesLinkApiImageChat && body.negativePrompt?.trim()
+      ? `${body.prompt.trim()}\n\nAvoid: ${body.negativePrompt.trim()}`
+      : body.prompt.trim();
+  const payload: Record<string, unknown> = usesLinkApiImageChat
+    ? {
+        ...(body.parameters &&
+        typeof body.parameters === "object" &&
+        !Array.isArray(body.parameters)
+          ? body.parameters
+          : {}),
+        model,
+        messages: [
+          {
+            role: "user",
+            content: imageInputs.length
+              ? [
+                  { type: "text", text: prompt },
+                  ...imageInputs.map((url) => ({
+                    type: "image_url",
+                    image_url: { url },
+                  })),
+                ]
+              : prompt,
+          },
+        ],
+        modalities: ["image", "text"],
+        n: numberOfImages,
+        ...(body.size || body.aspectRatio
+          ? {
+              image_config: {
+                ...(body.size ? { image_size: body.size } : {}),
+                ...(body.aspectRatio
+                  ? { aspect_ratio: body.aspectRatio }
+                  : {}),
+              },
+            }
+          : {}),
+      }
+    : {
+        ...(body.parameters &&
+        typeof body.parameters === "object" &&
+        !Array.isArray(body.parameters)
+          ? body.parameters
+          : {}),
+        model,
+        prompt,
+        n: numberOfImages,
+        response_format: source === "linkapi" ? "url" : "b64_json",
+      };
+  if (!usesLinkApiImageChat && body.size) payload.size = body.size;
+  if (!usesLinkApiImageChat && body.aspectRatio && source !== "linkapi") {
+    payload.aspect_ratio = body.aspectRatio;
+    if (!body.size && source === "navyai") payload.size = body.aspectRatio;
+  }
+  if (
+    !usesLinkApiImageChat &&
+    body.negativePrompt &&
+    source !== "linkapi"
+  ) {
+    payload.negative_prompt = body.negativePrompt;
+  }
+  if (
+    !usesLinkApiImageChat &&
+    body.quality &&
+    (source === "navyai" || source === "linkapi")
+  ) {
+    payload.quality = body.quality;
+  }
+  if (
+    !usesLinkApiImageChat &&
+    body.style &&
+    (source === "navyai" || source === "linkapi")
+  ) {
+    payload.style = body.style;
+  }
+  if (
+    !usesLinkApiImageChat &&
+    imageInputs.length &&
+    source !== "linkapi"
+  ) {
     payload[source === "navyai" ? "image_url" : "input_references"] =
       imageInputs.length === 1 ? imageInputs[0] : imageInputs;
   }
@@ -155,7 +213,9 @@ export async function POST(request: Request) {
   }
 
   const response = await fetch(
-    `${getMultiLlmProxyBaseUrl()}/${source}/v1/images/generations`,
+    `${getMultiLlmProxyBaseUrl()}/${source}/v1/${
+      usesLinkApiImageChat ? "chat/completions" : "images/generations"
+    }`,
     {
       method: "POST",
       headers: multiLlmAuthorizationHeaders(apiKey, "application/json"),
