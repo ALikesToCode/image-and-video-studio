@@ -787,6 +787,17 @@ export const MULTILLM_CHAT_MODELS: ModelOption[] = [
         metadataSource: "multillm-fallback",
         metadataStatus: "fallback",
     },
+    {
+        id: "linkapi:gpt-5.6-luna",
+        label: "LinkAPI · GPT-5.6 Luna",
+        provider: "multillm",
+        endpoint: "multillm-chat-completions",
+        inputModalities: ["text"],
+        outputModalities: ["text"],
+        supportsStreaming: true,
+        metadataSource: "multillm-fallback",
+        metadataStatus: "fallback",
+    },
 ];
 
 export const MULTILLM_IMAGE_MODELS: ModelOption[] = [

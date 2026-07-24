@@ -58,6 +58,23 @@ export const isLinkApiChatImageModel = (model: string) =>
     model.replace(/^linkapi:/i, "")
   );
 
+export const resolveMultiLlmChatTarget = (modelRef: string) => {
+  const normalizedModel = modelRef.trim();
+  const linkApiPrefix = "linkapi:";
+  if (normalizedModel.toLowerCase().startsWith(linkApiPrefix)) {
+    return {
+      model: normalizedModel.slice(linkApiPrefix.length),
+      basePath: "/linkapi/v1",
+      completionPath: "/linkapi/v1/chat/completions",
+    };
+  }
+  return {
+    model: normalizedModel,
+    basePath: "/v1",
+    completionPath: "/v1/chat/completions",
+  };
+};
+
 const scopedModelKeys: Record<Exclude<MultiLlmModelKind, "chat">, string[]> = {
   image: ["image", "images", "image_models", "imageModels"],
   video: ["video", "videos", "video_models", "videoModels"],

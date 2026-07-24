@@ -21,6 +21,7 @@ import {
 } from "../chat-tooling.ts";
 import {
   getMultiLlmProxyBaseUrl,
+  resolveMultiLlmChatTarget,
   resolveMultiLlmApiKey,
 } from "../multillm-proxy.ts";
 
@@ -196,6 +197,9 @@ export async function handleAIStudioChatRequest(request: Request) {
     body.reasoningEffort === undefined || isDeepSeekV4Model(model)
       ? undefined
       : normalizeReasoningEffort(body.reasoningEffort);
+  const multiLlmTarget =
+    providerId === "multillm" ? resolveMultiLlmChatTarget(model) : undefined;
+  const upstreamModel = multiLlmTarget?.model ?? model;
 
   try {
     const provider = createOpenAICompatible({
@@ -203,7 +207,7 @@ export async function handleAIStudioChatRequest(request: Request) {
       apiKey,
       baseURL:
         providerId === "multillm"
-          ? `${getMultiLlmProxyBaseUrl()}/v1`
+          ? `${getMultiLlmProxyBaseUrl()}${multiLlmTarget?.basePath ?? "/v1"}`
           : PROVIDER_BASE_URLS[providerId],
       includeUsage:
         providerId === "navy" ||
@@ -220,14 +224,14 @@ export async function handleAIStudioChatRequest(request: Request) {
       supportedUrls: () => NATIVE_IMAGE_URLS,
       transformRequestBody: (providerBody) =>
         normalizeAIChatRequestBody({
-          model,
+          model: upstreamModel,
           body: providerBody,
           thinking: body.thinking,
           reasoningEffort: body.reasoningEffort,
         }),
     });
     const result = streamText({
-      model: provider.chatModel(model),
+      model: provider.chatModel(upstreamModel),
       ...(instructions ? { instructions } : {}),
       messages,
       tools,

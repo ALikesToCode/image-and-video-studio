@@ -1,14 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { MULTILLM_CHAT_MODELS } from "./constants.ts";
 import {
   extractImageItems,
   normalizeModelOptions,
   parseMediaModelId,
   parseVideoJobPayload,
   readUpstreamError,
+  resolveMultiLlmChatTarget,
   resolveMultiLlmApiKey,
 } from "./multillm-proxy.ts";
+
+test("keeps LinkAPI Luna in the fallback chat catalog", () => {
+  assert.ok(
+    MULTILLM_CHAT_MODELS.some(
+      (model) => model.id === "linkapi:gpt-5.6-luna"
+    )
+  );
+});
 
 test("normalizes unified chat models as MultiLLM capabilities", () => {
   const models = normalizeModelOptions({
@@ -40,6 +50,19 @@ test("normalizes unified chat models as MultiLLM capabilities", () => {
       },
     ]
   );
+});
+
+test("routes LinkAPI chat models through the provider-specific endpoint", () => {
+  assert.deepEqual(resolveMultiLlmChatTarget("linkapi:gpt-5.6-luna"), {
+    model: "gpt-5.6-luna",
+    basePath: "/linkapi/v1",
+    completionPath: "/linkapi/v1/chat/completions",
+  });
+  assert.deepEqual(resolveMultiLlmChatTarget("opencode:deepseek-v4-flash"), {
+    model: "opencode:deepseek-v4-flash",
+    basePath: "/v1",
+    completionPath: "/v1/chat/completions",
+  });
 });
 
 test("adds source tags and media capabilities to provider-specific models", () => {

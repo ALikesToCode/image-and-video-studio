@@ -2,6 +2,7 @@ import {
   getMultiLlmProxyBaseUrl,
   multiLlmAuthorizationHeaders,
   readUpstreamError,
+  resolveMultiLlmChatTarget,
   resolveMultiLlmApiKey,
 } from "@/lib/multillm-proxy";
 
@@ -43,8 +44,13 @@ export async function POST(request: Request) {
     );
   }
 
+  const target = resolveMultiLlmChatTarget(body.model);
+  if (!target.model) {
+    return Response.json({ error: "model is required." }, { status: 400 });
+  }
+
   const payload: Record<string, unknown> = {
-    model: body.model.trim(),
+    model: target.model,
     messages: body.messages,
     stream: true,
   };
@@ -56,7 +62,7 @@ export async function POST(request: Request) {
   }
 
   const response = await fetch(
-    `${getMultiLlmProxyBaseUrl()}/v1/chat/completions`,
+    `${getMultiLlmProxyBaseUrl()}${target.completionPath}`,
     {
       method: "POST",
       headers: multiLlmAuthorizationHeaders(apiKey, "application/json"),

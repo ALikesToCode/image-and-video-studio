@@ -5,6 +5,9 @@ import {
   GET as multiLlmModelsGet,
 } from "../../app/api/multillm/models/route.ts";
 import {
+  POST as multiLlmChatPost,
+} from "../../app/api/multillm/chat/route.ts";
+import {
   POST as multiLlmImagePost,
 } from "../../app/api/multillm/image/route.ts";
 import {
@@ -111,6 +114,52 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
         );
         assert.equal(payload.warnings.length, 1);
         assert.match(payload.warnings[0], /NanoGPT catalog unavailable/);
+      }
+    );
+  });
+});
+
+test("MultiLLM sends LinkAPI Luna chat through the provider route", async () => {
+  await withMultiLlmEnv(async () => {
+    let upstreamBody: Record<string, unknown> = {};
+    await withFetch(
+      async (input, init) => {
+        assert.equal(
+          String(input),
+          "https://proxy.test/linkapi/v1/chat/completions"
+        );
+        assert.equal(
+          new Headers(init?.headers).get("authorization"),
+          "Bearer server-proxy-secret"
+        );
+        upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: [DONE]\n\n',
+          { headers: { "content-type": "text/event-stream" } }
+        );
+      },
+      async () => {
+        const response = await multiLlmChatPost(
+          new Request("https://studio.test/api/multillm/chat", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "linkapi:gpt-5.6-luna",
+              messages: [{ role: "user", content: "Hello." }],
+              maxTokens: 300,
+              temperature: 0.7,
+            }),
+          })
+        );
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(upstreamBody, {
+          model: "gpt-5.6-luna",
+          messages: [{ role: "user", content: "Hello." }],
+          stream: true,
+          max_tokens: 300,
+          temperature: 0.7,
+        });
       }
     );
   });
