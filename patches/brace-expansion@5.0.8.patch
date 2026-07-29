@@ -1,0 +1,19 @@
+diff --git a/dist/commonjs/index.js b/dist/commonjs/index.js
+index be9df86be09c7655787a65c55ae6da01858894c3..16659b4d9c5df33e37efaf6347c790197e666dfd
+--- a/dist/commonjs/index.js
++++ b/dist/commonjs/index.js
+@@ -260,4 +260,14 @@ function expand_(str, max, maxLength, isTop) {
+     }
+     return acc;
+ }
++// minimatch versions before v9 call the CommonJS export directly. Preserve
++// that API while exposing the named exports expected by newer minimatch.
++const legacyCallableExport = Object.assign(expand, {
++    default: expand,
++    expand,
++    EXPANSION_MAX: exports.EXPANSION_MAX,
++    EXPANSION_MAX_LENGTH: exports.EXPANSION_MAX_LENGTH,
++});
++Object.defineProperty(legacyCallableExport, "__esModule", { value: true });
++module.exports = legacyCallableExport;
+ //# sourceMappingURL=index.js.map
