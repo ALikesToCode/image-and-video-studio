@@ -9,6 +9,7 @@ import {
   buildChatMediaPreview,
   buildCancelledToolResults,
   buildAssistantToolContextContent,
+  collectUnsafeChatMediaAssets,
   createSyntheticFallbackToolCall,
   isDeepSeekV4Model,
   isChatVideoModelSupported,
@@ -1334,6 +1335,76 @@ test("Chat media assets preserve per-image model labels", () => {
       },
     ]
   );
+});
+
+test("restored chat media rejects unsafe, stale, and mismatched URLs", () => {
+  const safeVideo = {
+    id: "safe-video",
+    kind: "video",
+    dataUrl: "https://media.example/video.mp4",
+    mimeType: "video/mp4",
+  };
+  const unsafeMedia = [
+    {
+      id: "file-video",
+      kind: "video",
+      dataUrl: "file:///home/user/video.mp4",
+      mimeType: "video/mp4",
+    },
+    {
+      id: "script-audio",
+      kind: "audio",
+      dataUrl: "javascript:alert(1)",
+      mimeType: "audio/mpeg",
+    },
+    {
+      id: "stale-blob",
+      kind: "image",
+      dataUrl: "blob:https://studio.example/stale",
+      mimeType: "image/png",
+    },
+    {
+      id: "wrong-data-kind",
+      kind: "video",
+      dataUrl: "data:image/png;base64,YWJj",
+      mimeType: "video/mp4",
+    },
+  ];
+
+  assert.deepEqual(sanitizeChatMediaAssets([safeVideo, ...unsafeMedia]), [
+    safeVideo,
+  ]);
+  assert.deepEqual(
+    collectUnsafeChatMediaAssets([
+      {
+        id: "message-1",
+        media: unsafeMedia,
+      },
+    ]),
+    unsafeMedia.map((asset) => ({
+      messageId: "message-1",
+      field: "media",
+      asset,
+    }))
+  );
+});
+
+test("restored chat images and attachments reject unsafe URLs", () => {
+  const unsafeImage = {
+    id: "unsafe-image",
+    dataUrl: "file:///home/user/image.png",
+    mimeType: "image/png",
+  };
+  const unsafeAttachment = {
+    id: "unsafe-attachment",
+    kind: "image",
+    name: "image.png",
+    dataUrl: "javascript:alert(1)",
+    mimeType: "image/png",
+  };
+
+  assert.deepEqual(sanitizeChatImageAssets([unsafeImage]), []);
+  assert.deepEqual(sanitizeChatAttachmentAssets([unsafeAttachment]), []);
 });
 
 test("Synthetic fallback builds a Navy video tool call with current defaults", () => {

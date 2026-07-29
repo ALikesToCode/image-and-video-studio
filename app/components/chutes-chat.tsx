@@ -111,6 +111,7 @@ import {
   buildCancelledToolResults,
   buildNanoGptImageToolRequest,
   buildNanoGptVideoToolRequest,
+  collectUnsafeChatMediaAssets,
   createSyntheticFallbackToolCall,
   isDeepSeekV4Model,
   isChatVideoModelSupported,
@@ -128,6 +129,7 @@ import {
   stripHeavyMediaFromMessagesForStorage,
   toChatCompletionMessages,
 } from "@/lib/chat-tooling";
+import { mergeUnsafeMediaBackup } from "@/lib/media-backup";
 import {
   buildSaferImagePromptForModel,
   buildImagePolicyRecoveryPrompt,
@@ -1299,20 +1301,50 @@ export function ChutesChat({
     const loadMessages = async () => {
       if (typeof window === "undefined") return;
       let storedMessages: ChatMessage[] = [];
+      const backupKey = `${storageKey}_unsafe_media_backup_v1`;
 
       if (isStudioStateAvailable()) {
         try {
           const fromDb = await getStudioState<ChatMessage[]>(storageKey);
+          const unsafeMedia = collectUnsafeChatMediaAssets(fromDb);
           storedMessages = sanitizeChatMessages(fromDb);
+          if (unsafeMedia.length) {
+            try {
+              const existingBackup = await getStudioState(backupKey);
+              await putStudioState(
+                backupKey,
+                mergeUnsafeMediaBackup(existingBackup, unsafeMedia)
+              );
+              await putStudioState(storageKey, storedMessages);
+            } catch {
+              // Unsafe entries remain blocked in memory if browser storage is unavailable.
+            }
+          }
         } catch {
           storedMessages = [];
         }
       }
 
+      const fromLocalStorage = readLocalStorage<ChatMessage[]>(storageKey, []);
+      const localUnsafeMedia = collectUnsafeChatMediaAssets(fromLocalStorage);
+      const localMessages = sanitizeChatMessages(fromLocalStorage);
+      if (localUnsafeMedia.length) {
+        try {
+          const existingBackup = readLocalStorage(backupKey, null);
+          writeLocalStorage(
+            backupKey,
+            JSON.stringify(
+              mergeUnsafeMediaBackup(existingBackup, localUnsafeMedia)
+            )
+          );
+          writeLocalStorage(storageKey, JSON.stringify(localMessages));
+        } catch {
+          // Unsafe entries remain blocked in memory if browser storage is unavailable.
+        }
+      }
+
       if (!storedMessages.length) {
-        storedMessages = sanitizeChatMessages(
-          readLocalStorage<ChatMessage[]>(storageKey, [])
-        );
+        storedMessages = localMessages;
       }
 
       if (!cancelled) {
@@ -3231,6 +3263,7 @@ export function ChutesChat({
                   : update.status === "success"
                     ? `Generated ${imageCount} image${imageCount === 1 ? "" : "s"} with ${update.model}.`
                     : `Image generation failed with ${update.model}${attemptLabel}: ${update.error ?? "Unknown error."}`;
+            const safeImages = sanitizeChatImageAssets(update.images);
             onProgress?.({
               id: `${toolCall.id}:image:${update.model}`,
               role: "tool",
@@ -3238,19 +3271,23 @@ export function ChutesChat({
               promptUsed: update.prompt || undefined,
               toolCallId: toolCall.id,
               name: toolName,
-              images: update.images,
-              media: update.images?.map((image) => ({
+              images: safeImages.length ? safeImages : undefined,
+              media: safeImages.map((image) => ({
                 ...image,
                 kind: "image" as const,
               })),
               transient: true,
             });
           }, signal);
+          const safeImages = sanitizeChatImageAssets(result.images);
+          if (!safeImages.length) {
+            throw new Error("Image provider returned no safe media.");
+          }
           latestGeneratedImageRef.current =
-            result.images[0]?.dataUrl ?? latestGeneratedImageRef.current;
+            safeImages[0]?.dataUrl ?? latestGeneratedImageRef.current;
           if (saveToGallery && onSaveImages) {
             const imagesByProvider = new Map<Provider, ChatImageAsset[]>();
-            for (const image of result.images) {
+            for (const image of safeImages) {
               const targetProvider = image.provider ?? provider;
               imagesByProvider.set(targetProvider, [
                 ...(imagesByProvider.get(targetProvider) ?? []),
@@ -3270,8 +3307,8 @@ export function ChutesChat({
           }
           refreshNavyUsageAfterMediaTool();
           const imageStatus = result.errors.length
-            ? `Generated ${result.images.length} image(s) using ${result.model}. Failed: ${result.errors.join("; ")}`
-            : `Generated ${result.images.length} image(s) using ${result.model}.`;
+            ? `Generated ${safeImages.length} image(s) using ${result.model}. Failed: ${result.errors.join("; ")}`
+            : `Generated ${safeImages.length} image(s) using ${result.model}.`;
           toolMessages.push({
             id: createId(),
             role: "tool",
@@ -3279,8 +3316,8 @@ export function ChutesChat({
             promptUsed: result.prompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
-            images: result.images,
-            media: result.images.map((image) => ({
+            images: safeImages,
+            media: safeImages.map((image) => ({
               ...image,
               kind: "image" as const,
             })),
@@ -3290,6 +3327,10 @@ export function ChutesChat({
 
         if (toolName === "generate_video") {
           const result = await runGenerateVideo(args, signal);
+          const safeMedia = sanitizeChatMediaAssets(result.media);
+          if (!safeMedia.length) {
+            throw new Error("Video provider returned no safe media.");
+          }
           refreshNavyUsageAfterMediaTool();
           toolMessages.push({
             id: createId(),
@@ -3298,13 +3339,17 @@ export function ChutesChat({
             promptUsed: result.prompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
-            media: result.media,
+            media: safeMedia,
           });
           continue;
         }
 
         if (toolName === "generate_audio") {
           const result = await runGenerateAudio(args, signal);
+          const safeMedia = sanitizeChatMediaAssets(result.media);
+          if (!safeMedia.length) {
+            throw new Error("Audio provider returned no safe media.");
+          }
           toolMessages.push({
             id: createId(),
             role: "tool",
@@ -3312,7 +3357,7 @@ export function ChutesChat({
             promptUsed: result.prompt || undefined,
             toolCallId: toolCall.id,
             name: toolName,
-            media: result.media,
+            media: safeMedia,
           });
           continue;
         }

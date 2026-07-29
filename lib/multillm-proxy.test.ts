@@ -247,12 +247,47 @@ test("normalizes completed and failed media jobs", () => {
   );
 });
 
+test("rejects unsafe video URLs returned by MultiLLM providers", () => {
+  for (const videoUrl of [
+    "file:///home/user/video.mp4",
+    "javascript:alert(1)",
+    "http://media.example/video.mp4",
+    "data:video/mp4;base64,YWJj",
+    "blob:https://studio.example/stale",
+  ]) {
+    assert.deepEqual(
+      parseVideoJobPayload({ status: "completed", videoUrl }),
+      {
+        done: true,
+        status: "completed",
+        error: "Video generation returned an unsafe media URL.",
+      }
+    );
+  }
+});
+
 test("normalizes base64 image responses", () => {
   assert.deepEqual(
     extractImageItems({
       data: [{ b64_json: "aGVsbG8=", mime_type: "image/webp" }],
     }),
     [{ data: "aGVsbG8=", mimeType: "image/webp" }]
+  );
+});
+
+test("rejects unsafe image URLs and non-image data returned by MultiLLM", () => {
+  assert.deepEqual(
+    extractImageItems({
+      data: [
+        { url: "https://media.example/image.png" },
+        { url: "http://media.example/image.png" },
+        { url: "file:///home/user/image.png" },
+        { url: "javascript:alert(1)" },
+        { url: "data:text/html;base64,YWJj" },
+        { data: "YWJj", mimeType: "text/html" },
+      ],
+    }),
+    [{ url: "https://media.example/image.png", mimeType: "image/png" }]
   );
 });
 

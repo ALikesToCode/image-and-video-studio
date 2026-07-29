@@ -19,3 +19,26 @@ test("fetchAsDataUrl returns existing data URLs without fetching", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("fetchAsDataUrl rejects unsafe URLs before fetching", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return new Response(null);
+  };
+
+  try {
+    await assert.rejects(
+      fetchAsDataUrl("file:///home/user/image.png"),
+      /not a supported image URL/
+    );
+    await assert.rejects(
+      fetchAsDataUrl("javascript:alert(1)"),
+      /not a supported image URL/
+    );
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

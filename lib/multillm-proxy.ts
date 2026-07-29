@@ -4,6 +4,7 @@ import {
   providerErrorMessage,
   redactSecrets,
 } from "@/lib/api-safety";
+import { sanitizeMediaUrl } from "./media-url.ts";
 
 export const DEFAULT_MULTILLM_PROXY_BASE_URL =
   "https://multillm-proxy.cserules.workers.dev";
@@ -417,16 +418,18 @@ export type NormalizedImageItem = {
 
 const imageItemFromValue = (value: unknown): NormalizedImageItem | null => {
   if (typeof value === "string") {
+    const safeUrl = sanitizeMediaUrl(value, {
+      kind: "image",
+      allowBlob: false,
+    });
+    if (!safeUrl) return null;
     const dataUrl = /^data:(image\/[^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/i.exec(
-      value.trim()
+      safeUrl
     );
     if (dataUrl) {
       return { data: dataUrl[2], mimeType: dataUrl[1].toLowerCase() };
     }
-    if (/^https?:\/\//i.test(value.trim())) {
-      return { url: value.trim(), mimeType: "image/png" };
-    }
-    return null;
+    return { url: safeUrl, mimeType: "image/png" };
   }
   if (!isRecord(value)) return null;
 
@@ -452,10 +455,11 @@ const imageItemFromValue = (value: unknown): NormalizedImageItem | null => {
     asString(value.base64) ||
     asString(inlineData.data);
   if (data) {
-    const dataUrlItem = data.startsWith("data:")
-      ? imageItemFromValue(data)
-      : null;
-    return dataUrlItem ?? { data, mimeType };
+    return imageItemFromValue(
+      data.startsWith("data:")
+        ? data
+        : `data:${mimeType};base64,${data}`
+    );
   }
 
   const url =
@@ -468,7 +472,11 @@ const imageItemFromValue = (value: unknown): NormalizedImageItem | null => {
     ? imageItemFromValue(url)
     : null;
   if (dataUrlItem) return dataUrlItem;
-  return /^https?:\/\//i.test(url) ? { url, mimeType } : null;
+  const safeUrl = sanitizeMediaUrl(url, {
+    kind: "image",
+    allowBlob: false,
+  });
+  return safeUrl ? { url: safeUrl, mimeType } : null;
 };
 
 export const extractImageItems = (payload: unknown): NormalizedImageItem[] => {
@@ -565,7 +573,7 @@ export const parseVideoJobPayload = (payload: unknown): ParsedVideoJob => {
     asString(payload.status) ||
     "processing"
   ).toLowerCase();
-  const videoUrl =
+  const rawVideoUrl =
     asString(payload.videoUrl) ||
     asString(payload.url) ||
     nestedString(payload, ["data", "output", "video", "url"]) ||
@@ -574,6 +582,11 @@ export const parseVideoJobPayload = (payload: unknown): ParsedVideoJob => {
     nestedString(payload, ["result", "0", "url"]) ||
     nestedString(payload, ["result", "data", "0", "url"]) ||
     nestedString(payload, ["data", "data", "0", "url"]);
+  const videoUrl = sanitizeMediaUrl(rawVideoUrl, {
+    kind: "video",
+    allowData: false,
+    allowBlob: false,
+  });
   const error =
     asString(data.userFriendlyError) ||
     asString(data.error) ||
@@ -590,6 +603,14 @@ export const parseVideoJobPayload = (payload: unknown): ParsedVideoJob => {
       done: true,
       status,
       error: error || "Video generation failed.",
+    };
+  }
+
+  if (rawVideoUrl && !videoUrl) {
+    return {
+      done: true,
+      status,
+      error: "Video generation returned an unsafe media URL.",
     };
   }
 

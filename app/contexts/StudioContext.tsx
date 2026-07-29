@@ -96,6 +96,13 @@ import {
     restorePersistedGenerationJob,
     shouldPersistRemoteGenerationJob,
 } from "@/lib/generation-job-persistence";
+import { sanitizeMediaUrl } from "@/lib/media-url";
+import {
+    backupAndPruneUnsafeMediaRecords,
+    partitionGeneratedImages,
+    partitionStoredMediaRecords,
+    type StoredMediaRecord,
+} from "@/lib/studio-media-persistence";
 import { normalizeVeoDuration } from "@/lib/studio-validation";
 import {
     clearGalleryStore,
@@ -186,12 +193,6 @@ export type GenerationJob = {
     audioUrl?: string; // result
     videoUrl?: string; // result
     audioData?: string; // base64
-};
-
-type StoredMediaRecord = Omit<StoredMedia, "dataUrl" | "kind"> & {
-    dataUrl?: string;
-    kind?: StoredMedia["kind"];
-    mimeType?: string;
 };
 
 type StorageSnapshot = {
@@ -568,44 +569,6 @@ const isProvider = (value: unknown): value is Provider =>
 
 const isMode = (value: unknown): value is Mode =>
     value === "image" || value === "video" || value === "tts";
-
-const sanitizeGeneratedImages = (value: unknown): GeneratedImage[] => {
-    if (!Array.isArray(value)) return [];
-    return value
-        .map((item) => {
-            if (!isRecord(item)) return null;
-            const dataUrl = getString(item.dataUrl);
-            if (!dataUrl) return null;
-            const mimeType = getString(item.mimeType, "image/png");
-            const id = getString(item.id, createId());
-            const model = getString(item.model);
-            const prompt = getString(item.prompt);
-            const provider = isProvider(item.provider) ? item.provider : undefined;
-            const batchId = getString(item.batchId);
-            const batchCreatedAt = getString(item.batchCreatedAt);
-            const batchOrder =
-                typeof item.batchOrder === "number" ? item.batchOrder : undefined;
-            const imageOrder =
-                typeof item.imageOrder === "number" ? item.imageOrder : undefined;
-            const createdAt = getString(item.createdAt);
-
-            return {
-                id,
-                dataUrl,
-                mimeType,
-                ...(model ? { model } : {}),
-                ...(prompt ? { prompt } : {}),
-                ...(provider ? { provider } : {}),
-                ...(batchId ? { batchId } : {}),
-                ...(batchCreatedAt ? { batchCreatedAt } : {}),
-                ...(typeof batchOrder === "number" ? { batchOrder } : {}),
-                ...(typeof imageOrder === "number" ? { imageOrder } : {}),
-                ...(createdAt ? { createdAt } : {}),
-            };
-        })
-        .filter((item): item is GeneratedImage => !!item)
-        .slice(0, MAX_SAVED_MEDIA);
-};
 
 const sanitizeModelSelections = (value: unknown): Record<string, string> => {
     if (!isRecord(value)) return {};
@@ -1438,22 +1401,27 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         try {
             const entries: StoredMedia[] = [];
             for (const item of items) {
+                const safeUrl = sanitizeMediaUrl(item.url, {
+                    kind: metadata.kind,
+                    allowBlob: true,
+                });
+                if (!safeUrl) continue;
                 const id = createId();
                 let blob = item.blob;
                 let mimeType = item.mimeType;
                 const model = item.model ?? metadata.model;
                 if (!idbAvailable) {
-                    entries.push({ id, dataUrl: item.url, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
+                    entries.push({ id, dataUrl: safeUrl, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
                     continue;
                 }
                 if (!blob) {
                     try {
-                        const response = await fetch(item.url);
+                        const response = await fetch(safeUrl);
                         if (!response.ok) throw new Error("Fetch failed");
                         blob = await response.blob();
                         mimeType = mimeType ?? blob.type;
                     } catch {
-                        entries.push({ id, dataUrl: item.url, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
+                        entries.push({ id, dataUrl: safeUrl, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType });
                         continue;
                     }
                 }
@@ -1883,17 +1851,28 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 },
             });
 
-            const finalizedImages = images.map((image, index) => ({
-                ...image,
-                model: job.model,
-                provider: job.provider,
-                prompt: job.prompt,
-                batchId: job.batchId,
-                batchCreatedAt: job.batchCreatedAt ?? job.createdAt,
-                batchOrder: job.batchOrder ?? 0,
-                imageOrder: index,
-                createdAt: new Date().toISOString(),
-            }));
+            const finalizedImages = images.flatMap((image, index) => {
+                const dataUrl = sanitizeMediaUrl(image.dataUrl, {
+                    kind: "image",
+                    allowBlob: true,
+                });
+                if (!dataUrl) return [];
+                return [{
+                    ...image,
+                    dataUrl,
+                    model: job.model,
+                    provider: job.provider,
+                    prompt: job.prompt,
+                    batchId: job.batchId,
+                    batchCreatedAt: job.batchCreatedAt ?? job.createdAt,
+                    batchOrder: job.batchOrder ?? 0,
+                    imageOrder: index,
+                    createdAt: new Date().toISOString(),
+                }];
+            });
+            if (!finalizedImages.length) {
+                throw new Error("The model returned no safe image URLs.");
+            }
 
             for (let index = 0; index < finalizedImages.length; index += 1) {
                 const image = finalizedImages[index];
@@ -1908,7 +1887,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 await yieldToPaint();
             }
             const galleryEntries = await addMediaToGallery(
-                images.map((image) => ({ url: image.dataUrl, mimeType: image.mimeType })),
+                finalizedImages.map((image) => ({ url: image.dataUrl, mimeType: image.mimeType })),
                 {
                     prompt: job.prompt,
                     model: job.model,
@@ -2428,7 +2407,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 videoUrl = URL.createObjectURL(blob);
             }
 
-            if (!videoUrl) throw new Error("No video data received.");
+            const safeVideoUrl = sanitizeMediaUrl(videoUrl, {
+                kind: "video",
+                allowBlob: true,
+            });
+            if (!safeVideoUrl) {
+                throw new Error("Video provider returned no safe media.");
+            }
+            videoUrl = safeVideoUrl;
 
             setVideoUrl(videoUrl);
             const galleryEntries = await addMediaToGallery(
@@ -2527,7 +2513,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     audioMime = blob.type;
                 }
 
-                if (!audioDataUrl) throw new Error("No audio data received.");
+                const safeAudioUrl = sanitizeMediaUrl(audioDataUrl, {
+                    kind: "audio",
+                    allowBlob: true,
+                });
+                if (!safeAudioUrl) {
+                    throw new Error("Audio provider returned no safe media.");
+                }
+                audioDataUrl = safeAudioUrl;
 
                 setAudioUrl(audioDataUrl);
                 setAudioMimeType(audioMime);
@@ -2578,7 +2571,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                     throw new Error("No audio data received.");
                 }
 
-                const audioDataUrl = dataUrlFromBase64(audio.data, audio.mimeType);
+                const audioDataUrl = sanitizeMediaUrl(
+                    dataUrlFromBase64(audio.data, audio.mimeType),
+                    { kind: "audio" }
+                );
+                if (!audioDataUrl) {
+                    throw new Error("Audio provider returned no safe media.");
+                }
                 setAudioUrl(audioDataUrl);
                 setAudioMimeType(audio.mimeType);
                 const galleryEntries = await addMediaToGallery(
@@ -3249,7 +3248,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setHydrated(true);
         const storedProvider = readLocalStorage<Provider | null>(STORAGE_KEYS.provider, null);
         const storedMode = readLocalStorage<Mode | null>(STORAGE_KEYS.mode, null);
-        const storedMedia = readLocalStorage<StoredMediaRecord[]>(STORAGE_KEYS.images, []);
+        const storedMediaPartition = partitionStoredMediaRecords(
+            readLocalStorage<unknown>(STORAGE_KEYS.images, [])
+        );
+        const storedMedia = storedMediaPartition.accepted;
         const storedChatProvider = readLocalStorage<ChatProvider | null>(STORAGE_KEYS.chatProvider, null);
         const storedKeyStorageMode = readKeyStorageMode();
         const storedKeys = readProviderKeys(storedKeyStorageMode);
@@ -3257,9 +3259,28 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             ? []
             : detectLegacyProviderKeys();
         const storedSettings = readLocalStorage<StoredSettings>(STORAGE_KEYS.settings, {});
-        const storedGeneratedImages = readLocalStorage<GeneratedImage[]>(STORAGE_KEYS.generatedImages, []);
+        const storedGeneratedImagesPartition = partitionGeneratedImages(
+            readLocalStorage<unknown>(STORAGE_KEYS.generatedImages, []),
+            MAX_SAVED_MEDIA
+        );
+        const storedGeneratedImages = storedGeneratedImagesPartition.accepted;
         const storedLastOutput = readLocalStorage<unknown>(STORAGE_KEYS.lastOutput, null);
         const storedSelectedReferences = readLocalStorage<string[]>(STORAGE_KEYS.selectedReferences, []);
+
+        try {
+            backupAndPruneUnsafeMediaRecords(
+                window.localStorage,
+                STORAGE_KEYS.images,
+                storedMediaPartition
+            );
+            backupAndPruneUnsafeMediaRecords(
+                window.localStorage,
+                STORAGE_KEYS.generatedImages,
+                storedGeneratedImagesPartition
+            );
+        } catch {
+            // Unsafe entries remain blocked in memory if browser storage is unavailable.
+        }
 
         if (storedProvider) setProvider(storedProvider);
         if (storedMode) setMode(storedMode);
@@ -3481,8 +3502,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             if (storedChutesTtsMaxDuration) setChutesTtsMaxDuration(storedChutesTtsMaxDuration);
         }
 
-        const sanitizedImages = sanitizeGeneratedImages(storedGeneratedImages);
-        if (sanitizedImages.length) setGeneratedImages(sanitizedImages);
+        if (storedGeneratedImages.length) setGeneratedImages(storedGeneratedImages);
 
         if (isRecord(storedLastOutput)) {
             const mode = storedLastOutput.mode;
