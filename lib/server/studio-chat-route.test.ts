@@ -1,111 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  parseJsonEventStream,
-  readUIMessageStream,
-  uiMessageChunkSchema,
-  type UIMessage,
-} from "ai";
+  completionChunk,
+  completedResponsesEvent,
+  readFinalUIMessage,
+  readUIChunks,
+  responsesTextEvents,
+  upstreamResponsesStream,
+  upstreamStream,
+} from "./studio-chat-route-test-support.ts";
 
 import { POST as studioChatPost } from "../../app/api/studio/chat/route.ts";
-
-const completionChunk = (
-  delta: Record<string, unknown>,
-  finishReason: string | null = null
-) =>
-  JSON.stringify({
-    id: "chatcmpl_test",
-    object: "chat.completion.chunk",
-    created: 1,
-    model: "test-model",
-    choices: [{ index: 0, delta, finish_reason: finishReason }],
-  });
-
-const upstreamStream = (chunks: string[]) =>
-  new Response(
-    `${chunks.map((chunk) => `data: ${chunk}\n\n`).join("")}data: [DONE]\n\n`,
-    { headers: { "content-type": "text/event-stream" } }
-  );
-
-const upstreamResponsesStream = (events: Record<string, unknown>[]) =>
-  new Response(
-    events
-      .map(
-        (event) =>
-          `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`
-      )
-      .join(""),
-    { headers: { "content-type": "text/event-stream" } }
-  );
-
-const completedResponsesEvent = () => ({
-  type: "response.completed",
-  response: {
-    usage: {
-      input_tokens: 12,
-      input_tokens_details: { cached_tokens: 0 },
-      output_tokens: 8,
-      output_tokens_details: { reasoning_tokens: 0 },
-    },
-  },
-});
-
-const responsesTextEvents = (text: string, model: string) => [
-  {
-    type: "response.created",
-    response: {
-      id: "resp_test",
-      created_at: 1,
-      model,
-    },
-  },
-  {
-    type: "response.output_item.added",
-    output_index: 0,
-    item: { type: "message", id: "msg_test" },
-  },
-  {
-    type: "response.output_text.delta",
-    item_id: "msg_test",
-    delta: text,
-  },
-  {
-    type: "response.output_item.done",
-    output_index: 0,
-    item: { type: "message", id: "msg_test" },
-  },
-  completedResponsesEvent(),
-];
-
-const readUIChunks = async (response: Response) =>
-  (await response.text())
-    .split("\n")
-    .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
-    .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>);
-
-const readFinalUIMessage = async (response: Response) => {
-  assert.ok(response.body);
-  const chunks = parseJsonEventStream({
-    stream: response.body,
-    schema: uiMessageChunkSchema,
-  }).pipeThrough(
-    new TransformStream({
-      transform(chunk, controller) {
-        if (!chunk.success) throw chunk.error;
-        controller.enqueue(chunk.value);
-      },
-    })
-  );
-  let finalMessage: UIMessage | undefined;
-  for await (const message of readUIMessageStream({
-    stream: chunks,
-    terminateOnError: true,
-  })) {
-    finalMessage = message;
-  }
-  assert.ok(finalMessage);
-  return finalMessage;
-};
 
 test("Studio chat uses AI SDK tool streaming and provider defaults", async () => {
   const originalFetch = globalThis.fetch;
@@ -228,7 +133,6 @@ test("Studio chat uses AI SDK tool streaming and provider defaults", async () =>
     globalThis.fetch = originalFetch;
   }
 });
-
 test("Studio chat retries Navy reasoning envelopes without dropping tools", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
@@ -1006,114 +910,5 @@ test("Studio chat only repairs double-encoded valid tool JSON", async () => {
     assert.deepEqual(repaired.input, { prompt: "a lighthouse" });
   } finally {
     globalThis.fetch = originalFetch;
-  }
-});
-
-test("Studio chat routes MultiLLM through the configured proxy and server key", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalKey = process.env.MULTILLM_API_KEY;
-  const originalBaseUrl = process.env.PROXY_BASE_URL;
-  const requests: Array<{ url: string; authorization: string | null }> = [];
-  process.env.MULTILLM_API_KEY = "server-multillm-secret";
-  process.env.PROXY_BASE_URL = "https://proxy.example.test";
-  globalThis.fetch = async (input, init) => {
-    requests.push({
-      url: String(input),
-      authorization: new Headers(init?.headers).get("authorization"),
-    });
-    return upstreamStream([
-      completionChunk(
-        { role: "assistant", content: "Proxy response." },
-        "stop"
-      ),
-    ]);
-  };
-
-  try {
-    const response = await studioChatPost(
-      new Request("https://studio.test/api/studio/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          provider: "multillm",
-          model: "opencode:deepseek-v4-flash",
-          messages: [{ role: "user", content: "Hello." }],
-          enabledTools: [],
-        }),
-      })
-    );
-    const chunks = await readUIChunks(response);
-
-    assert.equal(response.status, 200);
-    assert.equal(
-      requests[0]?.url,
-      "https://proxy.example.test/v1/chat/completions"
-    );
-    assert.equal(
-      requests[0]?.authorization,
-      "Bearer server-multillm-secret"
-    );
-    assert.ok(chunks.some((chunk) => chunk.type === "text-delta"));
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalKey === undefined) delete process.env.MULTILLM_API_KEY;
-    else process.env.MULTILLM_API_KEY = originalKey;
-    if (originalBaseUrl === undefined) delete process.env.PROXY_BASE_URL;
-    else process.env.PROXY_BASE_URL = originalBaseUrl;
-  }
-});
-
-test("Studio chat routes LinkAPI Luna through its provider-specific proxy path", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalKey = process.env.MULTILLM_API_KEY;
-  const originalBaseUrl = process.env.PROXY_BASE_URL;
-  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
-  process.env.MULTILLM_API_KEY = "server-multillm-secret";
-  process.env.PROXY_BASE_URL = "https://proxy.example.test";
-  globalThis.fetch = async (input, init) => {
-    requests.push({
-      url: String(input),
-      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-    });
-    return upstreamResponsesStream(
-      responsesTextEvents("Luna response.", "gpt-5.6-luna")
-    );
-  };
-
-  try {
-    const response = await studioChatPost(
-      new Request("https://studio.test/api/studio/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          provider: "multillm",
-          model: "linkapi:gpt-5.6-luna",
-          messages: [{ role: "user", content: "Hello." }],
-          enabledTools: [],
-        }),
-      })
-    );
-    const chunks = await readUIChunks(response);
-
-    assert.equal(response.status, 200);
-    assert.equal(
-      requests[0]?.url,
-      "https://proxy.example.test/linkapi/v1/responses"
-    );
-    assert.equal(requests[0]?.body.model, "gpt-5.6-luna");
-    assert.deepEqual(requests[0]?.body.input, [
-      {
-        role: "user",
-        content: [{ type: "input_text", text: "Hello." }],
-      },
-    ]);
-    assert.equal(requests[0]?.body.store, false);
-    assert.ok(chunks.some((chunk) => chunk.type === "text-delta"));
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalKey === undefined) delete process.env.MULTILLM_API_KEY;
-    else process.env.MULTILLM_API_KEY = originalKey;
-    if (originalBaseUrl === undefined) delete process.env.PROXY_BASE_URL;
-    else process.env.PROXY_BASE_URL = originalBaseUrl;
   }
 });
