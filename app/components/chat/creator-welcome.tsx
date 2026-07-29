@@ -88,21 +88,21 @@ export function CreatorWelcome({
                 variant="ghost"
                 onClick={() => onSelectIntent(starter.intent)}
                 disabled={!enabled}
-                className="group h-16 justify-start rounded-none border-b border-border px-0 py-4 text-left hover:bg-transparent"
+                className="group h-16 justify-start rounded-none border-b border-border px-2 py-4 text-left text-foreground hover:bg-primary/10 hover:text-primary"
                 title={
                   enabled
                     ? starter.label
                     : `${starter.label} is unavailable with the current setup`
                 }
               >
-                <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground transition-colors duration-150 group-hover:bg-accent">
+                <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground transition-colors duration-150 group-hover:bg-primary group-hover:text-primary-foreground">
                   <Icon className="h-5 w-5" aria-hidden="true" />
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground transition-colors group-hover:text-primary">
                   {starter.label}
                 </span>
                 <ArrowUpRight
-                  className="ml-3 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                  className="ml-3 h-4 w-4 shrink-0 text-muted-foreground transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-primary"
                   aria-hidden="true"
                 />
               </Button>

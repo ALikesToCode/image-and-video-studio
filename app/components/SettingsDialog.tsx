@@ -92,7 +92,12 @@ export function SettingsDialog() {
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" title="Settings">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    title="Settings"
+                    aria-label="Settings"
+                >
                     <Settings className="h-5 w-5" />
                 </Button>
             </DialogTrigger>

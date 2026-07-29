@@ -203,7 +203,7 @@ export function VideoGenView() {
                             <div
                                 className={cn(
                                     "relative overflow-hidden rounded-2xl border-2 border-dashed transition-[background-color,border-color] duration-200",
-                                    isDragging ? "border-primary bg-primary/5" : "border-border/50 hover:border-border",
+                                    isDragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/45 hover:bg-primary/5",
                                     !videoImage ? "aspect-[16/9] flex items-center justify-center cursor-pointer bg-muted/20" : "aspect-auto"
                                 )}
                                 onDragOver={onDragOver}

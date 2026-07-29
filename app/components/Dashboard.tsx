@@ -302,7 +302,7 @@ export function Dashboard() {
                                             "h-14 flex-col gap-1 rounded-xl px-1 text-[10px]",
                                             isActive
                                                 ? "bg-primary text-primary-foreground shadow-sm"
-                                                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                                                : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
                                         )}
                                         onClick={() => setActiveTab(tab.id)}
                                         title={tab.label}
@@ -352,8 +352,8 @@ function NavButton({
                 "relative h-11 w-full rounded-lg transition-[background-color,color,box-shadow,transform] duration-150",
                 collapsed ? "justify-center px-0" : "justify-start px-3",
                 active
-                    ? "bg-accent text-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    ? "bg-primary/10 text-primary shadow-sm"
+                    : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
             )}
             onClick={onClick}
             title={collapsed ? label : undefined}

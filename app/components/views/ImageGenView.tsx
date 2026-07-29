@@ -503,7 +503,7 @@ export function ImageGenView() {
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => setClearConfirmOpen(true)}
-                                    className="min-h-10 gap-2 text-muted-foreground hover:text-destructive"
+                                    className="min-h-10 gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                 >
                                     <Trash2 className="h-4 w-4" />
                                     Clear Session
@@ -539,7 +539,7 @@ export function ImageGenView() {
                                                     context.setPrompt(starter);
                                                     scrollToComposer();
                                                 }}
-                                                className="min-h-11 rounded-xl border border-border/60 bg-background/70 p-3 text-left text-xs leading-relaxed text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                className="min-h-11 rounded-xl border border-border bg-background p-3 text-left text-xs leading-relaxed text-muted-foreground transition-colors hover:border-primary/45 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                             >
                                                 <span className="mb-1 block font-semibold text-foreground">
                                                     {index === 0 ? "Editorial portrait" : index === 1 ? "Product studio" : "Graphic poster"}
