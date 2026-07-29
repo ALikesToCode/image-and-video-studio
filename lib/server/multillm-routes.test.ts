@@ -126,7 +126,7 @@ test("MultiLLM sends LinkAPI Luna chat through the provider route", async () => 
       async (input, init) => {
         assert.equal(
           String(input),
-          "https://proxy.test/linkapi/v1/chat/completions"
+          "https://proxy.test/linkapi/v1/responses"
         );
         assert.equal(
           new Headers(init?.headers).get("authorization"),
@@ -134,7 +134,7 @@ test("MultiLLM sends LinkAPI Luna chat through the provider route", async () => 
         );
         upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return new Response(
-          'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: [DONE]\n\n',
+          'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
           { headers: { "content-type": "text/event-stream" } }
         );
       },
@@ -155,10 +155,10 @@ test("MultiLLM sends LinkAPI Luna chat through the provider route", async () => 
         assert.equal(response.status, 200);
         assert.deepEqual(upstreamBody, {
           model: "gpt-5.6-luna",
-          messages: [{ role: "user", content: "Hello." }],
+          input: [{ role: "user", content: "Hello." }],
           stream: true,
-          max_tokens: 300,
-          temperature: 0.7,
+          store: false,
+          max_output_tokens: 300,
         });
       }
     );

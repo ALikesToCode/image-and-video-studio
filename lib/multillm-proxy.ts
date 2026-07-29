@@ -67,12 +67,14 @@ export const resolveMultiLlmChatTarget = (modelRef: string) => {
       model: normalizedModel.slice(linkApiPrefix.length),
       basePath: "/linkapi/v1",
       completionPath: "/linkapi/v1/chat/completions",
+      responsesPath: "/linkapi/v1/responses",
     };
   }
   return {
     model: normalizedModel,
     basePath: "/v1",
     completionPath: "/v1/chat/completions",
+    responsesPath: "/v1/responses",
   };
 };
 

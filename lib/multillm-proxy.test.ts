@@ -57,11 +57,13 @@ test("routes LinkAPI chat models through the provider-specific endpoint", () => 
     model: "gpt-5.6-luna",
     basePath: "/linkapi/v1",
     completionPath: "/linkapi/v1/chat/completions",
+    responsesPath: "/linkapi/v1/responses",
   });
   assert.deepEqual(resolveMultiLlmChatTarget("opencode:deepseek-v4-flash"), {
     model: "opencode:deepseek-v4-flash",
     basePath: "/v1",
     completionPath: "/v1/chat/completions",
+    responsesPath: "/v1/responses",
   });
 });
 

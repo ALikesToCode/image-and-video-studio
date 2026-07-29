@@ -89,11 +89,11 @@ import {
   isFetchedOnlyModel,
 } from "@/lib/model-options";
 import { buildChatGenerationSystemPrompt } from "@/lib/chat-generation-prompt";
+import { readAssistantTextResponse } from "@/lib/client/chat-stream-text";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { createParser, type EventSourceMessage } from "eventsource-parser";
 import {
   deleteStudioState,
   getStudioState,
@@ -755,23 +755,6 @@ function ModelSearchSelect({
     </div>
   );
 }
-
-const extractTextFragment = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((item) => extractTextFragment(item)).join("");
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return (
-      extractTextFragment(record.text) ||
-      extractTextFragment(record.content) ||
-      extractTextFragment(record.output_text) ||
-      ""
-    );
-  }
-  return "";
-};
 
 export const sanitizeChatMessages = (value: unknown): ChatMessage[] => {
   if (!Array.isArray(value)) return [];
@@ -1764,67 +1747,6 @@ export function ChutesChat({
       toolCalls: finalState.toolCalls,
     };
   };
-  const readAssistantTextResponse = async (response: Response) => {
-    if (!response.body) {
-      throw new Error("No response body.");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let contentAcc = "";
-    let rawAcc = "";
-    const parser = createParser({
-      onEvent: (event: EventSourceMessage) => {
-        if (event.data === "[DONE]") return;
-        try {
-          const json = JSON.parse(event.data);
-          const choice = json.choices?.[0];
-          const delta =
-            choice?.delta && typeof choice.delta === "object"
-              ? (choice.delta as Record<string, unknown>)
-              : null;
-          const message =
-            choice?.message && typeof choice.message === "object"
-              ? (choice.message as Record<string, unknown>)
-              : null;
-          contentAcc +=
-            extractTextFragment(delta?.content) ||
-            extractTextFragment(message?.content) ||
-            "";
-        } catch {
-          // Ignore malformed stream chunks; callers fall back if no text arrives.
-        }
-      },
-    });
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        rawAcc += chunk;
-        parser.feed(chunk);
-      }
-      const finalChunk = decoder.decode();
-      if (finalChunk) {
-        rawAcc += finalChunk;
-        parser.feed(finalChunk);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-
-    if (contentAcc.trim()) return contentAcc.trim();
-    const raw = rawAcc.trim();
-    if (!raw.startsWith("{")) return "";
-    try {
-      const json = JSON.parse(raw);
-      return extractTextFragment(json?.choices?.[0]?.message?.content).trim();
-    } catch {
-      return "";
-    }
-  };
-
   const normalizeRecoveredImagePrompt = (value: string) => {
     const trimmed = value
       .trim()

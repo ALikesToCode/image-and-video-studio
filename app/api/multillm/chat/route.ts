@@ -5,6 +5,10 @@ import {
   resolveMultiLlmChatTarget,
   resolveMultiLlmApiKey,
 } from "@/lib/multillm-proxy";
+import {
+  buildOpenAIResponsesPayload,
+  shouldUseOpenAIResponses,
+} from "@/lib/openai-responses";
 
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
@@ -17,6 +21,7 @@ type ChatRequest = {
   toolChoice?: unknown;
   maxTokens?: number;
   temperature?: number;
+  reasoningEffort?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -49,20 +54,37 @@ export async function POST(request: Request) {
     return Response.json({ error: "model is required." }, { status: 400 });
   }
 
-  const payload: Record<string, unknown> = {
-    model: target.model,
-    messages: body.messages,
-    stream: true,
-  };
-  if (body.tools?.length) payload.tools = body.tools;
-  if (body.toolChoice !== undefined) payload.tool_choice = body.toolChoice;
-  if (Number.isFinite(body.maxTokens)) payload.max_tokens = body.maxTokens;
-  if (Number.isFinite(body.temperature)) {
-    payload.temperature = body.temperature;
-  }
+  const useResponses = shouldUseOpenAIResponses("multillm", body.model);
+  const payload = useResponses
+    ? buildOpenAIResponsesPayload({
+        model: target.model,
+        messages: body.messages,
+        tools: body.tools,
+        toolChoice: body.toolChoice,
+        maxTokens: body.maxTokens,
+        temperature: body.temperature,
+        reasoningEffort: body.reasoningEffort,
+      })
+    : {
+        model: target.model,
+        messages: body.messages,
+        stream: true,
+        ...(body.tools?.length ? { tools: body.tools } : {}),
+        ...(body.toolChoice !== undefined
+          ? { tool_choice: body.toolChoice }
+          : {}),
+        ...(Number.isFinite(body.maxTokens)
+          ? { max_tokens: body.maxTokens }
+          : {}),
+        ...(Number.isFinite(body.temperature)
+          ? { temperature: body.temperature }
+          : {}),
+      };
 
   const response = await fetch(
-    `${getMultiLlmProxyBaseUrl()}${target.completionPath}`,
+    `${getMultiLlmProxyBaseUrl()}${
+      useResponses ? target.responsesPath : target.completionPath
+    }`,
     {
       method: "POST",
       headers: multiLlmAuthorizationHeaders(apiKey, "application/json"),

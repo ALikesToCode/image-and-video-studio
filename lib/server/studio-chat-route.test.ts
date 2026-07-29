@@ -27,6 +27,56 @@ const upstreamStream = (chunks: string[]) =>
     { headers: { "content-type": "text/event-stream" } }
   );
 
+const upstreamResponsesStream = (events: Record<string, unknown>[]) =>
+  new Response(
+    events
+      .map(
+        (event) =>
+          `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`
+      )
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } }
+  );
+
+const completedResponsesEvent = () => ({
+  type: "response.completed",
+  response: {
+    usage: {
+      input_tokens: 12,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 8,
+      output_tokens_details: { reasoning_tokens: 0 },
+    },
+  },
+});
+
+const responsesTextEvents = (text: string, model: string) => [
+  {
+    type: "response.created",
+    response: {
+      id: "resp_test",
+      created_at: 1,
+      model,
+    },
+  },
+  {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { type: "message", id: "msg_test" },
+  },
+  {
+    type: "response.output_text.delta",
+    item_id: "msg_test",
+    delta: text,
+  },
+  {
+    type: "response.output_item.done",
+    output_index: 0,
+    item: { type: "message", id: "msg_test" },
+  },
+  completedResponsesEvent(),
+];
+
 const readUIChunks = async (response: Response) =>
   (await response.text())
     .split("\n")
@@ -70,32 +120,41 @@ test("Studio chat uses AI SDK tool streaming and provider defaults", async () =>
       headers: new Headers(init?.headers),
       body: JSON.parse(String(init?.body)) as Record<string, unknown>,
     });
-    return upstreamStream([
-      completionChunk({ role: "assistant", content: "I’ll generate that. " }),
-      completionChunk({
-        tool_calls: [
-          {
-            index: 0,
-            id: "call_image_1",
-            type: "function",
-            function: {
-              name: "generate_image",
-              arguments: '{"prompt":"a moonlit',
-            },
-          },
-        ],
-      }),
-      completionChunk(
-        {
-          tool_calls: [
-            {
-              index: 0,
-              function: { arguments: ' harbor"}' },
-            },
-          ],
+    return upstreamResponsesStream([
+      ...responsesTextEvents(
+        "I’ll generate that. ",
+        "openai/gpt-5-mini"
+      ).slice(0, -1),
+      {
+        type: "response.output_item.added",
+        output_index: 1,
+        item: {
+          type: "function_call",
+          id: "fc_image_1",
+          call_id: "call_image_1",
+          name: "generate_image",
+          arguments: "",
         },
-        "tool_calls"
-      ),
+      },
+      {
+        type: "response.function_call_arguments.delta",
+        item_id: "fc_image_1",
+        output_index: 1,
+        delta: '{"prompt":"a moonlit harbor"}',
+      },
+      {
+        type: "response.output_item.done",
+        output_index: 1,
+        item: {
+          type: "function_call",
+          id: "fc_image_1",
+          call_id: "call_image_1",
+          name: "generate_image",
+          arguments: '{"prompt":"a moonlit harbor"}',
+          status: "completed",
+        },
+      },
+      completedResponsesEvent(),
     ]);
   };
 
@@ -132,20 +191,30 @@ test("Studio chat uses AI SDK tool streaming and provider defaults", async () =>
       "v1"
     );
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, "https://api.navy/v1/chat/completions");
+    assert.equal(requests[0].url, "https://api.navy/v1/responses");
     assert.equal(requests[0].headers.get("authorization"), "Bearer navy-secret");
     assert.equal("temperature" in requests[0].body, false);
     assert.deepEqual(
       (requests[0].body.tools as Array<Record<string, unknown>>).map((tool) => {
-        const fn = tool.function as Record<string, unknown>;
-        return fn.name;
+        return tool.name;
       }),
       ["generate_image", "generate_video"]
     );
     assert.deepEqual(requests[0].body.tool_choice, {
       type: "function",
-      function: { name: "generate_image" },
+      name: "generate_image",
     });
+    assert.equal(requests[0].body.max_output_tokens, 1024);
+    assert.equal(requests[0].body.store, false);
+    assert.deepEqual(requests[0].body.input, [
+      { role: "developer", content: "Use tools when requested." },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "Generate a harbor image." },
+        ],
+      },
+    ]);
     assert.ok(chunks.some((chunk) => chunk.type === "text-delta"));
     assert.ok(
       chunks.some(
@@ -229,26 +298,17 @@ test("Studio chat retries Navy reasoning envelopes without dropping tools", asyn
   }
 });
 
-test("Studio chat retries reasoning-incompatible tool calls with reasoning disabled", async () => {
+test("Studio chat keeps reasoning and tools together on the Responses API", async () => {
   const originalFetch = globalThis.fetch;
+  const requestUrls: string[] = [];
   const requestBodies: Record<string, unknown>[] = [];
-  globalThis.fetch = async (_input, init) => {
+  globalThis.fetch = async (input, init) => {
+    requestUrls.push(String(input));
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     requestBodies.push(body);
-    if (requestBodies.length === 1) {
-      return Response.json(
-        {
-          error: {
-            message:
-              "Function tools with reasoning_effort are not supported for gpt-5.6-terra in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
-          },
-        },
-        { status: 400 }
-      );
-    }
-    return upstreamStream([
-      completionChunk({ role: "assistant", content: "Recovered." }, "stop"),
-    ]);
+    return upstreamResponsesStream(
+      responsesTextEvents("Ready.", "gpt-5.6-terra")
+    );
   };
 
   try {
@@ -274,13 +334,16 @@ test("Studio chat retries reasoning-incompatible tool calls with reasoning disab
     );
     await response.text();
 
-    assert.equal(requestBodies.length, 2);
-    assert.equal(requestBodies[0].reasoning_effort, "high");
-    assert.equal(requestBodies[1].reasoning_effort, "none");
-    assert.equal("tools" in requestBodies[1], true);
-    assert.deepEqual(requestBodies[1].tool_choice, {
+    assert.deepEqual(requestUrls, ["https://api.navy/v1/responses"]);
+    assert.equal(requestBodies.length, 1);
+    assert.deepEqual(requestBodies[0].reasoning, {
+      effort: "high",
+      summary: "detailed",
+    });
+    assert.equal("tools" in requestBodies[0], true);
+    assert.deepEqual(requestBodies[0].tool_choice, {
       type: "function",
-      function: { name: "generate_image" },
+      name: "generate_image",
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -1012,12 +1075,9 @@ test("Studio chat routes LinkAPI Luna through its provider-specific proxy path",
       url: String(input),
       body: JSON.parse(String(init?.body)) as Record<string, unknown>,
     });
-    return upstreamStream([
-      completionChunk(
-        { role: "assistant", content: "Luna response." },
-        "stop"
-      ),
-    ]);
+    return upstreamResponsesStream(
+      responsesTextEvents("Luna response.", "gpt-5.6-luna")
+    );
   };
 
   try {
@@ -1038,9 +1098,16 @@ test("Studio chat routes LinkAPI Luna through its provider-specific proxy path",
     assert.equal(response.status, 200);
     assert.equal(
       requests[0]?.url,
-      "https://proxy.example.test/linkapi/v1/chat/completions"
+      "https://proxy.example.test/linkapi/v1/responses"
     );
     assert.equal(requests[0]?.body.model, "gpt-5.6-luna");
+    assert.deepEqual(requests[0]?.body.input, [
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "Hello." }],
+      },
+    ]);
+    assert.equal(requests[0]?.body.store, false);
     assert.ok(chunks.some((chunk) => chunk.type === "text-delta"));
   } finally {
     globalThis.fetch = originalFetch;

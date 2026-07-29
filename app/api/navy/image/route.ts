@@ -16,6 +16,11 @@ import {
   parseDataUrl,
 } from "@/lib/studio-validation";
 import {
+  buildOpenAIResponsesPayload,
+  extractOpenAIResponseText,
+  isOpenAIResponsesModel,
+} from "@/lib/openai-responses";
+import {
   buildSaferImagePromptForModel,
   buildNavyImageGenerationPayload,
   isNavyGenerationFailed,
@@ -83,6 +88,8 @@ Return only the final rewritten image prompt, with no markdown, labels, quotes, 
 };
 
 const extractPromptAgentContent = (data: unknown) => {
+  const responseText = extractOpenAIResponseText(data);
+  if (responseText) return responseText;
   if (!data || typeof data !== "object") return "";
   const record = data as Record<string, unknown>;
   const choices = Array.isArray(record.choices) ? record.choices : [];
@@ -111,24 +118,40 @@ const rewritePromptWithPromptAgent = async ({
   if (!supportsSaferImagePromptRetry(model)) return prompt;
   const agentModel = promptAgentModel?.trim();
   if (!agentModel) return prompt;
+  const messages = [
+    { role: "system", content: promptAgentSystemPrompt(model) },
+    { role: "user", content: prompt },
+  ];
+  const useResponses = isOpenAIResponsesModel(agentModel);
 
   try {
-    const response = await fetch("https://api.navy/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: agentModel,
-        stream: false,
-        max_tokens: 700,
-        messages: [
-          { role: "system", content: promptAgentSystemPrompt(model) },
-          { role: "user", content: prompt },
-        ],
-      }),
-    });
+    const response = await fetch(
+      `https://api.navy/v1/${
+        useResponses ? "responses" : "chat/completions"
+      }`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(
+          useResponses
+            ? buildOpenAIResponsesPayload({
+                model: agentModel,
+                messages,
+                maxTokens: 700,
+                stream: false,
+              })
+            : {
+                model: agentModel,
+                stream: false,
+                max_tokens: 700,
+                messages,
+              }
+        ),
+      }
+    );
 
     if (!response.ok) return prompt;
     const rewritten = extractPromptAgentContent(await jsonOrNull(response));

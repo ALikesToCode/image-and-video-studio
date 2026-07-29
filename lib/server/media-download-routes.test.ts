@@ -569,6 +569,80 @@ test("Navy image route uses a prompt agent before strict-filter image models", a
   }
 });
 
+test("Navy image route sends OpenAI prompt agents through the Responses API", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  let responseRequest: Record<string, unknown> = {};
+  let generatedPrompt = "";
+  globalThis.fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    calls.push(url);
+    const requestBody =
+      typeof init?.body === "string"
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : {};
+
+    if (url === "https://api.navy/v1/responses") {
+      responseRequest = requestBody;
+      return Response.json({
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: "A safe, detailed moonlit editorial portrait.",
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    if (url === "https://api.navy/v1/images/generations") {
+      generatedPrompt = String(requestBody.prompt ?? "");
+      return Response.json({ id: "job_responses_agent", status: "queued" });
+    }
+
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "gpt-image-2",
+          promptAgentModel: "gpt-5",
+          prompt: "Create a moonlit editorial portrait.",
+        }),
+      })
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, [
+      "https://api.navy/v1/responses",
+      "https://api.navy/v1/images/generations",
+    ]);
+    assert.equal(responseRequest.model, "gpt-5");
+    assert.equal(responseRequest.stream, false);
+    assert.equal(responseRequest.store, false);
+    assert.equal(responseRequest.max_output_tokens, 700);
+    assert.equal("messages" in responseRequest, false);
+    assert.ok(Array.isArray(responseRequest.input));
+    assert.match(
+      generatedPrompt,
+      /^A safe, detailed moonlit editorial portrait\./
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route treats poll rate limits as pending jobs", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

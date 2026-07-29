@@ -5,6 +5,10 @@ import {
   buildChatCompletionPayload,
   buildChatCompletionRecoveryPayloads,
 } from "@/lib/chat-tooling";
+import {
+  buildOpenAIResponsesPayload,
+  isOpenAIResponsesModel,
+} from "@/lib/openai-responses";
 
 type ChatRequest = {
   apiKey?: string;
@@ -33,10 +37,26 @@ const upstreamChatCompletion = (
     body: JSON.stringify(payload),
   });
 
+const upstreamResponse = (
+  apiKey: string,
+  payload: Record<string, unknown>,
+  signal: AbortSignal
+) =>
+  fetch("https://api.navy/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+    signal,
+  });
+
 const streamingResponse = (response: Response, recoveryLabel?: string) =>
   new Response(response.body, {
     headers: {
-      "Content-Type": "text/event-stream",
+      "Content-Type":
+        response.headers.get("content-type") ?? "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       ...(recoveryLabel ? { "x-studio-chat-recovery": recoveryLabel } : {}),
@@ -64,6 +84,34 @@ export async function POST(req: Request) {
   const apiKey = getUserApiKey(req, body);
   if (!apiKey || !model || !Array.isArray(messages)) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
+  }
+
+  if (isOpenAIResponsesModel(model)) {
+    const response = await upstreamResponse(
+      apiKey,
+      buildOpenAIResponsesPayload({
+        model,
+        messages,
+        tools,
+        toolChoice,
+        maxTokens,
+        temperature,
+        reasoningEffort,
+      }),
+      req.signal
+    );
+    if (!response.ok) {
+      const data = await jsonOrNull(response);
+      return Response.json(
+        {
+          error: providerErrorMessage(data, "Response generation failed.", [
+            apiKey,
+          ]),
+        },
+        { status: response.status }
+      );
+    }
+    return streamingResponse(response);
   }
 
   const payload = buildChatCompletionPayload({

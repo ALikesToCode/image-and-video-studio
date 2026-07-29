@@ -1,4 +1,5 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { createOpenAI } from "@ai-sdk/openai";
 import {
   createUIMessageStreamResponse,
   streamText,
@@ -24,6 +25,10 @@ import {
   resolveMultiLlmChatTarget,
   resolveMultiLlmApiKey,
 } from "../multillm-proxy.ts";
+import {
+  isOpenAIReasoningModel,
+  shouldUseOpenAIResponses,
+} from "../openai-responses.ts";
 
 type StudioChatProvider = "navy" | "chutes" | "nanogpt" | "multillm";
 
@@ -200,44 +205,65 @@ export async function handleAIStudioChatRequest(request: Request) {
   const multiLlmTarget =
     providerId === "multillm" ? resolveMultiLlmChatTarget(model) : undefined;
   const upstreamModel = multiLlmTarget?.model ?? model;
+  const baseURL =
+    providerId === "multillm"
+      ? `${getMultiLlmProxyBaseUrl()}${multiLlmTarget?.basePath ?? "/v1"}`
+      : PROVIDER_BASE_URLS[providerId];
+  const useOpenAIResponses = shouldUseOpenAIResponses(providerId, model);
 
   try {
-    const provider = createOpenAICompatible({
-      name: providerId,
-      apiKey,
-      baseURL:
-        providerId === "multillm"
-          ? `${getMultiLlmProxyBaseUrl()}${multiLlmTarget?.basePath ?? "/v1"}`
-          : PROVIDER_BASE_URLS[providerId],
-      includeUsage:
-        providerId === "navy" ||
-        providerId === "nanogpt" ||
-        providerId === "multillm",
-      fetch:
-        providerId === "navy"
-          ? recoveringNavyFetch
-          : providerId === "nanogpt"
-            ? recoveringNanoGptFetch
-            : providerId === "multillm"
-              ? recoveringMultiLlmFetch
-              : undefined,
-      supportedUrls: () => NATIVE_IMAGE_URLS,
-      transformRequestBody: (providerBody) =>
-        normalizeAIChatRequestBody({
-          model: upstreamModel,
-          body: providerBody,
-          thinking: body.thinking,
-          reasoningEffort: body.reasoningEffort,
-        }),
-    });
+    const languageModel = useOpenAIResponses
+      ? createOpenAI({
+          name: providerId,
+          apiKey,
+          baseURL,
+        }).responses(upstreamModel)
+      : createOpenAICompatible({
+          name: providerId,
+          apiKey,
+          baseURL,
+          includeUsage:
+            providerId === "navy" ||
+            providerId === "nanogpt" ||
+            providerId === "multillm",
+          fetch:
+            providerId === "navy"
+              ? recoveringNavyFetch
+              : providerId === "nanogpt"
+                ? recoveringNanoGptFetch
+                : providerId === "multillm"
+                  ? recoveringMultiLlmFetch
+                  : undefined,
+          supportedUrls: () => NATIVE_IMAGE_URLS,
+          transformRequestBody: (providerBody) =>
+            normalizeAIChatRequestBody({
+              model: upstreamModel,
+              body: providerBody,
+              thinking: body.thinking,
+              reasoningEffort: body.reasoningEffort,
+            }),
+        }).chatModel(upstreamModel);
     const result = streamText({
-      model: provider.chatModel(upstreamModel),
+      model: languageModel,
       ...(instructions ? { instructions } : {}),
       messages,
       tools,
       toolChoice,
       maxOutputTokens: maxOutputTokens(body.maxTokens),
       reasoning,
+      ...(useOpenAIResponses
+        ? {
+            providerOptions: {
+              openai: {
+                store: false,
+                forceReasoning: isOpenAIReasoningModel(model),
+                ...(reasoning !== undefined
+                  ? { reasoningEffort: reasoning }
+                  : {}),
+              },
+            },
+          }
+        : {}),
       experimental_repairToolCall: repairAIChatToolCall,
       abortSignal: request.signal,
       onError: () => undefined,
