@@ -35,6 +35,7 @@ import {
   ExternalLink,
   Square,
   Download,
+  SlidersHorizontal,
 } from "lucide-react";
 import { DefaultChatTransport, readUIMessageStream } from "ai";
 import { Button } from "@/app/components/ui/button";
@@ -146,6 +147,7 @@ import {
 } from "@/lib/studio-generation";
 import { extractPdfTextFromFile, isSupportedPdfFile } from "@/lib/client/pdf-text";
 import { ImageViewer } from "./image-viewer";
+import { CreatorWelcome } from "./chat/creator-welcome";
 import { mediaExtensionFromMimeType } from "@/lib/media-files";
 import {
   chatModelToolSupport,
@@ -614,9 +616,9 @@ function ModelSearchSelect({
         variant="ghost"
         onClick={() => setOpen((prev) => !prev)}
         className={cn(
-          "glass-card h-9 min-w-0 border-0 bg-secondary/50 text-sm font-normal",
+          "h-10 min-w-0 border border-border bg-background text-sm font-normal shadow-sm",
           compact
-            ? "w-9 justify-center px-0"
+            ? "w-10 justify-center px-0"
             : "justify-between px-3 sm:w-[240px]",
           triggerClassName,
         )}
@@ -873,10 +875,10 @@ function ThinkingBlock({ content }: { content: string }) {
       <AnimatePresence>
         {isExpanded && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16, ease: "easeOut" }}
           >
             <div className="p-3 pt-0 font-mono text-muted-foreground/70 whitespace-pre-wrap leading-relaxed border-t border-border/30 border-dashed">
               {content.trim()}
@@ -1031,6 +1033,7 @@ export function ChutesChat({
   const [copiedPromptMessageId, setCopiedPromptMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const consumedInitialInputRef = useRef<string | null>(null);
   const reasoningPreferenceModelRef = useRef("");
@@ -3613,6 +3616,11 @@ export function ChutesChat({
     setCustomSystemPrompt("");
   };
 
+  const selectCreatorIntent = (intent: ChatTurnIntent) => {
+    setTurnIntent(intent);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
   const embedBaseUrl = embedOrigin || "https://your-domain.example";
   const chatEmbedUrl = `${embedBaseUrl}/?view=chat&embed=1`;
   const fullscreenChatEmbedUrl = `${chatEmbedUrl}&fullscreen=1`;
@@ -3631,75 +3639,92 @@ export function ChutesChat({
     <>
     <div
       className={cn(
-        "flex flex-col bg-background/50 isolate",
+        "isolate flex flex-col bg-background",
         fullscreen
           ? "fixed inset-0 z-50 h-[100dvh] w-screen"
           : "h-full"
       )}
     >
-      {/* Header */}
-      <header className="glass sticky top-0 z-10 flex-none border-b p-2.5 sm:p-4">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <div className="flex min-w-0 items-center gap-2 sm:hidden">
-            <div className="rounded-xl bg-primary/10 p-2 text-primary">
-              <Bot className="h-4 w-4" />
+      <header className="sticky top-0 z-10 flex-none border-b border-border bg-background p-2.5 sm:p-4">
+        <div
+          className={cn(
+            "mx-auto flex w-full max-w-7xl items-center justify-between gap-2 sm:gap-3 xl:flex-nowrap",
+            headerCollapsed ? "flex-nowrap" : "flex-wrap"
+          )}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-secondary text-primary shadow-sm"
+              aria-hidden="true"
+            >
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold leading-none">
-                {providerHeading}
+              <h2 className="truncate text-lg leading-none sm:text-xl">
+                <span className="sr-only">{providerHeading}. </span>
+                Create anything
               </h2>
-              <p className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                Online
+              <p className="mt-1 truncate text-[11px] text-muted-foreground sm:text-xs">
+                Ask once. The agent chooses the right tool.
               </p>
             </div>
           </div>
 
-          <div className="hidden items-center gap-2 sm:flex">
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="p-2 rounded-xl bg-primary/10 text-primary"
+          <div
+            className={cn(
+              "items-center gap-1.5",
+              headerCollapsed
+                ? "flex w-auto justify-end"
+                : "grid w-full grid-cols-[minmax(5.5rem,0.75fr)_minmax(0,1.25fr)_auto] xl:flex xl:w-auto xl:flex-nowrap xl:justify-end xl:overflow-visible"
+            )}
+          >
+            <div className={cn("min-w-0", headerCollapsed && "hidden")}>
+              <Select value={provider} onValueChange={(value) => setProvider(value as ChatProvider)}>
+                <SelectTrigger className="h-10 min-w-0 flex-none bg-background xl:w-[140px]">
+                  <SelectValue placeholder="Provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CHAT_PROVIDER_OPTIONS.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className={cn("min-w-0", headerCollapsed && "hidden")}>
+              <ModelSearchSelect
+                value={model}
+                onValueChange={setModel}
+                models={models}
+                staticModelIds={staticModelIds.chat}
+                placeholder="Select a model"
+                title="Chat Model"
+                ariaLabel="Chat Model"
+                triggerClassName="w-full xl:w-[240px]"
+              />
+            </div>
+
+            <Button
+              variant={headerCollapsed ? "outline" : "secondary"}
+              onClick={() => setHeaderCollapsed((prev) => !prev)}
+              className="h-10 w-10 flex-none px-0 sm:w-auto sm:px-3"
+              title={headerCollapsed ? "Show setup" : "Hide setup"}
+              aria-label={headerCollapsed ? "Show setup" : "Hide setup"}
+              aria-expanded={!headerCollapsed}
+              aria-controls="creator-setup"
             >
-              <Bot className="h-6 w-6" />
-            </motion.div>
-            <div>
-              <h2 className="font-semibold text-lg leading-none">
-                {providerHeading}
-              </h2>
-              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                Online
-              </p>
-            </div>
-          </div>
+              <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Setup</span>
+            </Button>
 
-          <div className="grid w-full grid-cols-[minmax(6.75rem,0.8fr)_minmax(0,1.2fr)] items-center gap-1.5 sm:flex sm:w-auto sm:flex-nowrap sm:justify-end sm:overflow-visible sm:pb-0">
-            <Select value={provider} onValueChange={(value) => setProvider(value as ChatProvider)}>
-              <SelectTrigger className="glass-card h-9 min-w-0 flex-none border-0 bg-secondary/50 sm:w-[140px]">
-                <SelectValue placeholder="Provider" />
-              </SelectTrigger>
-              <SelectContent>
-                {CHAT_PROVIDER_OPTIONS.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <ModelSearchSelect
-              value={model}
-              onValueChange={setModel}
-              models={models}
-              staticModelIds={staticModelIds.chat}
-              placeholder="Select a model"
-              title="Chat Model"
-              ariaLabel="Chat Model"
-              triggerClassName="sm:w-[240px]"
-            />
-
-            <div className="no-scrollbar col-span-2 flex min-w-0 items-center gap-1.5 overflow-x-auto pb-1 sm:contents sm:overflow-visible sm:pb-0">
+            <div
+              className={cn(
+                "no-scrollbar col-span-3 min-w-0 items-center gap-1.5 overflow-x-auto pb-1 xl:overflow-visible xl:pb-0",
+                headerCollapsed ? "hidden" : "flex xl:contents"
+              )}
+            >
             {chatModelSupportsReasoning ? (
               <Select
                 value={reasoningEffort}
@@ -4140,28 +4165,18 @@ export function ChutesChat({
               {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setHeaderCollapsed((prev) => !prev)}
-              className="h-9 w-9 flex-none"
-              title={headerCollapsed ? "Expand header controls" : "Collapse header controls"}
-              aria-label={headerCollapsed ? "Expand header controls" : "Collapse header controls"}
-            >
-              {headerCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-            </Button>
             </div>
           </div>
         </div>
         <AnimatePresence initial={false}>
           {!headerCollapsed ? (
             <motion.div
+              id="creator-setup"
               key="header-controls"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.16, ease: "easeOut" }}
             >
               {modelsError ? (
                 <div className="max-w-7xl mx-auto w-full pt-2">
@@ -4169,13 +4184,13 @@ export function ChutesChat({
                 </div>
               ) : null}
               <div className="max-w-7xl mx-auto w-full pt-2">
-                <div className="glass-card border-0 bg-secondary/30 p-2.5">
+                <div className="rounded-xl border border-border bg-secondary p-3">
                   <div className="flex items-center justify-between gap-2 pb-2">
                     <p className="text-xs font-medium text-muted-foreground">
-                      Generation Tools
+                      Media tools
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      Enable/disable tool invocation
+                      Choose what the agent can create
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -4234,7 +4249,7 @@ export function ChutesChat({
                 </div>
               </div>
               <div className="max-w-7xl mx-auto w-full pt-2">
-                <div className="glass-card border-0 bg-secondary/30 p-2.5">
+                <div className="rounded-xl border border-border bg-secondary p-3">
                   <div className="flex items-center justify-between gap-2 pb-2">
                     <p className="text-xs font-medium text-muted-foreground">
                       System Prompt (sent with every message)
@@ -4254,7 +4269,7 @@ export function ChutesChat({
                     value={customSystemPrompt}
                     onChange={(event) => setCustomSystemPrompt(event.target.value)}
                     placeholder="Optional: Add custom behavior/instructions for the assistant."
-                    className="min-h-[76px] resize-y border-0 bg-background/70 text-xs focus-visible:ring-1 focus-visible:ring-ring"
+                    className="min-h-[76px] resize-y bg-background text-xs"
                   />
                 </div>
               </div>
@@ -4269,51 +4284,15 @@ export function ChutesChat({
           <AnimatePresence initial={false} mode="popLayout">
             {messages.length === 0 ? (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="flex min-h-[240px] flex-col items-center justify-center space-y-4 text-center sm:min-h-[400px]"
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
               >
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
-                  <Sparkles className="h-8 w-8 text-primary/60" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-lg font-medium sm:text-xl">How can I help you create?</h3>
-                  <p className="text-sm text-muted-foreground max-w-sm">
-                    Ask me to generate images, videos, audio, refine prompts, or brainstorm ideas.
-                  </p>
-                </div>
-                <div className="grid w-full max-w-lg grid-cols-2 gap-2 sm:grid-cols-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="col-span-2 h-11 justify-start sm:col-span-1"
-                    onClick={() => setTurnIntent("generate_image")}
-                    disabled={!toolAvailability.image}
-                  >
-                    <ImageIcon className="mr-2 h-4 w-4" />
-                    Create image
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 justify-start"
-                    onClick={() => setTurnIntent("generate_video")}
-                    disabled={!toolAvailability.video}
-                  >
-                    <Video className="mr-2 h-4 w-4" />
-                    Create video
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 justify-start"
-                    onClick={() => setTurnIntent("chat")}
-                  >
-                    <Bot className="mr-2 h-4 w-4" />
-                    Ask only
-                  </Button>
-                </div>
+                <CreatorWelcome
+                  availability={toolAvailability}
+                  onSelectIntent={selectCreatorIntent}
+                />
               </motion.div>
             ) : (
               messages.map((message) => {
@@ -4389,7 +4368,7 @@ export function ChutesChat({
 
                       {/* Content */}
                       <div className={cn(
-                        "relative rounded-2xl px-3.5 py-2.5 sm:px-5 sm:py-3.5 text-sm shadow-sm w-full transition-all duration-300",
+                        "relative w-full rounded-2xl px-3.5 py-2.5 text-sm shadow-sm transition-[background-color,border-color,color,box-shadow] duration-200 sm:px-5 sm:py-3.5",
                         isUser
                           ? "bg-primary text-primary-foreground rounded-tr-sm"
                           : isTool
@@ -4597,8 +4576,7 @@ export function ChutesChat({
         </div>
       </div>
 
-      {/* Input Area */}
-      <footer className="glass mt-auto flex-none border-t p-2.5 sm:p-4">
+      <footer className="mt-auto flex-none border-t border-border bg-background p-2.5 sm:p-4">
         <div className="max-w-7xl mx-auto w-full relative">
           <AnimatePresence>
             {messages.length > 0 && (
@@ -4615,7 +4593,7 @@ export function ChutesChat({
                   className="text-muted-foreground hover:text-destructive transition-colors gap-2"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Clear Chat
+                  Clear chat
                 </Button>
               </motion.div>
             )}
@@ -4668,7 +4646,7 @@ export function ChutesChat({
             </div>
           ) : null}
 
-          <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/70 p-2 shadow-sm backdrop-blur sm:p-2.5">
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border bg-secondary p-2 shadow-sm sm:p-2.5">
             <div className="flex min-w-0 items-start gap-2">
               <div className="mt-0.5 rounded-lg bg-primary/10 p-1.5 text-primary">
                 {currentTurnDecision.intent === "generate_image" ? (
@@ -4730,7 +4708,7 @@ export function ChutesChat({
             </Select>
           </div>
 
-          <div className="glass-card relative flex items-end gap-2 rounded-2xl p-1.5 shadow-lg ring-1 ring-white/20 sm:rounded-3xl">
+          <div className="relative flex items-end gap-2 rounded-xl border border-border bg-card p-1.5 shadow-[var(--shadow-raised)]">
             <Button
               type="button"
               variant="ghost"
@@ -4753,17 +4731,18 @@ export function ChutesChat({
             </Button>
             <div className="flex-1">
               <Textarea
+                ref={composerRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={
                   busy
-                    ? `Queue another ${providerLabel} request...`
+                    ? "Queue another request..."
                     : pendingAttachments.length
-                      ? "Ask about the attached files..."
-                      : `Message ${providerLabel} Agent...`
+                      ? "Ask about the files..."
+                      : "Describe it…"
                 }
-                className="max-h-[140px] min-h-[46px] w-full resize-none border-0 bg-transparent px-3 py-3 text-base focus-visible:ring-0 sm:max-h-[200px] sm:px-4"
+                className="max-h-[140px] min-h-11 w-full resize-none border-0 bg-transparent px-3 py-3 text-base focus-visible:ring-0 sm:max-h-[200px] sm:px-4"
                 rows={1}
               />
             </div>

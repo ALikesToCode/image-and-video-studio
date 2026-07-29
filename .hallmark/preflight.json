@@ -1,0 +1,35 @@
+{
+  "scannedAt": "2026-07-29",
+  "designSystemFile": null,
+  "fontStack": {
+    "display": "DM Serif Display",
+    "text": "IBM Plex Sans",
+    "source": "app/layout.tsx"
+  },
+  "palette": {
+    "format": "OKLCH semantic tokens",
+    "modes": [
+      "light",
+      "dark"
+    ],
+    "source": "tokens.css"
+  },
+  "motion": {
+    "stance": "motion-on",
+    "library": "framer-motion",
+    "version": "^12.38.0",
+    "source": "package.json"
+  },
+  "spacing": {
+    "system": "Tailwind CSS with a four-point semantic scale",
+    "customScale": true,
+    "source": "tokens.css"
+  },
+  "framework": {
+    "name": "Next.js",
+    "version": "16.2.12",
+    "router": "App Router",
+    "styling": "Tailwind CSS 4.2.4",
+    "source": "package.json"
+  }
+}

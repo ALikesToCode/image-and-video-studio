@@ -1011,7 +1011,7 @@ export function ImgGenSettings({
                                     </div>
                                     <div className="w-full bg-background h-1.5 rounded-full overflow-hidden">
                                         <div
-                                            className="bg-primary h-full transition-all duration-500"
+                                            className="h-full bg-primary"
                                             style={{ width: `${Math.min(100, usagePercent ?? 0)}%` }}
                                         />
                                     </div>

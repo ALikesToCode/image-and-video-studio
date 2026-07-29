@@ -415,7 +415,7 @@ export function SettingsDialog() {
                                                     )}
                                                 >
                                                     <div
-                                                        className="h-full rounded-full bg-primary transition-[width]"
+                                                        className="h-full rounded-full bg-primary"
                                                         style={{
                                                             width: `${subscriptionPercent(
                                                                 nanoGptAccount.subscription.daily.percentUsed

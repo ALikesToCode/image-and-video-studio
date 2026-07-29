@@ -21,10 +21,10 @@ const text = IBM_Plex_Sans({
 });
 
 export const metadata: Metadata = {
-  applicationName: "Image & Video Studio",
-  title: "Image & Video Studio",
+  applicationName: "Studio",
+  title: "Studio — Create anything",
   description:
-    "Local-first studio for generating images and videos with Gemini and NavyAI.",
+    "Ask one creative agent to develop ideas and make images, videos, or audio.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
@@ -51,8 +51,8 @@ export const viewport: Viewport = {
   interactiveWidget: "resizes-visual",
   colorScheme: "light dark",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fafafa" },
-    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+    { media: "(prefers-color-scheme: light)", color: "#fbf7ef" },
+    { media: "(prefers-color-scheme: dark)", color: "#1d1917" },
   ],
 };
 

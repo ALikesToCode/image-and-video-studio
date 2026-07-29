@@ -214,7 +214,7 @@ export function GalleryGrid({ items, onClear, onDelete }: GalleryGridProps) {
                                 exit={{ opacity: 0, scale: 0.9 }}
                                 transition={{ duration: 0.2 }}
                             >
-                                <Card className="overflow-hidden group relative glass-card border-none shadow-sm hover:shadow-lg transition-all">
+                                <Card className="group relative overflow-hidden border-none shadow-sm transition-shadow duration-200 hover:shadow-lg">
                                     <div className="aspect-square relative">
                                         {kind === "image" ? (
                                             <>
