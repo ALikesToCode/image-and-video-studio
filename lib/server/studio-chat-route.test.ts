@@ -927,9 +927,9 @@ test("Studio chat rejects schema-invalid tool input", async () => {
       width: 8,
       unexpected: true,
     });
-    assert.match(
-      String(invalidChunk.errorText),
-      /unexpected is not allowed[\s\S]*prompt must contain[\s\S]*width must be at least 64/
+    assert.equal(
+      invalidChunk.errorText,
+      "The model called a tool with invalid inputs."
     );
     assert.deepEqual(outputErrorChunk, {
       type: "tool-output-error",

@@ -49,6 +49,18 @@ test("providerErrorMessage extracts nested provider errors safely", () => {
   assert.equal(providerErrorMessage(null, "fallback"), "fallback");
 });
 
+test("providerErrorMessage preserves redacted plain-text upstream errors", () => {
+  const apiKey = "sk-provider-secret";
+  assert.equal(
+    providerErrorMessage(
+      `The upstream image model rejected ${apiKey}.`,
+      "fallback",
+      [apiKey],
+    ),
+    "The upstream image model rejected [redacted].",
+  );
+});
+
 test("providerErrorDetails preserves documented provider metadata safely", () => {
   const apiKey = "sk-nano-secret";
   const response = Response.json(null, {
@@ -105,6 +117,48 @@ test("providerErrorDetails accepts root parameter and retry aliases", () => {
       requestId: "req_body_123",
       retryAfterMs: 3_000,
       guidance: "Submit a new generation request.",
+    },
+  );
+});
+
+test("providerErrorDetails preserves nested upstream diagnostics", () => {
+  assert.deepEqual(
+    providerErrorDetails(
+      {
+        error: {
+          message: "An unexpected provider error occurred",
+          details: {
+            message: "The Gemini image provider returned an unavailable response.",
+            code: "upstream_unavailable",
+            parameter: "model",
+            request_id: "req_nested_123",
+          },
+        },
+      },
+      "fallback",
+    ),
+    {
+      error: "An unexpected provider error occurred",
+      code: "upstream_unavailable",
+      parameter: "model",
+      requestId: "req_nested_123",
+      guidance: "The Gemini image provider returned an unavailable response.",
+    },
+  );
+});
+
+test("providerErrorDetails accepts OAuth-style error descriptions", () => {
+  assert.deepEqual(
+    providerErrorDetails(
+      {
+        error: "provider_error",
+        error_description: "The selected upstream model is not available.",
+      },
+      "fallback",
+    ),
+    {
+      error: "provider_error",
+      guidance: "The selected upstream model is not available.",
     },
   );
 });

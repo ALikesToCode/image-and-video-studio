@@ -165,6 +165,9 @@ export const providerErrorMessage = (
   const root = toRecord(payload);
   const error = root?.error;
   const errorRecord = toRecord(error);
+  const errorDetails = toRecord(errorRecord?.details);
+  const errorDetail = toRecord(errorRecord?.detail);
+  const rootDetail = toRecord(root?.detail);
   const raw =
     typeof errorRecord?.message === "string"
       ? errorRecord.message
@@ -172,6 +175,18 @@ export const providerErrorMessage = (
         ? error
         : typeof root?.message === "string"
           ? root.message
+          : typeof errorDetails?.message === "string"
+            ? errorDetails.message
+            : typeof errorDetail?.message === "string"
+              ? errorDetail.message
+              : typeof root?.detail === "string"
+                ? root.detail
+                : typeof rootDetail?.message === "string"
+                  ? rootDetail.message
+                  : typeof root?.error_description === "string"
+                    ? root.error_description
+                    : typeof payload === "string"
+                      ? payload
           : fallback;
   const redacted = redactSecrets(raw, knownSecrets).trim();
   return redacted || fallback;
@@ -280,8 +295,22 @@ export const providerErrorDetails = (
   const knownSecrets = options.knownSecrets ?? [];
   const root = toRecord(payload);
   const errorRecord = toRecord(root?.error);
+  const errorDetails = toRecord(errorRecord?.details);
+  const errorDetail = toRecord(errorRecord?.detail);
+  const errorMetadata = toRecord(errorRecord?.metadata);
+  const rootDetail = toRecord(root?.detail);
   const code = firstSafeStructuredIdentifier(
-    [errorRecord?.code, root?.code, errorRecord?.type, root?.type],
+    [
+      errorRecord?.code,
+      errorDetails?.code,
+      errorDetail?.code,
+      errorMetadata?.provider_code,
+      errorMetadata?.error_type,
+      rootDetail?.code,
+      root?.code,
+      errorRecord?.type,
+      root?.type,
+    ],
     SAFE_CODE_PATTERN,
     knownSecrets,
   );
@@ -289,6 +318,12 @@ export const providerErrorDetails = (
     [
       errorRecord?.param,
       errorRecord?.parameter,
+      errorDetails?.param,
+      errorDetails?.parameter,
+      errorDetail?.param,
+      errorDetail?.parameter,
+      rootDetail?.param,
+      rootDetail?.parameter,
       root?.param,
       root?.parameter,
     ],
@@ -301,6 +336,12 @@ export const providerErrorDetails = (
       options.response?.headers.get("request-id"),
       errorRecord?.requestId,
       errorRecord?.request_id,
+      errorDetails?.requestId,
+      errorDetails?.request_id,
+      errorDetail?.requestId,
+      errorDetail?.request_id,
+      rootDetail?.requestId,
+      rootDetail?.request_id,
       root?.requestId,
       root?.request_id,
     ],
@@ -315,11 +356,22 @@ export const providerErrorDetails = (
     errorRecord?.guidance,
     errorRecord?.hint,
     errorRecord?.suggestion,
+    errorDetails?.message,
+    errorDetails?.userFriendlyError,
+    errorDetails?.guidance,
+    errorDetails?.hint,
+    errorDetail?.message,
+    errorDetail?.guidance,
+    errorDetail?.hint,
+    rootDetail?.message,
+    rootDetail?.guidance,
+    rootDetail?.hint,
     root?.userFriendlyError,
     root?.guidance,
     root?.hint,
     root?.suggestion,
-    root?.refundMessage
+    root?.refundMessage,
+    root?.error_description,
   );
   const guidance = rawGuidance
     ? redactSecrets(rawGuidance, knownSecrets).trim().slice(0, 1_000)

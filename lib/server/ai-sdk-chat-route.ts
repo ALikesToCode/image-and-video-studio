@@ -2,8 +2,11 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   createUIMessageStreamResponse,
+  InvalidToolInputError,
+  NoSuchToolError,
   streamText,
   toUIMessageStream,
+  ToolCallRepairError,
 } from "ai";
 
 import { getUserApiKey, providerErrorMessage } from "../api-safety.ts";
@@ -138,11 +141,24 @@ const maxOutputTokens = (value: unknown) => {
   return Math.min(8192, Math.max(1, Math.trunc(value)));
 };
 
-const safeStreamError = (error: unknown, apiKey: string) =>
-  providerErrorMessage(error, "Chat completion failed.", [apiKey]).slice(
+const safeStreamError = (error: unknown, apiKey: string) => {
+  if (InvalidToolInputError.isInstance(error)) {
+    return "The model called a tool with invalid inputs.";
+  }
+  if (NoSuchToolError.isInstance(error)) {
+    return "The model called an unavailable tool.";
+  }
+  if (ToolCallRepairError.isInstance(error)) {
+    return "The model produced an invalid tool call.";
+  }
+  if (typeof error === "string") {
+    return "Chat completion failed.";
+  }
+  return providerErrorMessage(error, "Chat completion failed.", [apiKey]).slice(
     0,
     1000
   );
+};
 
 const usageMessageMetadata = (usage: {
   inputTokens?: number;

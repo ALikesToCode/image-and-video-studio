@@ -91,6 +91,7 @@ import {
 } from "@/lib/model-options";
 import { buildChatGenerationSystemPrompt } from "@/lib/chat-generation-prompt";
 import { readAssistantTextResponse } from "@/lib/client/chat-stream-text";
+import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import ReactMarkdown from "react-markdown";
@@ -2063,9 +2064,14 @@ export function ChutesChat({
           body: JSON.stringify(request.body),
           signal,
         });
-        let payload = await response.json();
+        let payload = await response.json().catch(() => null);
         if (!response.ok) {
-          throw new Error(payload?.error ?? "Image tool failed.");
+          throw new Error(
+            formatProviderErrorForDisplay(payload, {
+              fallback: "Image tool failed.",
+              status: response.status,
+            }),
+          );
         }
 
         if (
@@ -2092,9 +2098,14 @@ export function ChutesChat({
                 signal,
               }
             );
-            const pollPayload = await pollResponse.json();
+            const pollPayload = await pollResponse.json().catch(() => null);
             if (!pollResponse.ok && pollResponse.status !== 429) {
-              throw new Error(pollPayload?.error ?? "Unable to poll image job.");
+              throw new Error(
+                formatProviderErrorForDisplay(pollPayload, {
+                  fallback: "Unable to poll image job.",
+                  status: pollResponse.status,
+                }),
+              );
             }
             if (pollPayload?.done) {
               if (typeof pollPayload?.error === "string" && pollPayload.error) {
