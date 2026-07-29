@@ -159,6 +159,52 @@ test("safeFetchExternalMedia rejects redirect to an unallowed host", async () =>
   }
 });
 
+test("safeFetchExternalMedia strips credentials on an allowed cross-origin redirect", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      headers: new Headers(init?.headers),
+    });
+    if (requests.length === 1) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://cdn.example.com/image.png" },
+      });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), {
+      headers: { "content-type": "image/png" },
+    });
+  };
+
+  try {
+    await safeFetchExternalMedia("https://media.example.com/image.png", {
+      allowedHosts: ["media.example.com", "cdn.example.com"],
+      allowedContentTypes: ["image/"],
+      maxBytes: 10,
+      timeoutMs: 1000,
+      allowRedirects: true,
+      headers: {
+        Accept: "image/*",
+        Authorization: "Bearer provider-secret",
+        Cookie: "session=provider-secret",
+        "X-Api-Key": "provider-secret",
+      },
+    });
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].headers.get("authorization"), "Bearer provider-secret");
+    assert.equal(requests[1].url, "https://cdn.example.com/image.png");
+    assert.equal(requests[1].headers.get("authorization"), null);
+    assert.equal(requests[1].headers.get("cookie"), null);
+    assert.equal(requests[1].headers.get("x-api-key"), null);
+    assert.equal(requests[1].headers.get("accept"), "image/*");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("safeFetchExternalMedia applies its timeout while reading the body", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) =>

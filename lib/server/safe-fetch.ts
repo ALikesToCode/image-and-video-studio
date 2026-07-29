@@ -8,6 +8,14 @@ export type SafeFetchOptions = {
 };
 
 const MAX_REDIRECTS = 3;
+const CROSS_ORIGIN_SENSITIVE_HEADERS = [
+  "authorization",
+  "cookie",
+  "proxy-authorization",
+  "x-api-key",
+  "x-goog-api-key",
+  "x-user-api-key",
+] as const;
 
 const normalizeHost = (host: string) => host.toLowerCase().replace(/\.$/, "");
 
@@ -159,6 +167,7 @@ export async function safeFetchExternalMedia(
   options: SafeFetchOptions
 ): Promise<Response> {
   let currentUrl = validateExternalMediaUrl(url, options.allowedHosts);
+  const requestHeaders = new Headers(options.headers);
   let redirects = 0;
 
   while (true) {
@@ -166,7 +175,7 @@ export async function safeFetchExternalMedia(
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
     try {
       const response = await fetch(currentUrl.toString(), {
-        headers: options.headers,
+        headers: requestHeaders,
         redirect: "manual",
         signal: controller.signal,
       });
@@ -180,10 +189,16 @@ export async function safeFetchExternalMedia(
           throw new Error("Media URL redirect is not allowed.");
         }
         const location = response.headers.get("location");
-        currentUrl = validateExternalMediaUrl(
+        const nextUrl = validateExternalMediaUrl(
           new URL(location ?? "", currentUrl).toString(),
           options.allowedHosts
         );
+        if (nextUrl.origin !== currentUrl.origin) {
+          for (const header of CROSS_ORIGIN_SENSITIVE_HEADERS) {
+            requestHeaders.delete(header);
+          }
+        }
+        currentUrl = nextUrl;
         redirects += 1;
         continue;
       }
