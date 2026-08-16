@@ -1,5 +1,4 @@
 import {
-  asSchema,
   dynamicTool,
   jsonSchema,
   type ModelMessage,
@@ -294,6 +293,29 @@ const validatedJSONSchema = (schema: JSONSchemaRecord) =>
     }
   );
 
+const decodeValidAIChatToolInput = (
+  toolName: unknown,
+  input: unknown,
+): Record<string, unknown> | null => {
+  if (!isAIChatToolName(toolName)) return null;
+
+  let candidate = input;
+  for (let depth = 0; depth < 3 && typeof candidate === "string"; depth += 1) {
+    try {
+      candidate = JSON.parse(candidate) as unknown;
+    } catch {
+      return null;
+    }
+  }
+
+  const record = schemaRecord(candidate);
+  if (!record) return null;
+  const definition = TOOL_DEFINITIONS[toolName];
+  return validateSchemaValue(definition.schema, record).length === 0
+    ? record
+    : null;
+};
+
 export const buildAIChatTools = (enabledTools: unknown): ToolSet => {
   const tools: ToolSet = {};
   for (const name of normalizeEnabledAIChatTools(enabledTools)) {
@@ -316,28 +338,15 @@ export const repairAIChatToolCall: ToolCallRepairFunction<ToolSet> = async ({
   const tool = tools[toolCall.toolName];
   if (!tool || !("inputSchema" in tool)) return null;
 
-  let encodedInput: unknown;
-  try {
-    encodedInput = JSON.parse(toolCall.input) as unknown;
-  } catch {
-    return null;
-  }
-  if (typeof encodedInput !== "string") return null;
-
-  let decodedInput: unknown;
-  try {
-    decodedInput = JSON.parse(encodedInput) as unknown;
-  } catch {
-    return null;
-  }
-  const schema = asSchema(tool.inputSchema);
-  if (!schema.validate) return null;
-  const validation = await schema.validate(decodedInput);
-  if (!validation.success) return null;
+  const decodedInput = decodeValidAIChatToolInput(
+    toolCall.toolName,
+    toolCall.input,
+  );
+  if (!decodedInput) return null;
 
   return {
     ...toolCall,
-    input: JSON.stringify(validation.value),
+    input: JSON.stringify(decodedInput),
   };
 };
 
@@ -635,14 +644,22 @@ export const extractAIChatStreamState = (message: UIMessage) => {
       const thoughtSignature = thoughtSignatureFromMetadata(
         part.callProviderMetadata
       );
+      const recoveredInput = decodeValidAIChatToolInput(
+        part.toolName,
+        part.input,
+      );
       toolCalls.push({
         id: part.toolCallId,
         type: "function",
-        input_error:
-          part.errorText || `Invalid arguments for ${part.toolName}.`,
+        ...(!recoveredInput
+          ? {
+              input_error:
+                part.errorText || `Invalid arguments for ${part.toolName}.`,
+            }
+          : {}),
         function: {
           name: part.toolName,
-          arguments: JSON.stringify(part.input ?? {}),
+          arguments: JSON.stringify(recoveredInput ?? part.input ?? {}),
         },
         ...(thoughtSignature !== null
           ? {

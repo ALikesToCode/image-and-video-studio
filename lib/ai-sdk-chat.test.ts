@@ -298,6 +298,60 @@ test("AI SDK stream state turns invalid tool input into a resolvable tool call",
   assert.deepEqual(state.toolErrors, []);
 });
 
+test("AI SDK stream state recovers valid tool input exposed as a JSON string", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-luna-tool",
+    role: "assistant",
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolCallId: "call_luna_image",
+        toolName: "generate_image",
+        state: "output-error",
+        input: '{"prompt":"a moonlit harbor","width":1536}',
+        errorText: "The model called a tool with invalid inputs.",
+      },
+    ],
+  });
+
+  assert.deepEqual(state.toolCalls, [
+    {
+      id: "call_luna_image",
+      type: "function",
+      function: {
+        name: "generate_image",
+        arguments: '{"prompt":"a moonlit harbor","width":1536}',
+      },
+    },
+  ]);
+});
+
+test("AI SDK stream state keeps schema-invalid JSON strings blocked", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-invalid-encoded-tool",
+    role: "assistant",
+    parts: [
+      {
+        type: "dynamic-tool",
+        toolCallId: "call_invalid_encoded_image",
+        toolName: "generate_image",
+        state: "output-error",
+        input: '{"prompt":"","width":"huge","unexpected":true}',
+        errorText: "The model called a tool with invalid inputs.",
+      },
+    ],
+  });
+
+  assert.equal(
+    state.toolCalls[0]?.input_error,
+    "The model called a tool with invalid inputs.",
+  );
+  assert.equal(
+    state.toolCalls[0]?.function.arguments,
+    '"{\\"prompt\\":\\"\\",\\"width\\":\\"huge\\",\\"unexpected\\":true}"',
+  );
+});
+
 test("AI SDK chat round-trips Gemini thought signatures through client history", () => {
   const state = extractAIChatStreamState({
     id: "assistant-1",
