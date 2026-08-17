@@ -24,6 +24,7 @@ import {
   normalizeImageRetryAttempts,
   normalizeImagePromptHelpModel,
   prepareImageModelRequests,
+  prepareImagePromptForModel,
   resolveNavyChatImageSizing,
   resolveNavyJobPollDelayMs,
   summarizeImageModelPrompts,
@@ -156,6 +157,11 @@ export const runChatImageTool = async ({
       (entry) => entry.id === targetModel,
     );
     if (targetProvider === "multillm") {
+      const prepared = prepareImagePromptForModel(
+        targetModel,
+        prompt,
+        negativePrompt || undefined,
+      );
       const size = getStringArg(finalArgs, ["size"]);
       const aspectRatio = getStringArg(finalArgs, [
         "aspect_ratio",
@@ -168,11 +174,11 @@ export const runChatImageTool = async ({
       ]);
       return {
         model: targetModel,
-        prompt,
+        prompt: prepared.prompt,
         body: {
           model: targetModel,
-          prompt,
-          negativePrompt: negativePrompt || undefined,
+          prompt: prepared.prompt,
+          negativePrompt: prepared.negativePrompt,
           size: size || undefined,
           aspectRatio: aspectRatio || undefined,
           quality: quality || undefined,

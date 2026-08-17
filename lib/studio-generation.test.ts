@@ -887,7 +887,12 @@ test("Image prompts use semantic age bands without changing the requested life s
   const prompt =
     "Premium anime close-up of Princess Leila, a beautiful 22-year-old woman, beside a 27-year-old man at dawn.";
 
-  for (const model of ["gpt-image-2", "nano-banana-2"]) {
+  for (const model of [
+    "gpt-image-2",
+    "nano-banana-2",
+    "navyai:gpt-image-2",
+    "linkapi:nano-banana-2",
+  ]) {
     const prepared = prepareImagePromptForModel(model, prompt).prompt;
     assert.match(prepared, /Princess Leila, a beautiful young adult woman/i);
     assert.match(prepared, /beside a young adult man/i);
