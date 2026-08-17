@@ -180,6 +180,14 @@ test("AI SDK media tools expose provider-compatible object schemas", async () =>
   const audioSchema = await asSchema(
     tools.generate_audio.inputSchema
   ).jsonSchema;
+  const imageSchema = await asSchema(
+    tools.generate_image.inputSchema
+  ).jsonSchema;
+  const promptHelpModel = imageSchema.properties?.prompt_help_model as
+    | { enum?: unknown[]; description?: string }
+    | undefined;
+  assert.deepEqual(promptHelpModel?.enum, ["auto", "terra", "sol"]);
+  assert.match(promptHelpModel?.description ?? "", /stronger Navy chat model/i);
   assert.deepEqual(audioSchema.required, ["input"]);
   assert.equal("input" in (audioSchema.properties ?? {}), true);
   assert.equal("text" in (audioSchema.properties ?? {}), false);

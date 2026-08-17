@@ -361,6 +361,7 @@ export function ChutesChat({
 
     return buildChatGenerationSystemPrompt({
       customPrompt: customSystemPrompt,
+      chatModel: model,
       imageModel:
         toolSettings.image && imageModels.length
           ? selectedImageModel
@@ -380,6 +381,7 @@ export function ChutesChat({
     audioModels,
     customSystemPrompt,
     imageModels,
+    model,
     toolAudioModel,
     toolImageModel,
     toolSettings,
@@ -391,6 +393,7 @@ export function ChutesChat({
   const {
     callChatStreaming,
     recoverImagePromptAfterPolicyFailure,
+    requestImagePromptHelp,
   } = createChatStreamClient({
     apiKey,
     provider,
@@ -426,6 +429,7 @@ export function ChutesChat({
       imageModelOrder,
       imageRetryAttempts,
       recoverPrompt: recoverImagePromptAfterPolicyFailure,
+      requestPromptHelp: requestImagePromptHelp,
     });
 
   const runGenerateVideo = (

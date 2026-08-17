@@ -207,7 +207,9 @@ export const runChatTools = async (
                   ? ` (try ${update.attempt}/${update.maxAttempts})`
                   : "";
               const content =
-                update.status === "running"
+                update.status === "refining"
+                  ? `Asking a stronger chat model to refine the prompt before generating with ${update.model}…`
+                  : update.status === "running"
                   ? `Generating image with ${update.model}${attemptLabel}…`
                   : update.status === "rewriting"
                     ? `Rephrasing prompt for ${update.model}${attemptLabel} after safety rejection…`

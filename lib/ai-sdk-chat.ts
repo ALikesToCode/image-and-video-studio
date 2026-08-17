@@ -48,6 +48,12 @@ const IMAGE_TOOL_SCHEMA = {
       description: "The final, production-ready image prompt.",
     },
     model: { type: "string", minLength: 1 },
+    prompt_help_model: {
+      type: "string",
+      enum: ["auto", "terra", "sol"],
+      description:
+        "Optional stronger Navy chat model for refining a difficult image prompt before generation. This does not change the selected image model.",
+    },
     negative_prompt: { type: "string" },
     guidance_scale: { type: "number", minimum: 0 },
     width: { type: "integer", minimum: 64, maximum: 8192 },

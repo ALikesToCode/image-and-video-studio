@@ -21,6 +21,7 @@ test("chat generation prompt prevents accidental tool calls", () => {
 
 test("image guidance follows the selected image model provider", () => {
   const prompt = buildChatGenerationSystemPrompt({
+    chatModel: "gpt-5.6-luna",
     imageModel: {
       id: "gpt-image-2",
       label: "GPT Image 2",
@@ -41,7 +42,26 @@ test("image guidance follows the selected image model provider", () => {
   assert.match(prompt, /up to 5 reference images/i);
   assert.match(prompt, /configured fallback order: Flux Pro \(nanogpt\/flux-pro\)/i);
   assert.match(prompt, /do not send a style parameter/i);
+  assert.match(prompt, /primary subject and action/i);
+  assert.match(prompt, /background.*lowest visual priority/i);
+  assert.match(prompt, /semantic age band/i);
+  assert.match(prompt, /never resubmit the unchanged prompt/i);
+  assert.match(prompt, /prompt_help_model.*terra/i);
   assert.doesNotMatch(prompt, /Flux mode is active/i);
+});
+
+test("Terra can request Sol prompt help without changing the image model", () => {
+  const prompt = buildChatGenerationSystemPrompt({
+    chatModel: "gpt-5.6-terra",
+    imageModel: {
+      id: "nano-banana-2",
+      label: "Nano Banana 2",
+      provider: "navy",
+    },
+  });
+
+  assert.match(prompt, /prompt_help_model.*sol/i);
+  assert.match(prompt, /refines the prompt; it does not replace the selected image model/i);
 });
 
 test("Flux guidance is scoped to a selected Flux image model", () => {

@@ -11,9 +11,13 @@ import {
 import { toChatCompletionMessages } from "@/lib/chat-tooling";
 import { readAssistantTextResponse } from "@/lib/client/chat-stream-text";
 import {
+  areImagePromptsEquivalent,
   buildImagePolicyRecoveryPrompt,
-  buildSaferImagePromptForModel,
+  buildImagePromptHelpRequest,
+  buildImageRetryFallbackPrompt,
+  resolveImagePromptHelpChatModels,
   resolveImagePromptRecoveryChatModels,
+  type ImagePromptHelpModel,
 } from "@/lib/studio-generation";
 import { isDeepSeekV4Model } from "@/lib/chat-tooling";
 
@@ -50,6 +54,13 @@ type PromptRecoveryOptions = {
   errorMessage: string;
   nextAttempt: number;
   maxAttempts: number;
+  signal?: AbortSignal;
+};
+
+type PromptHelpOptions = {
+  targetModel: string;
+  currentPrompt: string;
+  requestedHelpModel: ImagePromptHelpModel;
   signal?: AbortSignal;
 };
 
@@ -191,10 +202,12 @@ export const createChatStreamClient = ({
     maxAttempts,
     signal,
   }: PromptRecoveryOptions) => {
-    const fallbackPrompt = buildSaferImagePromptForModel(
-      targetModel,
-      currentPrompt,
-    );
+    const fallbackPrompt = buildImageRetryFallbackPrompt({
+      model: targetModel,
+      prompt: currentPrompt,
+      nextAttempt,
+      maxAttempts,
+    });
     const recoveryInstruction = buildImagePolicyRecoveryPrompt({
       model: targetModel,
       prompt: currentPrompt,
@@ -220,7 +233,12 @@ export const createChatStreamClient = ({
         const recoveredPrompt = normalizeRecoveredImagePrompt(
           recovered.content,
         );
-        if (recoveredPrompt) return recoveredPrompt;
+        if (
+          recoveredPrompt &&
+          !areImagePromptsEquivalent(recoveredPrompt, currentPrompt)
+        ) {
+          return recoveredPrompt;
+        }
       } catch (error) {
         if (isAbortLikeError(error, signal)) throw error;
       }
@@ -235,6 +253,7 @@ export const createChatStreamClient = ({
       resolveImagePromptRecoveryChatModels({
         provider,
         activeModel: model,
+        nextAttempt,
       });
 
     for (const recoveryModel of recoveryModels) {
@@ -251,7 +270,7 @@ export const createChatStreamClient = ({
               {
                 role: "system",
                 content:
-                  "You rewrite image-generation prompts after provider moderation rejections. Return only one direct image prompt. Preserve the requested artistic medium, composition, mood, lighting, camera/framing, and quality level while removing unsafe details.",
+                  "You rewrite image-generation prompts after provider moderation rejections. Return only one direct image prompt. Preserve the named primary subject, semantic age band, artistic medium, composition, mood, lighting, camera/framing, and quality level while removing unsafe details. Lead with the primary subject and keep background detail subordinate.",
               },
               {
                 role: "user",
@@ -259,7 +278,7 @@ export const createChatStreamClient = ({
               },
             ],
             toolChoice: "none",
-            maxTokens: 700,
+            maxTokens: 2200,
             ...(provider === "navy" &&
             isDeepSeekV4Model(recoveryModel)
               ? { thinking: { type: "disabled" } }
@@ -271,7 +290,12 @@ export const createChatStreamClient = ({
         const recoveredPrompt = normalizeRecoveredImagePrompt(
           await readAssistantTextResponse(response),
         );
-        if (recoveredPrompt) return recoveredPrompt;
+        if (
+          recoveredPrompt &&
+          !areImagePromptsEquivalent(recoveredPrompt, currentPrompt)
+        ) {
+          return recoveredPrompt;
+        }
       } catch (error) {
         if (isAbortLikeError(error, signal)) throw error;
       }
@@ -280,8 +304,67 @@ export const createChatStreamClient = ({
     return fallbackPrompt;
   };
 
+  const requestImagePromptHelp = async ({
+    targetModel,
+    currentPrompt,
+    requestedHelpModel,
+    signal,
+  }: PromptHelpOptions) => {
+    const recoveryModels = resolveImagePromptHelpChatModels({
+      provider,
+      activeModel: model,
+      requestedHelpModel,
+    });
+    if (!recoveryModels.length) return currentPrompt;
+
+    const promptHelpRequest = buildImagePromptHelpRequest({
+      targetImageModel: targetModel,
+      prompt: currentPrompt,
+    });
+    for (const helpModel of recoveryModels) {
+      try {
+        const response = await fetch("/api/navy/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            model: helpModel,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a production image-prompt editor. Return only one direct, policy-compliant image prompt. Preserve the user's named subject, identity, lawful intent, medium, composition, mood, and constraints. Make the primary subject visually dominant and keep secondary background detail subordinate.",
+              },
+              { role: "user", content: promptHelpRequest },
+            ],
+            toolChoice: "none",
+            maxTokens: 2200,
+          }),
+          signal,
+        });
+        if (!response.ok) continue;
+        const helpedPrompt = normalizeRecoveredImagePrompt(
+          await readAssistantTextResponse(response),
+        );
+        if (
+          helpedPrompt &&
+          !areImagePromptsEquivalent(helpedPrompt, currentPrompt)
+        ) {
+          return helpedPrompt;
+        }
+      } catch (error) {
+        if (isAbortLikeError(error, signal)) throw error;
+      }
+    }
+
+    return currentPrompt;
+  };
+
   return {
     callChatStreaming,
     recoverImagePromptAfterPolicyFailure,
+    requestImagePromptHelp,
   };
 };

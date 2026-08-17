@@ -22,6 +22,7 @@ import {
   NAVY_JOB_POLL_INTERVAL_MS,
   NAVY_JOB_POLL_MAX_ATTEMPTS,
   normalizeImageRetryAttempts,
+  normalizeImagePromptHelpModel,
   prepareImageModelRequests,
   resolveNavyChatImageSizing,
   resolveNavyJobPollDelayMs,
@@ -40,7 +41,7 @@ import {
 
 export type ImageToolProgress = {
   model: string;
-  status: "running" | "rewriting" | "success" | "error";
+  status: "refining" | "running" | "rewriting" | "success" | "error";
   attempt?: number;
   maxAttempts?: number;
   prompt?: string;
@@ -73,6 +74,12 @@ type RunChatImageToolOptions = {
     maxAttempts: number;
     signal?: AbortSignal;
   }) => Promise<string>;
+  requestPromptHelp: (options: {
+    targetModel: string;
+    currentPrompt: string;
+    requestedHelpModel: "auto" | "terra" | "sol";
+    signal?: AbortSignal;
+  }) => Promise<string>;
 };
 
 export const runChatImageTool = async ({
@@ -90,6 +97,7 @@ export const runChatImageTool = async ({
   imageModelOrder,
   imageRetryAttempts,
   recoverPrompt,
+  requestPromptHelp,
 }: RunChatImageToolOptions) => {
   const rawRequestedModel = getStringArg(args, ["model"]);
   const requestedModel = normalizeImageToolModelRequest({
@@ -107,15 +115,36 @@ export const runChatImageTool = async ({
       "No image models are available for the image tool.",
     );
   }
-  const finalArgs =
+  let finalArgs =
     context && modelsToRun.some(isFluxModel)
       ? repairImageToolArguments(args, context, {
           preferAssistantPrompt: true,
         })
       : args;
-  const prompt = getStringArg(finalArgs, ["prompt"]);
+  let prompt = getStringArg(finalArgs, ["prompt"]);
   if (!prompt) {
     throw new Error("Tool call missing prompt.");
+  }
+  const requestedHelpModel = normalizeImagePromptHelpModel(
+    getStringArg(finalArgs, ["prompt_help_model"]),
+  );
+  if (requestedHelpModel) {
+    const targetModel = modelsToRun[0] ?? toolImageModel;
+    onModelProgress?.({
+      model: targetModel,
+      status: "refining",
+      prompt,
+    });
+    const helpedPrompt = await requestPromptHelp({
+      targetModel,
+      currentPrompt: prompt,
+      requestedHelpModel,
+      signal,
+    });
+    if (helpedPrompt.trim()) {
+      prompt = helpedPrompt.trim();
+      finalArgs = { ...finalArgs, prompt };
+    }
   }
   const negativePrompt = getStringArg(finalArgs, [
     "negative_prompt",

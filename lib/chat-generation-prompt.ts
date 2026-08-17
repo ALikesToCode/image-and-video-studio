@@ -7,6 +7,7 @@ export type ChatGenerationPromptModel = Pick<
 
 type ChatGenerationSystemPromptOptions = {
   customPrompt?: string;
+  chatModel?: string;
   imageModel?: ChatGenerationPromptModel;
   imageFallbackModels?: ChatGenerationPromptModel[];
   videoModel?: ChatGenerationPromptModel;
@@ -18,15 +19,29 @@ const modelSummary = (model: ChatGenerationPromptModel) =>
 
 const buildImageGuidance = (
   model: ChatGenerationPromptModel,
-  fallbackModels: ChatGenerationPromptModel[]
+  fallbackModels: ChatGenerationPromptModel[],
+  chatModel: string,
 ) => {
   const normalizedId = model.id.toLowerCase();
   const lines = [
     `Active image model: ${modelSummary(model)}.`,
     "When calling generate_image, include one production-ready visual prompt and preserve the user's subject, composition, identity, exact-text, reference, and exclusion constraints.",
+    "Write subject-first briefs in this order: output style, primary subject and action, defining details, composition/camera, lighting/mood, background/setting, then constraints. Make the named primary subject dominant through scale, sharpness, contrast, placement, and detail; background receives the lowest visual priority unless the user says otherwise.",
+    "Use a semantic age band rather than an exact numeric age: infant, toddler, child, teenager, young adult, adult, middle-aged adult, or older adult. Preserve the correct life stage and never age a minor into an adult.",
+    "For a requested revision, make that change visibly meaningful and preserve every other stated invariant. Never resubmit the unchanged prompt; for an unspecified variation, change one meaningful visual axis such as composition, pose, expression, lighting, or palette.",
     "Use the active image model unless the user explicitly names another valid model ID. Omit the model argument when uncertain so the configured fallback order remains authoritative.",
     "Do not automatically optimize an image for video, animation, narration, or audio. Add cross-modal direction only when the user asks for it.",
   ];
+
+  if (/gpt-5\.6-luna$/i.test(chatModel)) {
+    lines.push(
+      'If the image brief is unusually complex, internally conflicting, or you cannot preserve its intent confidently, set prompt_help_model to "terra". Terra refines the prompt; it does not replace the selected image model.',
+    );
+  } else if (/gpt-5\.6-terra$/i.test(chatModel)) {
+    lines.push(
+      'If the image brief still needs stronger prompt reasoning, set prompt_help_model to "sol". Sol refines the prompt; it does not replace the selected image model.',
+    );
+  }
 
   const distinctFallbacks = fallbackModels
     .filter(
@@ -88,6 +103,7 @@ const buildImageGuidance = (
 
 export const buildChatGenerationSystemPrompt = ({
   customPrompt = "",
+  chatModel = "",
   imageModel,
   imageFallbackModels = [],
   videoModel,
@@ -95,7 +111,9 @@ export const buildChatGenerationSystemPrompt = ({
 }: ChatGenerationSystemPromptOptions) => {
   const toolSections: string[] = [];
   if (imageModel) {
-    toolSections.push(buildImageGuidance(imageModel, imageFallbackModels));
+    toolSections.push(
+      buildImageGuidance(imageModel, imageFallbackModels, chatModel),
+    );
   }
   if (videoModel) {
     toolSections.push(

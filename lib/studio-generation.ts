@@ -6,11 +6,37 @@ import {
 import type { GeneratedImage } from "./types.ts";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
 import {
+  appendImagePromptDirective,
+  normalizeImagePromptAgeDescriptors,
+  normalizeImagePromptWhitespace,
+} from "./image-prompt-language.ts";
+import {
+  isGeminiNativeImageModel,
+  isOpenAiImageModel,
+  preparePolicyImagePromptForModel,
+} from "./image-prompt-policy.ts";
+import {
   IMAGE_MIME_TYPES,
   dataUrlToInlineData,
   normalizeVeoDuration,
   parseDataUrl,
 } from "./studio-validation.ts";
+
+export {
+  areImagePromptsEquivalent,
+  buildImagePolicyRecoveryPrompt,
+  buildImagePromptHelpRequest,
+  buildImageRetryFallbackPrompt,
+  buildProviderPolicyHintForImageModels,
+  buildSaferImagePromptForModel,
+  extractImagePolicyViolationCategories,
+  isLikelyImagePolicyError,
+  normalizeImagePromptHelpModel,
+  resolveImagePromptHelpChatModels,
+  resolveImagePromptRecoveryChatModels,
+  supportsSaferImagePromptRetry,
+  type ImagePromptHelpModel,
+} from "./image-prompt-policy.ts";
 
 type ActiveJobLike = {
   status: "queued" | "running" | "success" | "error";
@@ -171,31 +197,7 @@ const normalizeModalities = (modalities?: string[] | null) =>
 const normalizeEndpoint = (value: unknown) =>
   typeof value === "string" ? value.toLowerCase() : "";
 
-const normalizeWhitespace = (value: string) =>
-  value
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join("\n");
-
-const stripPromptEnvelope = (value: string) => {
-  const trimmed = value.trim();
-  let start = 0;
-  let end = trimmed.length;
-
-  while (start < end && (trimmed[start] === `"` || trimmed[start] === "'")) {
-    start += 1;
-  }
-  while (
-    end > start &&
-    (trimmed[end - 1] === `"` || trimmed[end - 1] === "'")
-  ) {
-    end -= 1;
-  }
-
-  return trimmed.slice(start, end);
-};
+const normalizeWhitespace = normalizeImagePromptWhitespace;
 
 const ensureSentence = (value: string) => {
   const trimmed = value.trim().replace(/\s+/g, " ");
@@ -203,14 +205,7 @@ const ensureSentence = (value: string) => {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 };
 
-const appendPromptNote = (prompt: string, note: string) => {
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) return note;
-  if (normalizedPrompt.toLowerCase().includes(note.toLowerCase())) {
-    return normalizedPrompt;
-  }
-  return `${normalizedPrompt}\n\n${note}`;
-};
+const appendPromptNote = appendImagePromptDirective;
 
 const isAutoImageOption = (value?: string) =>
   !value || value === AUTO_IMAGE_OPTION;
@@ -246,12 +241,6 @@ const NEGATIVE_PROMPT_UPGRADES: Array<[RegExp, string]> = [
   ],
 ];
 
-const ADULT_IMAGE_PROMPT_PATTERN =
-  /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
-const OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE =
-  "Allowed visual goal: Preserve the theme through symbolism, fashion, environment, expression, lighting, texture, composition, color palette, and cinematic staging. Use safe visual language with no graphic injury, sexual exploitation, real-person impersonation, private data, instructions for wrongdoing, weapon-use detail, extremist praise or recruitment, self-harm depiction, or deceptive realism. Use clearly adult subjects, non-explicit styling, and consensual/non-threatening staging when people are relevant.";
-const OPENAI_GPT_IMAGE_PRODUCTION_GUIDE_NOTE =
-  "OpenAI GPT Image production prompt guide (instructions, not visible image text): Use a clear production image brief ordered as background/scene, subject, key details, composition, lighting/mood, and constraints. Include the intended output format from the request, such as photorealistic image, ad, UI mockup, infographic, diagram, logo, product mockup, comic panel, or slide. Be concrete about materials, shapes, textures, color, camera/framing, viewpoint, placement, scale, pose, gaze, and object interactions when relevant. For photorealism, preserve natural lighting, real materials, texture, and believable camera framing. For edits or reference images, preserve identity, geometry, layout, brand elements, camera angle, saturation, contrast, and surrounding objects unless the user asks to change them. For text in images, render only text explicitly requested in quotes or ALL CAPS; keep it exact, legible, high contrast, and placed as requested. Do not invent extra words. Keep the final image polished and production-ready with no watermark, no signature, no unrelated logos, and no generic stock-photo treatment.";
 const NAVY_IMAGE_ASPECT_RATIOS = new Set([
   "1:1",
   "16:9",
@@ -310,9 +299,6 @@ export const isValidGptImage2Size = (value: string) => {
 
 export const isImagenModel = (model: string) => model.startsWith("imagen-");
 
-const isOpenAiImageModel = (model: string) =>
-  /\b(gpt-image-|dall-e-)/i.test(model);
-
 const isOpenAiGptImageModel = (model: string) =>
   /\bgpt-image-/i.test(model.trim());
 
@@ -342,308 +328,6 @@ const sanitizeImageRequestBodyForModel = <T extends Record<string, unknown>>(
   const sanitized = { ...body };
   delete sanitized.style;
   return sanitized;
-};
-
-const isGeminiNativeImageModel = (model: string) => {
-  const normalized = model.toLowerCase();
-  return (
-    normalized.includes("nano-banana") ||
-    (normalized.includes("gemini-") &&
-      (normalized.includes("flash-image") || normalized.includes("pro-image")))
-  );
-};
-
-const isGeminiImagePolicyModel = (model: string) => {
-  const normalized = model.toLowerCase();
-  return (
-    isGeminiNativeImageModel(model) ||
-    isImagenModel(normalized) ||
-    normalized.includes("/imagen-")
-  );
-};
-
-const isLikelyAdultImagePrompt = (prompt: string) =>
-  ADULT_IMAGE_PROMPT_PATTERN.test(prompt);
-
-const POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN =
-  /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust|apparent\s+age\s+18|18[-\s]?year[-\s]?old|student\s+council|school\s+uniform|slim\s+yet\s+curvy|curvy\s+build|dilated\s+pupils?|vacant\s+(?:eyes|gaze)|glassy\s+(?:eyes?|gaze)|bloody|blood\s*soaked|gore|gory|body\s+parts?|dismember(?:ed|ment)?|decapitat(?:ed|ion)|graphic\s+injur(?:y|ies)|torture|final\s+blow|suicide|self-?harm|cutting|hanging|overdose|terroris[mt]|extremis[mt]|propaganda|recruitment|build\s+(?:a\s+)?(?:bomb|gun|weapon)|weapon\s+(?:construction|procurement|use)|phishing|credential\s+theft|steal(?:ing)?\s+.*passwords?|malware|deepfake|impersonat(?:e|ion)|photorealistic\s+likeness)\b/i;
-
-const isPolicySensitiveImagePrompt = (prompt: string) =>
-  isLikelyAdultImagePrompt(prompt) ||
-  POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN.test(prompt);
-
-export const supportsSaferImagePromptRetry = (model: string) =>
-  isOpenAiImageModel(model) || isGeminiImagePolicyModel(model);
-
-const softenPolicySensitiveImagePrompt = (prompt: string) => {
-  const softened = reframePolicySensitiveVisualDetails(prompt);
-
-  return appendPromptNote(
-    softened,
-    "Safety preflight: Reframe as a policy-compliant tasteful editorial anime illustration with clearly adult subjects, non-explicit styling, consensual/non-threatening staging, and no graphic sexual focus.",
-  );
-};
-
-const reframePolicySensitiveVisualDetails = (prompt: string) =>
-  normalizeWhitespace(stripPromptEnvelope(prompt))
-    .replace(
-      /\bicy\s+blue\s+eyes\s+rendered\s+glassy\s+and\s+vacant\s+with\s+dilated\s+pupils\b/gi,
-      "soft blue eyes rendered bright and reflective",
-    )
-    .replace(
-      /\b(\d{2})[-\s]?year[-\s]?old\s+adult\s+(woman|man|person)\b/gi,
-      "clearly adult $2",
-    )
-    .replace(
-      /\bapparent\s+age\s+18\b/gi,
-      "clearly adult university-age appearance",
-    )
-    .replace(
-      /\b(?:apparently|about|around)\s+18(?:\s*years?\s*old)?\b/gi,
-      "clearly adult",
-    )
-    .replace(/\b18[-\s]?year[-\s]?old\b/gi, "clearly adult")
-    .replace(/\bstudent council room\b/gi, "university council room")
-    .replace(/\bstudent council\b/gi, "university council")
-    .replace(/\bhigh school\b/gi, "university")
-    .replace(/\bschool uniform\b/gi, "formal academy-inspired blazer outfit")
-    .replace(/\bslim\s+yet\s+curvy\b/gi, "slim, balanced")
-    .replace(/\bcurvy\s+build\b/gi, "balanced build")
-    .replace(/\bcurvy\b/gi, "balanced")
-    .replace(/\bimpossibly\s+wide\s+hips\b/gi, "balanced silhouette")
-    .replace(/\berotic\s+standoff\s+atmosphere\b/gi, "dramatic editorial tension")
-    .replace(/\berotic\b/gi, "dramatic editorial")
-    .replace(/\bprovocative\b/gi, "glamorous")
-    .replace(/\bsexualized\b/gi, "fashion editorial")
-    .replace(/\bseductive\b/gi, "confident")
-    .replace(/\bsexy\b/gi, "stylish")
-    .replace(/\bdilated\s+pupils?\b/gi, "soft blue eyes")
-    .replace(/\bvacant\s+(?:eyes|gaze)\b/gi, "reflective gaze")
-    .replace(/\bvacant\b/gi, "reflective")
-    .replace(/\bglassy\s+eyes?\b/gi, "bright eyes")
-    .replace(/\bglassy\b/gi, "bright")
-    .replace(
-      /\bmassive\s+heavy\s+J-cup\s+breasts\s+straining\s+against\s+(?:her|their)\s+top\b/gi,
-      "an athletic curvy figure in fitted activewear",
-    )
-    .replace(
-      /\ba\s+(?:very\s+large|large)\s+bust\b/gi,
-      "an athletic curvy figure",
-    )
-    .replace(/\b(?:very\s+large|large)\s+bust\b/gi, "athletic curvy figure")
-    .replace(/\bmassive\s+heavy\s+breasts?\b/gi, "athletic curvy figure")
-    .replace(/\bJ-cup\s+breasts?\b/gi, "curvy upper body")
-    .replace(
-      /\bhard\s+nipples?\s+poking\s+through\s+(?:her|their)\s+top\b/gi,
-      "subtle fabric texture",
-    )
-    .replace(
-      /\bhard\s+nipples?\s+faintly\s+outlined\s+through\s+(?:her|their)\s+top\b/gi,
-      "subtle fabric texture",
-    )
-    .replace(/\bhard\s+nipples?\b/gi, "subtle fabric texture")
-    .replace(
-      /\b(?:slight\s+)?darkened\s+patch\s+at\s+the\s+crotch\b/gi,
-      "natural fabric shading",
-    )
-    .replace(/\bcrotch\b/gi, "leggings fabric")
-    .replace(
-      /\bclutching\s+a\s+small\s+gym\s+bag\s+to\s+(?:her|their)\s+heaving\s+chest\b/gi,
-      "holding a small gym bag close",
-    )
-    .replace(/\bto\s+(?:her|their)\s+heaving\s+chest\b/gi, "held close")
-    .replace(/\bheaving\s+chest\b/gi, "upper body")
-    .replace(/\bpleading\s+(?:wide\s+)?eyes\b/gi, "wide expressive eyes")
-    .replace(/\bmasked\s+man\b/gi, "mysterious figure")
-    .replace(/\bnon-?consensual\b/gi, "consensual")
-    .replace(/\bblood\s*soaked\b/gi, "rain-darkened")
-    .replace(/\bbloody\b/gi, "non-graphic")
-    .replace(/\bblood\b/gi, "dark rain")
-    .replace(/\bbody\s+parts\s+everywhere\b/gi, "shattered armor and debris everywhere")
-    .replace(/\bbody\s+parts\b/gi, "scattered debris")
-    .replace(/\bgory?\b/gi, "non-graphic")
-    .replace(/\bdismember(?:ed|ment)?\b/gi, "obscured aftermath")
-    .replace(/\bdecapitat(?:ed|ion)\b/gi, "obscured aftermath")
-    .replace(/\bgraphic\s+injur(?:y|ies)\b/gi, "non-graphic aftermath")
-    .replace(/\btorture\b/gi, "symbolic conflict")
-    .replace(/\bfinal\s+blow\b/gi, "decisive symbolic strike")
-    .replace(/\bsuicide|self-?harm|cutting|hanging|overdose\b/gi, "symbolic recovery")
-    .replace(/\bterroris[mt]\b/gi, "fictional authoritarian threat")
-    .replace(/\bextremis[mt]\b/gi, "fictional authoritarian faction")
-    .replace(/\bpropaganda|recruitment\b/gi, "historical warning poster")
-    .replace(/\b(?:build\s+(?:a\s+)?(?:bomb|gun|weapon)|weapon\s+(?:construction|procurement|use))\b/gi, "nonfunctional fantasy prop on a museum display")
-    .replace(/\bphishing\b/gi, "simulated phishing incident")
-    .replace(/\bcredential\s+theft\b/gi, "defensive credential-safety audit")
-    .replace(/\bsteal(?:ing)?\s+.*passwords?\b/gi, "reviewing a simulated security incident with dummy data")
-    .replace(/\bmalware\b/gi, "defensive malware-analysis dashboard")
-    .replace(/\bdeepfake|impersonat(?:e|ion)|photorealistic\s+likeness\b/gi, "fictionalized non-deceptive likeness");
-
-const buildOpenAiAllowedImagePrompt = (
-  prompt: string,
-  { force = false }: { force?: boolean } = {},
-) => {
-  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
-  if (!normalizedPrompt) return normalizedPrompt;
-  const policyReadyPrompt =
-    force || isPolicySensitiveImagePrompt(normalizedPrompt)
-      ? appendPromptNote(
-          reframePolicySensitiveVisualDetails(normalizedPrompt),
-          OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE,
-        )
-      : normalizedPrompt;
-  return appendPromptNote(
-    policyReadyPrompt,
-    OPENAI_GPT_IMAGE_PRODUCTION_GUIDE_NOTE,
-  );
-};
-
-export const isLikelyImagePolicyError = (message: string) =>
-  /\b(policy|safety|safe|blocked|flagged|prohibited|moderation|filtered|responsibleai|violation|unsafe)\b/i.test(
-    message,
-  );
-
-const IMAGE_POLICY_CATEGORIES = [
-  "sexual/minors",
-  "sexual",
-  "violence/graphic",
-  "violence",
-  "self-harm/instructions",
-  "self-harm/intent",
-  "self-harm",
-  "harassment/threatening",
-  "harassment",
-  "hate/threatening",
-  "hate",
-  "illicit/violent",
-  "illicit",
-] as const;
-
-const IMAGE_POLICY_CATEGORY_GUIDANCE: Record<string, string> = {
-  sexual:
-    "remove sexual arousal framing, explicit sexual activity, fetishized anatomy, eroticized posing, and intimate body-part focus",
-  "sexual/minors":
-    "remove any sexualization and any age ambiguity; use clearly adult subjects only when people are relevant",
-  violence:
-    "remove depictions of injury, death, gore, or physical harm while preserving cinematic tension through lighting and composition",
-  "violence/graphic":
-    "remove gore, wounds, blood detail, dismemberment, and graphic injury while preserving non-graphic cinematic atmosphere",
-  "self-harm":
-    "remove self-harm depiction or encouragement while preserving mood through safe visual symbolism",
-  "self-harm/intent":
-    "remove intent to self-harm and show a safe, supported scene instead",
-  "self-harm/instructions":
-    "remove instructions or actionable self-harm details entirely",
-  harassment:
-    "remove harassing or demeaning language while preserving neutral character dynamics",
-  "harassment/threatening":
-    "remove threats and violent intimidation while preserving non-threatening dramatic tension",
-  hate: "remove hateful references to protected traits while preserving neutral worldbuilding details",
-  "hate/threatening":
-    "remove hateful threats and protected-class targeting while preserving non-hateful conflict only if needed",
-  illicit:
-    "remove instructions or facilitation of illicit acts while preserving lawful scene context",
-  "illicit/violent":
-    "remove violent illicit instructions, weapons procurement, or facilitation details while preserving safe visual context",
-};
-
-const escapeRegExp = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-export const extractImagePolicyViolationCategories = (message: string) => {
-  const categories = new Set<string>();
-  const lowered = message.toLowerCase();
-  for (const match of lowered.matchAll(
-    /(?:safety_violations|policy_violations|violations|categories)\s*[:=]\s*\[([^\]]+)\]/g,
-  )) {
-    const rawCategories = match[1] ?? "";
-    for (const rawCategory of rawCategories.split(/[,|]/)) {
-      const category = rawCategory.replace(/['"`]/g, "").trim();
-      if (IMAGE_POLICY_CATEGORIES.includes(category as typeof IMAGE_POLICY_CATEGORIES[number])) {
-        categories.add(category);
-      }
-    }
-  }
-
-  for (const category of IMAGE_POLICY_CATEGORIES) {
-    const pattern = new RegExp(`(^|[^a-z0-9_/-])${escapeRegExp(category)}([^a-z0-9_/-]|$)`, "i");
-    if (pattern.test(message)) {
-      categories.add(category);
-    }
-  }
-
-  return Array.from(categories);
-};
-
-export const buildImagePolicyRecoveryPrompt = ({
-  model,
-  prompt,
-  errorMessage,
-  nextAttempt,
-  maxAttempts,
-}: {
-  model: string;
-  prompt: string;
-  errorMessage: string;
-  nextAttempt: number;
-  maxAttempts: number;
-}) => {
-  const categories = extractImagePolicyViolationCategories(errorMessage);
-  const categoryLabel = categories.length ? categories.join(", ") : "unknown";
-  const categoryGuidance = categories
-    .map((category) => IMAGE_POLICY_CATEGORY_GUIDANCE[category])
-    .filter(Boolean);
-  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
-  const saferPrompt = supportsSaferImagePromptRetry(model)
-    ? buildSaferImagePromptForModel(model, normalizedPrompt)
-    : normalizedPrompt;
-
-  return `Rewrite this image prompt for ${model} after a provider safety rejection (try ${nextAttempt}/${maxAttempts}).
-Flagged moderation categories: ${categoryLabel}.
-${categoryGuidance.length ? `Category-specific changes: ${categoryGuidance.join("; ")}.` : "Remove any likely unsafe, explicit, graphic, coercive, minor-related, or prohibited details."}
-
-Preserve the art medium, genre, setting, composition, named subject identity, age/adult context, lighting, camera/framing, palette, mood, and quality level.
-When clothing or swimwear is part of the scene, preserve its non-explicit visual role, color, and context while making it properly fitting and removing fabric-strain or body-part focus.
-Remove or neutralize the unsafe parts without replacing the requested style with a generic safe image.
-Return only the final rewritten image prompt. Do not mention policy, moderation, safety systems, provider errors, blocked categories, or request IDs in the final prompt.
-
-Prompt to rewrite:
-${saferPrompt}`;
-};
-
-export const resolveImagePromptRecoveryChatModels = ({
-  activeModel,
-}: {
-  provider: string;
-  activeModel: string;
-}) => {
-  const candidates = [activeModel];
-  const seen = new Set<string>();
-  return candidates
-    .map((candidate) => candidate.trim())
-    .filter((candidate) => {
-      if (!candidate || seen.has(candidate)) return false;
-      seen.add(candidate);
-      return true;
-    });
-};
-
-export const buildSaferImagePromptForModel = (
-  model: string,
-  prompt: string,
-) => {
-  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
-  if (!supportsSaferImagePromptRetry(model)) return normalizedPrompt;
-  if (isOpenAiImageModel(model)) {
-    return buildOpenAiAllowedImagePrompt(normalizedPrompt, { force: true });
-  }
-
-  const saferPrompt = isPolicySensitiveImagePrompt(normalizedPrompt)
-    ? softenPolicySensitiveImagePrompt(normalizedPrompt)
-    : normalizedPrompt;
-  const policyNote =
-    "Safety recovery: Rewrite this as a policy-compliant Gemini image prompt. Preserve the user's lawful visual intent, but respect Gemini built-in safety filtering, avoid sexually explicit output, avoid any child-safety risk, and remove or soften details likely to trigger prohibited-content or image-safety blocks.";
-
-  return appendPromptNote(saferPrompt, policyNote);
 };
 
 const buildFluxQualityGuidance = (negativePrompt?: string) => {
@@ -710,26 +394,27 @@ export const prepareImagePromptForModel = (
   negativePrompt?: string,
 ) => {
   const rawPrompt = prompt.trim().replace(/\r\n/g, "\n");
-  const normalizedPrompt = normalizeWhitespace(stripPromptEnvelope(prompt));
+  const semanticRawPrompt = normalizeImagePromptAgeDescriptors(rawPrompt);
+  const preparedPrompt = preparePolicyImagePromptForModel(model, prompt);
   const trimmedNegativePrompt = negativePrompt?.trim() || undefined;
 
-  if (isOpenAiImageModel(model)) {
+  if (isOpenAiImageModel(model) || isGeminiNativeImageModel(model)) {
     return {
-      prompt: buildOpenAiAllowedImagePrompt(normalizedPrompt),
+      prompt: preparedPrompt,
       negativePrompt: trimmedNegativePrompt,
     };
   }
 
   if (!isFluxModel(model)) {
     return {
-      prompt: normalizedPrompt,
+      prompt: preparedPrompt,
       negativePrompt: trimmedNegativePrompt,
     };
   }
 
-  const fluxPrompt = isPreparedFluxPrompt(rawPrompt)
-    ? rawPrompt
-    : buildFluxImagePrompt(normalizedPrompt, trimmedNegativePrompt);
+  const fluxPrompt = isPreparedFluxPrompt(semanticRawPrompt)
+    ? semanticRawPrompt
+    : buildFluxImagePrompt(preparedPrompt, trimmedNegativePrompt);
   return {
     prompt: fluxPrompt,
     negativePrompt: undefined,
@@ -1461,48 +1146,6 @@ export const resolveActiveImageToolModels = ({
     fallbackModel,
     availableModels,
   );
-
-const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `For OpenAI GPT Image and Gemini Nano Banana models, always rephrase the image prompt before calling generate_image. Preserve the user's image intent while removing or softening offending, disallowed, non-visual, or unsupported parts. Translate risky intent into a safe visual language instead of hiding it.
-For OpenAI GPT Image models, follow the production prompting guide: structure prompts as background/scene, subject, key details, composition, lighting/mood, and constraints; include the intended format such as photorealistic image, ad, UI mockup, infographic, diagram, logo, product mockup, comic panel, or slide; describe materials, textures, camera/framing, viewpoint, placement, pose, gaze, and object interactions; and keep the prompt skimmable instead of keyword-stuffed.
-For OpenAI GPT Image text-in-image requests, put exact visible copy in quotes or ALL CAPS, specify typography/placement when available, and do not add any extra words, captions, watermarks, signatures, or unrelated logos.
-For OpenAI GPT Image edits or reference images, explicitly state what changes and what must remain invariant, including identity, geometry, layout, brand elements, camera angle, lighting, saturation, contrast, and surrounding objects.
-Preserve the theme through symbolism, fashion, environment, expression, cinematic composition, lighting, texture, and color while removing operational or harmful detail.
-For any human subject, state "adult woman in her mid-20s" or "adult man in his mid-20s" early when age is relevant, and use tasteful artistic framing such as "tasteful artistic illustration", "vibrant intricate anime style", or "glamorous editorial artwork".
-For Nano Banana models, be especially conservative: avoid repeated emphasis on bust, breasts, cleavage, wide hips, body-hugging fabric, submission, eroticism, seductive framing, BDSM-coded collars, or explicit arching poses. Replace them with safer visible wording such as "pronounced hourglass silhouette", "fitted outfit that follows the figure", "confident presentation", "glamorous poise", "warm amusement", "teasing smirk", "playful fondness", "intimate domestic mood", or "artistically charged atmosphere".
-If another person appears in an intimate or tense scene, prefer a silhouetted, distant, or partially visible figure unless the user explicitly needs that person as the main subject. Avoid describing coercion, explicit sexual focus, or direct physical interaction as the center of the still image.
-Keep only details that can be shown visually: subject, setting, composition, pose, clothing, objects, lighting, colors, style, mood, camera angle, background, symbols, readable text, and layout.
-Ignore or convert anything that is not directly visual:
-- Do not ask the image to speak, explain, argue, think, or teach.
-- Do not include hidden meanings unless they can be represented through visible symbols, expressions, gestures, or scene design.
-- Do not follow instructions meant for audio, animation, interaction, or behavior over time unless they can be shown in a single still frame.
-- Do not render long paragraphs of text inside the image.
-- Do not include unnecessary labels, captions, names, or UI text unless explicitly requested.
-- If a person, organization, product, or project name is mentioned, treat it as context, not mandatory visible text, unless the prompt says to write that exact name in the image.
-- If exact text is requested, render it exactly as written and keep it short, clear, and legible.
-- If a concept is abstract, translate it into a strong visual metaphor instead of literal explanation.
-Prioritize a clean, coherent, visually rich image. Remove clutter, non-visual instructions, backend notes, explanations, and anything the image model cannot actually depict. Do not try to bypass provider moderation; if the request cannot be safely rephrased, ask for a safer visual direction.`;
-
-export const buildProviderPolicyHintForImageModels = (models: string[]) => {
-  const hints: string[] = [];
-  if (
-    models.some(
-      (model) => isOpenAiImageModel(model) || isGeminiNativeImageModel(model),
-    )
-  ) {
-    hints.push(STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE);
-  }
-  if (models.some(isOpenAiImageModel)) {
-    hints.push(
-      "For OpenAI GPT Image models, preserve lawful adult intent and concrete visual details while adding artistic direction, but keep prompts policy-compliant: consenting adults only when adult themes are relevant, and never include minors, non-consensual sexual content, sexual violence, or deceptive likeness abuse.",
-    );
-  }
-  if (models.some(isGeminiNativeImageModel)) {
-    hints.push(
-      "For Gemini Nano Banana models, preserve lawful adult intent and concrete visual details while adding painterly art direction, but respect Gemini safety settings for sexually explicit content and the built-in child safety protections.",
-    );
-  }
-  return hints.join("\n");
-};
 
 export const getQueuedJobsToStart = (
   jobs: QueueJobLike[],
