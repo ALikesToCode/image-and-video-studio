@@ -21,7 +21,7 @@ import {
   isOpenAIResponsesModel,
 } from "@/lib/openai-responses";
 import {
-  buildSaferImagePromptForModel,
+  buildImageRetryFallbackPrompt,
   buildNavyImageGenerationPayload,
   isNavyGenerationFailed,
   isLikelyImagePolicyError,
@@ -78,12 +78,14 @@ const promptAgentSystemPrompt = (model: string) => {
   return `You are a prompt safety and art-direction agent for ${family} image generation.
 Rewrite the user's image prompt for this exact target model before image generation.
 Preserve concrete subject, setting, composition, style, pose, mood, lighting, and story details.
-For OpenAI GPT Image models, follow the OpenAI GPT Image prompting guide: structure the final prompt as background/scene, subject, key details, composition, lighting/mood, and constraints; include the intended format such as photorealistic image, ad, UI mockup, infographic, diagram, logo, product mockup, comic panel, or slide; and use concrete materials, textures, camera/framing, viewpoint, placement, scale, pose, gaze, and object interactions.
+This system message guides your rewrite; never copy it into the final image prompt. Return only the renderable scene and direct visual constraints. Do not mention prompt guides, providers, models, policy, safety, moderation, retries, or invisible instructions.
+Treat the user's requested visual medium as authoritative. For anime, manga, cel-shaded, watercolor, comic, or other illustrated output, use medium-native visible details and never introduce photography, live-action, realistic-skin-texture, or subsurface-scattering cues unless the user explicitly requests a hybrid.
+Use concrete materials, textures, composition, viewpoint, placement, scale, pose, gaze, and object interactions. Prefer medium-specific details over generic masterpiece, best-quality, ultra-detailed, or 8K keyword stacks.
 Render exact in-image text only when explicitly requested in quotes or ALL CAPS. Preserve requested typography and placement, keep text legible, and do not add extra words.
 For edits or reference images, explicitly preserve identity, geometry, layout, brand elements, camera angle, lighting, saturation, contrast, and surrounding objects unless the user asks to change them.
 Translate risky intent into a safe visual language instead of hiding it. Preserve the theme through symbolism, fashion, environment, expression, cinematic composition, lighting, texture, and color.
 Replace explicit sexual focus, coercive/threatening framing, minor-risk ambiguity, graphic injury, self-harm depiction, weapon-use detail, wrongdoing instructions, deceptive real-person likeness, and fetishized anatomy with tasteful editorial art direction.
-Keep clearly adult subjects when age is given. Do not add new characters or story events.
+Replace exact numeric human ages with the matching semantic life stage while preserving whether the subject is a minor or adult. Do not add new characters or story events.
 Return only the final rewritten image prompt, with no markdown, labels, quotes, or explanation.`;
 };
 
@@ -140,13 +142,13 @@ const rewritePromptWithPromptAgent = async ({
             ? buildOpenAIResponsesPayload({
                 model: agentModel,
                 messages,
-                maxTokens: 700,
+                maxTokens: 2200,
                 stream: false,
               })
             : {
                 model: agentModel,
                 stream: false,
-                max_tokens: 700,
+                max_tokens: 2200,
                 messages,
               }
         ),
@@ -507,7 +509,14 @@ export async function POST(req: Request) {
       supportsSaferImagePromptRetry(model) &&
       isLikelyImagePolicyError(errorMessage)
     ) {
-      response = await postGeneration(buildSaferImagePromptForModel(model, promptAgentPrompt));
+      response = await postGeneration(
+        buildImageRetryFallbackPrompt({
+          model,
+          prompt: promptAgentPrompt,
+          nextAttempt: 2,
+          maxAttempts: 2,
+        })
+      );
       data = await jsonOrNull(response);
     }
   }

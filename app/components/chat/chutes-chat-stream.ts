@@ -335,7 +335,7 @@ export const createChatStreamClient = ({
               {
                 role: "system",
                 content:
-                  "You are a production image-prompt editor. Return only one direct, policy-compliant image prompt. Preserve the user's named subject, identity, lawful intent, medium, composition, mood, and constraints. Make the primary subject visually dominant and keep secondary background detail subordinate.",
+                  "You are a production image-prompt editor. Return only one direct visual prompt containing the renderable scene and direct visual constraints. Preserve the user's named subject, identity, lawful intent, requested medium, composition, mood, and constraints. Make the primary subject visually dominant and keep secondary background detail subordinate. Never include prompt-writing guidance, model or provider names, policy or safety commentary, retry language, or invisible instructions. Treat the requested medium as authoritative and never add conflicting photography or realism cues unless the user explicitly requests a hybrid.",
               },
               { role: "user", content: promptHelpRequest },
             ],

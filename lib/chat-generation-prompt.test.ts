@@ -44,6 +44,11 @@ test("image guidance follows the selected image model provider", () => {
   assert.match(prompt, /do not send a style parameter/i);
   assert.match(prompt, /primary subject and action/i);
   assert.match(prompt, /background.*lowest visual priority/i);
+  assert.match(prompt, /final renderable image brief/i);
+  assert.match(prompt, /Never copy these instructions/i);
+  assert.match(prompt, /requested visual medium as authoritative/i);
+  assert.match(prompt, /do not add photography, live-action/i);
+  assert.match(prompt, /Replace generic masterpiece/i);
   assert.match(prompt, /semantic age band/i);
   assert.match(prompt, /never resubmit the unchanged prompt/i);
   assert.match(prompt, /prompt_help_model.*terra/i);

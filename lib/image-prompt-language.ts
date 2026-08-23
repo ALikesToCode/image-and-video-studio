@@ -1,5 +1,11 @@
 const IMAGE_SUBJECT_NOUN =
   "(?:adult\\s+)?(?:woman|man|person|girl|boy|female|male|lady|gentleman|character|subject)";
+const IMAGE_PROMPT_META_BLOCK =
+  /(?:^|\n)\s*(?:OpenAI GPT Image production prompt guide\b|Gemini Nano Banana production prompt guide\b|Allowed visual goal:\s*Preserve the theme through symbolism\b|Visual constraints:\s*Preserve the lawful visual intent\b|Variation direction:)[\s\S]*$/i;
+const ANIME_STYLE_PATTERN =
+  /\b(?:anime|manga|cel[-\s]?(?:shaded|shading)|anime key art|2D anime illustration)\b/i;
+const EXPLICIT_ANIME_REALISM_HYBRID_PATTERN =
+  /\b(?:(?:semi[-\s]?realistic|photorealistic|photo[-\s]?realistic|live[-\s]?action)\s+anime|anime[-\s]?inspired\s+(?:photo|photograph|photography))\b/i;
 
 type SubjectKind = "female" | "male" | "neutral";
 
@@ -103,6 +109,67 @@ export const stripImagePromptEnvelope = (value: string) => {
   }
 
   return trimmed.slice(start, end);
+};
+
+export const stripImagePromptMetaInstructions = (value: string) => {
+  const match = IMAGE_PROMPT_META_BLOCK.exec(value);
+  return (match ? value.slice(0, match.index) : value).trim();
+};
+
+const replacePositivePhotoCue = (value: string) =>
+  value.replace(
+    /\b(?:photorealistic|photo[-\s]?realistic|professional photography|real photograph|live[-\s]?action)\b/gi,
+    (match, offset: number, source: string) => {
+      const prefix = source.slice(Math.max(0, offset - 16), offset);
+      return /\b(?:not|avoid|without)\s+$/i.test(prefix)
+        ? match
+        : "stylized 2D anime rendering";
+    },
+  );
+
+export const normalizeImagePromptStyleConflicts = (value: string) => {
+  if (
+    !ANIME_STYLE_PATTERN.test(value) ||
+    EXPLICIT_ANIME_REALISM_HYBRID_PATTERN.test(value)
+  ) {
+    return value;
+  }
+
+  const styleNativeDetails = value
+    .replace(
+      /\b(?:photo[-\s]?realistic|realistic) fabric folds?(?: and (?:translucency|draping))?\b/gi,
+      "crisp illustrated fabric folds and translucent fabric effects",
+    )
+    .replace(
+      /\b(?:highly\s+)?detailed skin texture(?: and subsurface scattering)?\b/gi,
+      "clean cel-shaded skin gradients",
+    )
+    .replace(
+      /\b(?:photo[-\s]?realistic|realistic|natural) skin texture\b/gi,
+      "clean stylized skin shading",
+    )
+    .replace(/\bsubsurface scattering\b/gi, "soft cel-shaded skin gradients");
+
+  const normalized = replacePositivePhotoCue(styleNativeDetails)
+    .replace(/^\s*masterpiece\s+(?=(?:modern\s+)?anime\b)/i, "")
+    .replace(/\bbest quality\s*,?\s*/gi, "")
+    .replace(
+      /\bultra[-\s]?detailed\s+([a-z-]+)\s+rendering\b/gi,
+      "intricate $1 rendering",
+    )
+    .replace(/\bultra[-\s]?detailed\b/gi, "intricate")
+    .replace(
+      /\b8K[-\s]?level\s+detail\b/gi,
+      "fine linework and controlled color detail",
+    )
+    .replace(/\b8K[-\s]?quality appearance\b/gi, "polished anime finish")
+    .replace(/\b8K\s+(?=(?:professional|anime|illustration|key art)\b)/gi, "");
+
+  return normalizeImagePromptWhitespace(normalized)
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/,\s*,+/g, ",")
+    .replace(/^\s*[,.;:]\s*/, "")
+    .trim();
 };
 
 export const appendImagePromptDirective = (prompt: string, note: string) => {

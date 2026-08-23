@@ -2,23 +2,16 @@ import {
   appendImagePromptDirective,
   imagePromptFingerprint,
   normalizeImagePromptAgeDescriptors,
+  normalizeImagePromptStyleConflicts,
   normalizeImagePromptWhitespace,
   stripImagePromptEnvelope,
+  stripImagePromptMetaInstructions,
 } from "./image-prompt-language.ts";
 
 const ADULT_IMAGE_PROMPT_PATTERN =
   /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
 const POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN =
   /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust|student\s+council|school\s+uniform|slim\s+yet\s+curvy|curvy\s+build|dilated\s+pupils?|vacant\s+(?:eyes|gaze)|glassy\s+(?:eyes?|gaze)|bloody|blood\s*soaked|gore|gory|body\s+parts?|dismember(?:ed|ment)?|decapitat(?:ed|ion)|graphic\s+injur(?:y|ies)|torture|final\s+blow|suicide|self-?harm|cutting|hanging|overdose|terroris[mt]|extremis[mt]|propaganda|recruitment|build\s+(?:a\s+)?(?:bomb|gun|weapon)|weapon\s+(?:construction|procurement|use)|phishing|credential\s+theft|steal(?:ing)?\s+.*passwords?|malware|deepfake|impersonat(?:e|ion)|photorealistic\s+likeness)\b/i;
-
-const OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE =
-  "Allowed visual goal: Preserve the theme through symbolism, fashion, environment, expression, lighting, texture, composition, color palette, and cinematic staging. Use safe visual language with no graphic injury, sexual exploitation, real-person impersonation, private data, instructions for wrongdoing, weapon-use detail, extremist praise or recruitment, self-harm depiction, or deceptive realism. Use clearly adult subjects, non-explicit styling, and consensual/non-threatening staging when people are relevant.";
-const OPENAI_GPT_IMAGE_PRODUCTION_GUIDE_NOTE =
-  "OpenAI GPT Image production prompt guide (instructions, not visible image text): Lead with the intended output format and the primary subject. Order the production brief as primary subject and action, defining details, composition/camera, lighting/mood, background/setting, then constraints. When a primary subject is named, make the primary subject visually dominant through scale, sharpness, contrast, placement, and detail; keep the background minimal and subordinate unless the user explicitly prioritizes it. Use semantic age tags such as infant, toddler, child, teenager, young adult, adult, middle-aged adult, or older adult instead of exact numeric ages. Be concrete about materials, shapes, textures, color, framing, viewpoint, placement, scale, pose, gaze, and object interactions. For photorealism, preserve natural lighting, real materials, texture, and believable camera framing. For edits or reference images, state the requested change and preserve identity, geometry, layout, brand elements, camera angle, saturation, contrast, and surrounding objects. Iterate with one clear change at a time and restate critical invariants. Render only text explicitly requested in quotes or ALL CAPS; keep it exact, legible, high contrast, and correctly placed. Do not invent extra words. Keep the final image polished and production-ready with no watermark, no signature, no unrelated logos, and no generic stock-photo treatment.";
-const GEMINI_NANO_BANANA_PRODUCTION_GUIDE_NOTE =
-  "Gemini Nano Banana production prompt guide (instructions, not visible image text): Write a concise narrative brief led by the output style, primary subject, and visible action, followed by defining details, composition and camera framing, lighting and color, then the background. When a primary subject is named, make the primary subject visually dominant through scale, sharpness, contrast, placement, and detail; keep the background minimal and subordinate unless the user explicitly prioritizes it. Use semantic age tags such as infant, toddler, child, teenager, young adult, adult, middle-aged adult, or older adult instead of exact numeric ages. For a requested revision, change only the requested visual detail, keep the remaining identity and composition invariants, and make the change visibly meaningful. Keep the prompt concrete, coherent, and free of redundant keyword lists, watermarks, signatures, unrelated logos, or unrequested text.";
-const GEMINI_IMAGE_SAFETY_RECOVERY_NOTE =
-  "Visual constraints: Preserve the lawful visual intent with tasteful non-explicit styling, age-appropriate portrayal, and consensual/non-threatening staging; replace graphic or exploitative detail with symbolic editorial art direction.";
 
 export const isOpenAiImageModel = (model: string) =>
   /\b(gpt-image-|dall-e-)/i.test(model);
@@ -43,10 +36,16 @@ const isGeminiImagePolicyModel = (model: string) => {
   );
 };
 
-const normalizePrompt = (prompt: string) =>
-  normalizeImagePromptAgeDescriptors(
-    normalizeImagePromptWhitespace(stripImagePromptEnvelope(prompt)),
+const normalizePrompt = (prompt: string) => {
+  const withoutMetaInstructions = stripImagePromptMetaInstructions(
+    stripImagePromptEnvelope(prompt),
   );
+  return normalizeImagePromptStyleConflicts(
+    normalizeImagePromptAgeDescriptors(
+      normalizeImagePromptWhitespace(withoutMetaInstructions),
+    ),
+  );
+};
 
 const isPolicySensitiveImagePrompt = (prompt: string) =>
   ADULT_IMAGE_PROMPT_PATTERN.test(prompt) ||
@@ -153,15 +152,9 @@ const buildOpenAiAllowedImagePrompt = (
   if (!normalizedPrompt) return normalizedPrompt;
   const policyReadyPrompt =
     force || isPolicySensitiveImagePrompt(normalizedPrompt)
-      ? appendImagePromptDirective(
-          reframePolicySensitiveVisualDetails(normalizedPrompt),
-          OPENAI_IMAGE_ALLOWED_VISUAL_GOAL_NOTE,
-        )
+      ? reframePolicySensitiveVisualDetails(normalizedPrompt)
       : normalizedPrompt;
-  return appendImagePromptDirective(
-    policyReadyPrompt,
-    OPENAI_GPT_IMAGE_PRODUCTION_GUIDE_NOTE,
-  );
+  return policyReadyPrompt;
 };
 
 const buildGeminiAllowedImagePrompt = (
@@ -172,15 +165,9 @@ const buildGeminiAllowedImagePrompt = (
   if (!normalizedPrompt) return normalizedPrompt;
   const policyReadyPrompt =
     force || isPolicySensitiveImagePrompt(normalizedPrompt)
-      ? appendImagePromptDirective(
-          reframePolicySensitiveVisualDetails(normalizedPrompt),
-          GEMINI_IMAGE_SAFETY_RECOVERY_NOTE,
-        )
+      ? reframePolicySensitiveVisualDetails(normalizedPrompt)
       : normalizedPrompt;
-  return appendImagePromptDirective(
-    policyReadyPrompt,
-    GEMINI_NANO_BANANA_PRODUCTION_GUIDE_NOTE,
-  );
+  return policyReadyPrompt;
 };
 
 export const preparePolicyImagePromptForModel = (
@@ -204,10 +191,7 @@ export const buildSaferImagePromptForModel = (model: string, prompt: string) => 
   if (isGeminiNativeImageModel(model)) {
     return buildGeminiAllowedImagePrompt(normalizedPrompt, { force: true });
   }
-  return appendImagePromptDirective(
-    reframePolicySensitiveVisualDetails(normalizedPrompt),
-    GEMINI_IMAGE_SAFETY_RECOVERY_NOTE,
-  );
+  return reframePolicySensitiveVisualDetails(normalizedPrompt);
 };
 
 export const isLikelyImagePolicyError = (message: string) =>
@@ -414,8 +398,11 @@ Return only the final image prompt.
 
 Requirements:
 - Preserve the user's named subjects, identity-defining details, lawful intent, output medium, mood, palette, and requested constraints.
+- Return only the final renderable scene and direct visual constraints. Never include this guide, provider or model names, policy or safety commentary, retry language, or invisible instructions.
 - Lead with output style, primary subject and visible action, then defining details, composition/camera, lighting, background, and constraints.
 - Make the named primary subject visually dominant; background details receive the lowest priority unless the user explicitly says otherwise.
+- Treat the requested medium as authoritative. For anime or another illustration style, use medium-native visible details and do not introduce photography, live-action, realistic-skin-texture, or subsurface-scattering cues unless the user explicitly requests a hybrid.
+- Replace generic masterpiece, best-quality, ultra-detailed, and 8K keyword stacks with concrete medium-specific details.
 - Replace exact numeric ages with the matching semantic age band: infant, toddler, child, teenager, young adult, adult, middle-aged adult, or older adult. Never age a minor into an adult.
 - For a revision, make the requested change visibly meaningful and preserve everything else. Do not add new plot, characters, text, or unrelated scenery.
 - Keep it policy-compliant. Do not attempt to bypass moderation or conceal prohibited intent.
@@ -441,15 +428,18 @@ export const buildImageRetryFallbackPrompt = ({
   const boundedAttempt = Math.min(Math.max(nextAttempt, 2), maxAttempts);
   const direction =
     boundedAttempt <= 2
-      ? "Variation direction: keep the named primary subject, medium, framing, lighting, and mood; replace only the rejected or unsupported detail with a non-explicit visual equivalent."
+      ? "Composition: keep the requested framing and named primary subject, with a cleaner silhouette, stronger subject-background separation, and fewer secondary details."
       : boundedAttempt === 3
-        ? "Variation direction: rebuild this as a concise subject-first production brief. Keep the same named subject and identity details, make the requested change unmistakable, and reduce background detail."
-        : "Variation direction: use a materially different but intent-equivalent composition, pose, or staging while preserving the named primary subject, medium, palette, mood, and constraints.";
+        ? "Lighting and staging: keep the requested medium, palette, named subject, and identity details; use a clearer key light, restrained rim light, and simplified background staging."
+        : "Pose and staging: keep the requested medium, palette, mood, named subject, and identity details; use a distinct pose with clean readable anatomy and minimal background competition.";
   return appendImagePromptDirective(saferPrompt, direction);
 };
 
-const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `For OpenAI GPT Image and Gemini Nano Banana models, always rephrase the image prompt before calling generate_image. Preserve the user's lawful image intent while removing or softening disallowed, non-visual, or unsupported parts. Translate risky intent into a safe visual language instead of hiding it.
+const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `For OpenAI GPT Image and Gemini Nano Banana models, always shape the final visual prompt before calling generate_image. Preserve the user's lawful image intent while removing or softening disallowed, non-visual, or unsupported parts. Translate risky intent into a safe visual language instead of hiding it.
+These are instructions for you, never text to copy into generate_image. The tool prompt must contain only the final renderable scene and direct visual constraints. Never mention a prompt guide, provider, model family, policy, safety system, moderation, retry, or "instructions not visible" in the tool prompt.
 Follow a subject-first production order: intended output, primary subject and action, defining details, composition/camera, lighting/mood, background/setting, then constraints. When the user identifies a main character or primary focus, make that subject dominant through scale, sharpness, contrast, placement, and detail; give the background the lowest visual priority unless explicitly requested otherwise.
+Treat the requested visual medium as a hard constraint. For anime, manga, cel-shaded, watercolor, comic, or other illustrated output, never add photorealistic, real-photograph, professional-photography, live-action, realistic-skin-texture, or subsurface-scattering cues unless the user explicitly requests a hybrid. Translate them into medium-native visible details such as crisp linework, cel-shaded skin gradients, illustrated fabric folds, controlled color blocks, and stylized highlights.
+Prefer concrete, medium-specific visual details over generic keyword stacks such as "masterpiece", "best quality", "ultra-detailed", or "8K".
 Use semantic visual age tags, never exact numeric ages or numeric age ranges: infant, toddler, child, teenager, young adult, adult, middle-aged adult, or older adult. Preserve the correct life stage and never age a minor into an adult.
 For OpenAI GPT Image text-in-image requests, put exact visible copy in quotes or ALL CAPS, specify typography and placement, and add no extra words, captions, watermarks, signatures, or unrelated logos.
 For OpenAI GPT Image edits or reference images, state what changes and what remains invariant, including identity, geometry, layout, brand elements, camera angle, lighting, saturation, contrast, and surrounding objects.
