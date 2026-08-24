@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "image-and-video-studio",
+  "account_id": "9b0a1524e478000ec9b3ff2da6104d81",
   "main": ".open-next/worker.js",
   "keep_names": false,
   "compatibility_date": "2025-03-25",

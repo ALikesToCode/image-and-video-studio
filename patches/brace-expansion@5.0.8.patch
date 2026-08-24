@@ -17,3 +17,21 @@ index be9df86be09c7655787a65c55ae6da01858894c3..16659b4d9c5df33e37efaf6347c79019
 +Object.defineProperty(legacyCallableExport, "__esModule", { value: true });
 +module.exports = legacyCallableExport;
  //# sourceMappingURL=index.js.map
+diff --git a/dist/esm/index.d.ts b/dist/esm/index.d.ts
+--- a/dist/esm/index.d.ts
++++ b/dist/esm/index.d.ts
+@@ -5,4 +5,5 @@ export type BraceExpansionOptions = {
+     maxLength?: number;
+ };
+ export declare function expand(str: string, options?: BraceExpansionOptions): string[];
++export default expand;
+ //# sourceMappingURL=index.d.ts.map
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -255,4 +255,5 @@ function expand_(str, max, maxLength, isTop) {
+     }
+     return acc;
+ }
++export default expand;
+ //# sourceMappingURL=index.js.map

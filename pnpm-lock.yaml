@@ -25,7 +25,7 @@ overrides:
 
 patchedDependencies:
   brace-expansion@5.0.8:
-    hash: f40f868a1360fb7e3d79ebf6bcf5ba08d2966c6612647ea672832e18b655ccdf
+    hash: c23a925dbac3bb8c185f611ce003615f896713489a91d70d6c06390499fd18cc
     path: patches/brace-expansion@5.0.8.patch
 
 importers:
@@ -7067,7 +7067,7 @@ snapshots:
 
   bowser@2.14.1: {}
 
-  brace-expansion@5.0.8(patch_hash=f40f868a1360fb7e3d79ebf6bcf5ba08d2966c6612647ea672832e18b655ccdf):
+  brace-expansion@5.0.8(patch_hash=c23a925dbac3bb8c185f611ce003615f896713489a91d70d6c06390499fd18cc):
     dependencies:
       balanced-match: 4.0.4
 
@@ -8690,19 +8690,19 @@ snapshots:
 
   minimatch@10.2.5:
     dependencies:
-      brace-expansion: 5.0.8(patch_hash=f40f868a1360fb7e3d79ebf6bcf5ba08d2966c6612647ea672832e18b655ccdf)
+      brace-expansion: 5.0.8(patch_hash=c23a925dbac3bb8c185f611ce003615f896713489a91d70d6c06390499fd18cc)
 
   minimatch@3.1.5:
     dependencies:
-      brace-expansion: 5.0.8(patch_hash=f40f868a1360fb7e3d79ebf6bcf5ba08d2966c6612647ea672832e18b655ccdf)
+      brace-expansion: 5.0.8(patch_hash=c23a925dbac3bb8c185f611ce003615f896713489a91d70d6c06390499fd18cc)
 
   minimatch@8.0.7:
     dependencies:
-      brace-expansion: 5.0.8(patch_hash=f40f868a1360fb7e3d79ebf6bcf5ba08d2966c6612647ea672832e18b655ccdf)
+      brace-expansion: 5.0.8(patch_hash=c23a925dbac3bb8c185f611ce003615f896713489a91d70d6c06390499fd18cc)
 
   minimatch@9.0.7:
     dependencies:
-      brace-expansion: 5.0.8(patch_hash=f40f868a1360fb7e3d79ebf6bcf5ba08d2966c6612647ea672832e18b655ccdf)
+      brace-expansion: 5.0.8(patch_hash=c23a925dbac3bb8c185f611ce003615f896713489a91d70d6c06390499fd18cc)
 
   minimist@1.2.8: {}
 
