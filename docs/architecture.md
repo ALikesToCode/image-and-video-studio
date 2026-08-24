@@ -33,7 +33,7 @@ Database: `studio-gallery`, version 2.
 - Gemini image models use `models/{model}:generateContent` with `contents.parts`, text first, then `inline_data` image references.
 - Imagen models remain separate on `models/{model}:predict` with `instances` and `parameters`.
 - Gemini Veo uses `models/{model}:predictLongRunning`, then operation polling and a validated Gemini download proxy.
-- NavyAI image/video requests use the OpenAI-compatible image generation endpoint. Async job IDs are stored locally and polling can resume after refresh.
+- NavyAI native image/video requests use the OpenAI-compatible image generation endpoint. Catalog entries served through Chat Completions use an image-output chat payload instead. Async job IDs from the native generation endpoint are stored locally and polling can resume after refresh.
 - OpenRouter image generation uses chat completions with `modalities` and optional multipart text-plus-image content.
 - Chutes routes keep Chutes-specific payloads and settings isolated.
 

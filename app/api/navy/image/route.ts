@@ -28,6 +28,10 @@ import {
   isNavyGenerationPending,
   supportsSaferImagePromptRetry,
 } from "@/lib/studio-generation";
+import {
+  buildNavyChatImagePayload,
+  isNavyChatImageEndpoint,
+} from "@/lib/navy-chat-image";
 import { NAVY_MEDIA_HOSTS } from "@/lib/server/navy-media";
 
 type ImageRequest = {
@@ -48,6 +52,8 @@ type ImageRequest = {
   responseFormat?: string;
   aspectRatio?: string;
   promptAgentModel?: string;
+  modelEndpoint?: string;
+  outputModalities?: string[];
 };
 
 type NavyImagePayload = {
@@ -313,10 +319,33 @@ const downloadGeneratedImage = async (url: string): Promise<NavyImagePayload> =>
 const normalizeNavyImages = async (items: unknown[]) => {
   const images: NavyImagePayload[] = [];
   for (const item of items) {
+    const directPayload = dataUrlImagePayload(item);
+    if (directPayload) {
+      images.push(directPayload);
+      continue;
+    }
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
     const contentType = contentTypeFromRecord(record);
-    const b64Payload = inlineImagePayload(record.b64_json, contentType);
+    const inlineData =
+      record.inlineData && typeof record.inlineData === "object"
+        ? (record.inlineData as Record<string, unknown>)
+        : record.inline_data && typeof record.inline_data === "object"
+          ? (record.inline_data as Record<string, unknown>)
+          : null;
+    const nestedImageUrl =
+      record.image_url && typeof record.image_url === "object"
+        ? (record.image_url as Record<string, unknown>)
+        : record.imageUrl && typeof record.imageUrl === "object"
+          ? (record.imageUrl as Record<string, unknown>)
+          : null;
+    const nestedContentType = inlineData
+      ? contentTypeFromRecord(inlineData)
+      : contentType;
+    const b64Payload = inlineImagePayload(
+      record.b64_json ?? record.base64,
+      contentType,
+    );
     if (b64Payload) {
       images.push(b64Payload);
       continue;
@@ -326,13 +355,31 @@ const normalizeNavyImages = async (items: unknown[]) => {
       images.push(dataPayload);
       continue;
     }
-    if (typeof record.url === "string" && record.url) {
-      const dataUrlPayload = dataUrlImagePayload(record.url);
+    const inlinePayload = inlineImagePayload(
+      inlineData?.data,
+      nestedContentType,
+    );
+    if (inlinePayload) {
+      images.push(inlinePayload);
+      continue;
+    }
+    const imageUrl =
+      typeof record.url === "string"
+        ? record.url
+        : typeof record.image_url === "string"
+          ? record.image_url
+          : typeof record.imageUrl === "string"
+            ? record.imageUrl
+            : typeof nestedImageUrl?.url === "string"
+              ? nestedImageUrl.url
+              : "";
+    if (imageUrl) {
+      const dataUrlPayload = dataUrlImagePayload(imageUrl);
       if (dataUrlPayload) {
         images.push(dataUrlPayload);
         continue;
       }
-      images.push(await downloadGeneratedImage(record.url));
+      images.push(await downloadGeneratedImage(imageUrl));
     }
   }
   return images;
@@ -349,6 +396,27 @@ const navyImageCandidates = (record: Record<string, unknown>) => {
   }
   if (typeof result.url === "string" || typeof result.data === "string") {
     items.push(result);
+  }
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== "object") continue;
+    const message = (choice as Record<string, unknown>).message;
+    if (!message || typeof message !== "object") continue;
+    const messageRecord = message as Record<string, unknown>;
+    if (Array.isArray(messageRecord.images)) {
+      items.push(...messageRecord.images);
+    }
+    if (Array.isArray(messageRecord.content)) {
+      items.push(...messageRecord.content);
+    }
+  }
+  const candidates = Array.isArray(record.candidates) ? record.candidates : [];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const content = (candidate as Record<string, unknown>).content;
+    if (!content || typeof content !== "object") continue;
+    const parts = (content as Record<string, unknown>).parts;
+    if (Array.isArray(parts)) items.push(...parts);
   }
   return items;
 };
@@ -467,28 +535,42 @@ export async function POST(req: Request) {
     );
   }
 
-  const postGeneration = (requestPrompt: string) => fetch("https://api.navy/v1/images/generations", {
+  const usesChatImageEndpoint = isNavyChatImageEndpoint(body.modelEndpoint);
+  const postGeneration = (requestPrompt: string) => fetch(`https://api.navy/v1/${
+    usesChatImageEndpoint ? "chat/completions" : "images/generations"
+  }`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${userApiKey}`,
     },
     body: JSON.stringify(
-      buildNavyImageGenerationPayload({
-        model,
-        prompt: requestPrompt,
-        size,
-        numberOfImages,
-        quality,
-        style,
-        imageUrl,
-        negativePrompt,
-        seed,
-        seconds,
-        sync: false,
-        responseFormat,
-        aspectRatio,
-      })
+      usesChatImageEndpoint
+        ? buildNavyChatImagePayload({
+            model,
+            prompt: requestPrompt,
+            size,
+            numberOfImages,
+            imageUrl,
+            negativePrompt,
+            aspectRatio,
+            outputModalities: body.outputModalities,
+          })
+        : buildNavyImageGenerationPayload({
+            model,
+            prompt: requestPrompt,
+            size,
+            numberOfImages,
+            quality,
+            style,
+            imageUrl,
+            negativePrompt,
+            seed,
+            seconds,
+            sync: false,
+            responseFormat,
+            aspectRatio,
+          })
     ),
   });
 
@@ -545,7 +627,11 @@ export async function POST(req: Request) {
       { status: 502 }
     );
   }
-  if (typeof dataRecord.id === "string" && !Array.isArray(dataRecord.data)) {
+  if (
+    !usesChatImageEndpoint &&
+    typeof dataRecord.id === "string" &&
+    !Array.isArray(dataRecord.data)
+  ) {
     return janitorAiJsonResponse(req, {
       id: dataRecord.id,
       status: dataRecord.status ?? null,

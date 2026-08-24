@@ -182,6 +182,10 @@ export const runChatImageTool = async ({
           size: size || undefined,
           aspectRatio: aspectRatio || undefined,
           quality: quality || undefined,
+          modelEndpoint:
+            targetModelOption?.upstreamEndpoint ??
+            targetModelOption?.endpoint,
+          outputModalities: targetModelOption?.outputModalities,
           imageDataUrl:
             typeof imageInput === "string"
               ? imageInput
@@ -230,6 +234,9 @@ export const runChatImageTool = async ({
       if (quality) baseBody.quality = quality;
       if (style) baseBody.style = style;
       if (imageUrl) baseBody.imageUrl = imageUrl;
+      baseBody.modelEndpoint =
+        targetModelOption?.upstreamEndpoint ?? targetModelOption?.endpoint;
+      baseBody.outputModalities = targetModelOption?.outputModalities;
       baseBody.sync = false;
     } else {
       const guidanceScale = getNumberArg(finalArgs, [

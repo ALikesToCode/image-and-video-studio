@@ -1,6 +1,6 @@
 # Provider Capabilities
 
-Last verified against the provider documentation and the application routes on 2026-07-23.
+Last verified against the provider documentation, live model catalog, and application routes on 2026-08-24.
 
 The capability foundation lives in `lib/providers`. Static entries in `lib/constants.ts` are fallbacks; provider catalogs replace or enrich them when live discovery succeeds. Unknown catalog values remain `null` or absent and are never treated as zero or `false`.
 
@@ -30,8 +30,9 @@ Credential values are redacted before errors reach the browser. Unknown nested f
 - `GET /v1/models` is the live source for endpoint compatibility, model identity, plan requirements, token multipliers, nullable limits, capability flags, modalities, descriptions, pricing, and metadata provenance. The app groups the catalog into chat, image, video, and speech choices while retaining `null` as unknown.
 - `GET /v1/models/status` feeds a compact, cached media-health view. The proxy accepts only validated model IDs and exposes current status, last check, in-progress state, uptime/check counts, latency summaries, and a redacted last error; provider history arrays are intentionally omitted.
 - `GET /v1/usage` supplies account usage for the generation and chat-tool surfaces. It refreshes while NavyAI is the active provider, after media tools, and on explicit user refresh.
-- `POST /v1/images/generations` handles both images and videos. The request builder sends only model-compatible fields, including `size`/`aspect_ratio`, `image_url`, `negative_prompt`, `seed`, documented quality, DALL-E-only style, video seconds, response format, and async `sync: false` when a job handle is needed.
-- Compatible editing models accept one reference or an array of at most five references. NavyAI does not support `n`; the app treats each provider request as one output.
+- Image discovery follows the endpoint and output modalities declared by each live model. Native image/video models use `POST /v1/images/generations`; chat models that declare image output remain in the chat catalog and are also exposed in the image catalog through `POST /v1/chat/completions` with `modalities` and `image_config`.
+- The native image request builder sends only model-compatible fields, including `size`/`aspect_ratio`, `image_url`, `negative_prompt`, `seed`, documented quality, DALL-E-only style, video seconds, response format, and async `sync: false` when a job handle is needed. Chat-image requests use multipart message content with text first and preserve the model's declared text/image output modalities.
+- Compatible editing models accept one reference or an array of at most five references. Native NavyAI image generation does not use `n`; chat-image models receive a bounded OpenAI-compatible `n` only when more than one image is requested.
 - Async image and video results are polled through `GET /v1/images/generations/:id`. Active remote handles can be restored after a refresh when the matching provider key is available. Rate limits remain pending and honor `Retry-After`.
 - Generated media downloads are performed server-side through bounded host/content-type/size checks. Provider credentials are attached only to trusted NavyAI media hosts.
 - NavyAI chat supports the app's AI SDK tool loop for image, video, and speech tools. OpenAI-family text models use `POST /v1/responses`, including Responses-native tool calls, reasoning controls, and typed SSE text events; other model families remain on `POST /v1/chat/completions`. Vision uploads and tool availability are gated by normalized model metadata.
@@ -58,8 +59,8 @@ Official references: [overview](https://api.navy/docs), [models](https://api.nav
 
 ## MultiLLM Proxy
 
-- Unified text discovery uses `GET /v1/models`. OpenAI-family chat models use `POST /v1/responses` with the catalog's `provider:model` IDs; LinkAPI models use its provider-specific `/linkapi/v1/responses` path. Other model families continue to use the OpenAI-compatible `POST /v1/chat/completions` stream.
-- NavyAI media discovery uses `GET /navyai/v1/models`. NanoGPT image and video discovery use `GET /nanogpt/v1/image-models` and `GET /nanogpt/v1/video-models`.
+- Unified text discovery uses `GET /v1/models`. The Studio retains MultiLLM's safe Navy metadata, including provider endpoint/owner, plan gate, multiplier, nullable limits, modalities, capability flags, description, pricing, and metadata provenance. OpenAI-family chat models use `POST /v1/responses` with the catalog's `provider:model` IDs; LinkAPI models use its provider-specific `/linkapi/v1/responses` path. Other model families continue to use the OpenAI-compatible `POST /v1/chat/completions` stream.
+- NavyAI media discovery uses `GET /navyai/v1/models`. Both native image-generation entries and chat-completion entries declaring image output are source-tagged and routed to their catalog-declared transport. NanoGPT image and video discovery use `GET /nanogpt/v1/image-models` and `GET /nanogpt/v1/video-models`.
 - The studio source-tags media IDs as `navyai:model` or `nanogpt:model`. The tag is removed before forwarding the request and is retained locally only to select the correct provider-specific proxy route.
 - Image generation normalizes URL, base64, binary, and asynchronous NavyAI job responses. Hosted image downloads use bounded HTTPS/content-type/size validation.
 - NavyAI and NanoGPT video submissions are polled by job ID until a terminal state. Processing jobs are never automatically resubmitted. Completed job downloads are re-resolved server-side and bounded before reaching the browser.

@@ -861,6 +861,12 @@ const withNavyMediaCapabilities = (
   const profile = metadataIsKnown
     ? NAVY_MEDIA_CAPABILITY_PROFILES[model.id.toLowerCase()]
     : undefined;
+  const inputModalities = normalizeModalities(model.inputModalities);
+  const acceptsImageInput = inputModalities.includes("image");
+  const normalizedEndpoint = normalizeEndpoint(model.endpoint);
+  const usesAsyncJobs =
+    normalizedEndpoint.includes("/images/generations") ||
+    normalizedEndpoint === "navy-images-generations";
 
   return {
     ...model,
@@ -868,12 +874,26 @@ const withNavyMediaCapabilities = (
       ...(model.supports ?? {}),
       ...(kind === "video"
         ? { video: true, asyncJobs: true }
-        : { imageGeneration: true }),
+        : {
+            imageGeneration: true,
+            size: true,
+            aspectRatio: true,
+            ...(usesAsyncJobs ? { asyncJobs: true } : {}),
+            ...(acceptsImageInput
+              ? {
+                  imageEdit: true,
+                  sourceImage: true,
+                  referenceImages: true,
+                }
+              : {}),
+          }),
       ...(profile?.supports ?? {}),
     },
     ...(profile
       ? { maxReferenceImages: profile.maxReferenceImages }
-      : {}),
+      : acceptsImageInput
+        ? { maxReferenceImages: 5 }
+        : {}),
   };
 };
 
@@ -981,6 +1001,8 @@ const toModelOption = (value: unknown): ModelOption | null => {
     label,
     ...(provider ? { provider } : {}),
     ...(endpoint ? { endpoint } : {}),
+    ...(endpoint ? { upstreamEndpoint: endpoint } : {}),
+    ...(provider ? { upstreamOwner: provider } : {}),
     ...(inputModalities !== undefined ? { inputModalities } : {}),
     ...(outputModalities !== undefined ? { outputModalities } : {}),
     ...(typeof premium === "boolean" ? { premium } : {}),
@@ -1041,6 +1063,7 @@ export const groupNavyModelsByCapability = (
       const id = model.id.toLowerCase();
       const outputModalities = normalizeModalities(model.outputModalities);
 
+      const usesChatCompletions = endpoint.includes("/v1/chat/completions");
       if (
         endpoint.includes("/v1/chat/completions") ||
         endpoint.includes("/v1/messages") ||
@@ -1050,6 +1073,16 @@ export const groupNavyModelsByCapability = (
           ...model,
           supports: { ...(model.supports ?? {}) },
         });
+        if (
+          usesChatCompletions &&
+          (outputModalities.includes("image") ||
+            model.supportsImageOutput === true)
+        ) {
+          pushUniqueModel(
+            groups.image,
+            withNavyMediaCapabilities(model, "image"),
+          );
+        }
         return groups;
       }
 

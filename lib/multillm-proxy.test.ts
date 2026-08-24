@@ -52,6 +52,85 @@ test("normalizes unified chat models as MultiLLM capabilities", () => {
   );
 });
 
+test("preserves unified Navy model metadata for Studio model details", () => {
+  const models = normalizeModelOptions({
+    data: [
+      {
+        id: "navyai:gemini-3.1-flash-image",
+        owned_by: "navyai",
+        upstream_owned_by: "google",
+        provider_metadata: {
+          endpoint: "/v1/chat/completions",
+          token_multiplier: 45,
+          premium: false,
+          required_plan: null,
+          context_window: 131072,
+          max_output_tokens: 32768,
+          input_modalities: ["text", "image"],
+          output_modalities: ["text", "image"],
+          modality: "text+image->text+image",
+          tokenizer: "Gemini",
+          supports_vision: true,
+          supports_reasoning: true,
+          supports_image_output: true,
+          description: "Navy image-output chat model.",
+          pricing: { prompt: "0.0000005", completion: "0.000003" },
+          metadata_source: "openrouter",
+          metadata_resolved_from: "google/gemini-image",
+          metadata_status: "known",
+        },
+      },
+    ],
+  });
+
+  const model = models[0];
+  assert.equal(model?.provider, "multillm");
+  assert.equal(model?.upstreamEndpoint, "/v1/chat/completions");
+  assert.equal(model?.upstreamOwner, "google");
+  assert.equal(model?.tokenMultiplier, 45);
+  assert.equal(model?.requiredPlan, null);
+  assert.equal(model?.contextWindow, 131072);
+  assert.equal(model?.maxOutputTokens, 32768);
+  assert.deepEqual(model?.inputModalities, ["text", "image"]);
+  assert.deepEqual(model?.outputModalities, ["text", "image"]);
+  assert.equal(model?.supportsVision, true);
+  assert.equal(model?.supportsReasoning, true);
+  assert.equal(model?.supportsImageOutput, true);
+  assert.equal(model?.metadataSource, "openrouter");
+  assert.equal(model?.metadataResolvedFrom, "google/gemini-image");
+  assert.equal(model?.metadataStatus, "known");
+  assert.deepEqual(model?.pricing, {
+    prompt: "0.0000005",
+    completion: "0.000003",
+  });
+});
+
+test("routes catalog-declared Navy chat image models through chat transport", () => {
+  const models = normalizeModelOptions(
+    {
+      data: [
+        {
+          id: "gemini-3.1-flash-image",
+          owned_by: "google",
+          endpoint: "/v1/chat/completions",
+          input_modalities: ["text", "image"],
+          output_modalities: ["text", "image"],
+          supports_image_output: true,
+        },
+      ],
+    },
+    { source: "navyai", kind: "image" },
+  );
+
+  const model = models[0];
+  assert.equal(model?.endpoint, "multillm-image-chat-completions");
+  assert.equal(model?.upstreamEndpoint, "/v1/chat/completions");
+  assert.equal(model?.upstreamOwner, "google");
+  assert.equal(model?.supports?.asyncJobs, false);
+  assert.equal(model?.supports?.referenceImages, true);
+  assert.equal(model?.maxReferenceImages, 5);
+});
+
 test("routes LinkAPI chat models through the provider-specific endpoint", () => {
   assert.deepEqual(resolveMultiLlmChatTarget("linkapi:gpt-5.6-luna"), {
     model: "gpt-5.6-luna",

@@ -26,6 +26,27 @@ const isRecord = (value: unknown): value is ModelRecord =>
 const asString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
+const asNullableString = (value: unknown) =>
+  value === null
+    ? null
+    : typeof value === "string"
+      ? value.trim()
+      : undefined;
+
+const asNullableNumber = (value: unknown) =>
+  value === null
+    ? null
+    : typeof value === "number" && Number.isFinite(value)
+      ? value
+      : undefined;
+
+const asNullableBoolean = (value: unknown) =>
+  value === null
+    ? null
+    : typeof value === "boolean"
+      ? value
+      : undefined;
+
 const asStringList = (value: unknown): string[] => {
   if (Array.isArray(value)) {
     return value.flatMap((entry) => asStringList(entry));
@@ -53,6 +74,11 @@ const modelLabel = (record: ModelRecord, fallback: string) =>
   asString(record.name) ||
   asString(record.model_name) ||
   fallback;
+
+const withProviderMetadata = (record: ModelRecord): ModelRecord => ({
+  ...(isRecord(record.provider_metadata) ? record.provider_metadata : {}),
+  ...record,
+});
 
 export const isLinkApiChatImageModel = (model: string) =>
   /^gemini-[a-z0-9._-]*image(?:[a-z0-9._-]*)$/i.test(
@@ -116,41 +142,43 @@ const extractModelRecords = (
 };
 
 const modelMetadata = (record: ModelRecord) => {
-  const capabilities = isRecord(record.capabilities)
-    ? record.capabilities
+  const catalogRecord = withProviderMetadata(record);
+  const capabilities = isRecord(catalogRecord.capabilities)
+    ? catalogRecord.capabilities
     : {};
-  const architecture = isRecord(record.architecture)
-    ? record.architecture
+  const architecture = isRecord(catalogRecord.architecture)
+    ? catalogRecord.architecture
     : {};
   return [
-    ...asStringList(record.endpoint),
-    ...asStringList(record.endpoints),
-    ...asStringList(record.type),
-    ...asStringList(record.category),
-    ...asStringList(record.modality),
-    ...asStringList(record.task),
-    ...asStringList(record.input_modalities),
-    ...asStringList(record.output_modalities),
-    ...asStringList(record.supported_endpoint_types),
+    ...asStringList(catalogRecord.endpoint),
+    ...asStringList(catalogRecord.endpoints),
+    ...asStringList(catalogRecord.type),
+    ...asStringList(catalogRecord.category),
+    ...asStringList(catalogRecord.modality),
+    ...asStringList(catalogRecord.task),
+    ...asStringList(catalogRecord.input_modalities),
+    ...asStringList(catalogRecord.output_modalities),
+    ...asStringList(catalogRecord.supported_endpoint_types),
     ...asStringList(architecture.modality),
     ...asStringList(architecture.input_modalities),
     ...asStringList(architecture.output_modalities),
-    ...asStringList(record.capabilities),
+    ...asStringList(catalogRecord.capabilities),
     ...asStringList(capabilities.input_modalities),
     ...asStringList(capabilities.output_modalities),
-    asString(record.id).toLowerCase(),
-    asString(record.name).toLowerCase(),
-    asString(record.model_name).toLowerCase(),
-    asString(record.description).toLowerCase(),
+    asString(catalogRecord.id).toLowerCase(),
+    asString(catalogRecord.name).toLowerCase(),
+    asString(catalogRecord.model_name).toLowerCase(),
+    asString(catalogRecord.description).toLowerCase(),
   ].join(" ");
 };
 
 const truthyCapability = (record: ModelRecord, keys: string[]) => {
-  const capabilities = isRecord(record.capabilities)
-    ? record.capabilities
+  const catalogRecord = withProviderMetadata(record);
+  const capabilities = isRecord(catalogRecord.capabilities)
+    ? catalogRecord.capabilities
     : {};
   return keys.some(
-    (key) => record[key] === true || capabilities[key] === true
+    (key) => catalogRecord[key] === true || capabilities[key] === true
   );
 };
 
@@ -158,8 +186,9 @@ export const modelSupportsKind = (
   record: ModelRecord,
   kind: Exclude<MultiLlmModelKind, "chat">
 ) => {
+  const catalogRecord = withProviderMetadata(record);
   const metadata = modelMetadata(record);
-  const endpoint = asString(record.endpoint).toLowerCase();
+  const endpoint = asString(catalogRecord.endpoint).toLowerCase();
 
   if (kind === "audio") {
     if (endpoint) return endpoint.includes("audio/speech");
@@ -226,6 +255,7 @@ export const normalizeModelOptions = (
   const deduplicated = new Map<string, ModelOption>();
 
   for (const record of filtered) {
+    const catalogRecord = withProviderMetadata(record);
     const rawId = modelIdentity(record);
     if (!rawId) continue;
     const id = options.source
@@ -242,23 +272,74 @@ export const normalizeModelOptions = (
       kind === "image" &&
       options.source === "linkapi" &&
       isLinkApiChatImageModel(rawId);
+    const upstreamEndpoint = asString(catalogRecord.endpoint);
+    const usesNavyImageChat =
+      kind === "image" &&
+      options.source === "navyai" &&
+      upstreamEndpoint.toLowerCase().includes("/v1/chat/completions") &&
+      modelSupportsKind(record, "image");
+    const usesImageChat = usesLinkApiImageChat || usesNavyImageChat;
     const inputModalities = [
-      ...asStringList(record.input_modalities),
-      ...(isRecord(record.architecture)
-        ? asStringList(record.architecture.input_modalities)
+      ...asStringList(catalogRecord.input_modalities),
+      ...(isRecord(catalogRecord.architecture)
+        ? asStringList(catalogRecord.architecture.input_modalities)
         : []),
     ];
     const outputModalities = [
-      ...asStringList(record.output_modalities),
-      ...(isRecord(record.architecture)
-        ? asStringList(record.architecture.output_modalities)
+      ...asStringList(catalogRecord.output_modalities),
+      ...(isRecord(catalogRecord.architecture)
+        ? asStringList(catalogRecord.architecture.output_modalities)
         : []),
     ];
+    const providerMetadata = isRecord(record.provider_metadata)
+      ? record.provider_metadata
+      : {};
+    const upstreamOwner =
+      asString(record.upstream_owned_by) ||
+      asString(providerMetadata.owned_by) ||
+      asString(catalogRecord.owned_by);
+    const requiredPlan = asNullableString(catalogRecord.required_plan);
+    const tokenMultiplier =
+      typeof catalogRecord.token_multiplier === "number" &&
+      Number.isFinite(catalogRecord.token_multiplier)
+        ? catalogRecord.token_multiplier
+        : undefined;
+    const contextWindow = asNullableNumber(catalogRecord.context_window);
+    const maxOutputTokens = asNullableNumber(
+      catalogRecord.max_output_tokens,
+    );
+    const modality = asNullableString(catalogRecord.modality);
+    const tokenizer = asNullableString(catalogRecord.tokenizer);
+    const description = asNullableString(catalogRecord.description);
+    const metadataSource = asNullableString(catalogRecord.metadata_source);
+    const metadataResolvedFrom = asNullableString(
+      catalogRecord.metadata_resolved_from,
+    );
+    const supportsVision = asNullableBoolean(catalogRecord.supports_vision);
+    const supportsTools = asNullableBoolean(catalogRecord.supports_tools);
+    const supportsFunctionCalling = asNullableBoolean(
+      catalogRecord.supports_function_calling,
+    );
+    const supportsReasoning = asNullableBoolean(
+      catalogRecord.supports_reasoning,
+    );
+    const supportsJsonMode = asNullableBoolean(
+      catalogRecord.supports_json_mode,
+    );
+    const supportsAudioInput = asNullableBoolean(
+      catalogRecord.supports_audio_input,
+    );
+    const supportsImageOutput = asNullableBoolean(
+      catalogRecord.supports_image_output,
+    );
+    const supportsStreaming = asNullableBoolean(
+      catalogRecord.supports_streaming,
+    );
     const endpoint =
       kind === "chat"
         ? "multillm-chat-completions"
         : kind === "image"
-          ? usesLinkApiImageChat
+          ? usesImageChat
             ? "multillm-image-chat-completions"
             : "multillm-images-generations"
           : kind === "video"
@@ -268,11 +349,11 @@ export const normalizeModelOptions = (
       kind === "image"
         ? {
             imageGeneration: true,
-            asyncJobs: options.source === "navyai",
+            asyncJobs: options.source === "navyai" && !usesNavyImageChat,
             size: true,
             aspectRatio:
-              options.source !== "linkapi" || usesLinkApiImageChat,
-            ...(usesLinkApiImageChat
+              options.source !== "linkapi" || usesImageChat,
+            ...(usesImageChat
               ? { imageEdit: true, referenceImages: true }
               : {}),
           }
@@ -297,40 +378,95 @@ export const normalizeModelOptions = (
       inputModalities:
         inputModalities.length > 0
           ? [...new Set(inputModalities)]
-          : kind === "video" || usesLinkApiImageChat
+          : kind === "video" || usesImageChat
             ? ["text", "image"]
             : ["text"],
       outputModalities:
         outputModalities.length > 0
           ? [...new Set(outputModalities)]
-          : usesLinkApiImageChat
+          : usesImageChat
             ? ["text", "image"]
             : [kind === "chat" ? "text" : kind],
       ...(kind === "chat"
         ? {
-            supportsStreaming: true,
-            supportsTools:
-              typeof record.supports_tools === "boolean"
-                ? record.supports_tools
-                : undefined,
-            supportsFunctionCalling:
-              typeof record.supports_function_calling === "boolean"
-                ? record.supports_function_calling
-                : undefined,
-            supportsReasoning:
-              typeof record.supports_reasoning === "boolean"
-                ? record.supports_reasoning
-                : undefined,
+            supportsStreaming: supportsStreaming ?? true,
+            ...(supportsTools !== undefined ? { supportsTools } : {}),
+            ...(supportsFunctionCalling !== undefined
+              ? { supportsFunctionCalling }
+              : {}),
+            ...(supportsReasoning !== undefined ? { supportsReasoning } : {}),
           }
         : {}),
-      ...(kind === "image" ? { supportsImageOutput: true } : {}),
+      ...(kind === "image"
+        ? { supportsImageOutput: supportsImageOutput ?? true }
+        : supportsImageOutput !== undefined
+          ? { supportsImageOutput }
+          : {}),
       ...(supports ? { supports } : {}),
-      ...(kind === "image" && options.source === "linkapi"
-        ? { maxReferenceImages: usesLinkApiImageChat ? 5 : 0 }
+      ...(kind === "image" &&
+      (options.source === "linkapi" || usesNavyImageChat)
+        ? { maxReferenceImages: usesImageChat ? 5 : 0 }
         : {}),
       ...(kind === "video" ? { maxReferenceImages: 1 } : {}),
-      metadataSource: "multillm-live-catalog",
-      metadataStatus: "live",
+      ...(upstreamEndpoint ? { upstreamEndpoint } : {}),
+      ...(upstreamOwner ? { upstreamOwner } : {}),
+      ...(typeof catalogRecord.premium === "boolean"
+        ? { premium: catalogRecord.premium }
+        : {}),
+      ...(requiredPlan !== undefined
+        ? { requiredPlan }
+        : {}),
+      ...(tokenMultiplier !== undefined
+        ? { tokenMultiplier }
+        : {}),
+      ...(contextWindow !== undefined
+        ? { contextWindow }
+        : {}),
+      ...(maxOutputTokens !== undefined
+        ? { maxOutputTokens }
+        : {}),
+      ...(modality !== undefined
+        ? { modality }
+        : {}),
+      ...(tokenizer !== undefined
+        ? { tokenizer }
+        : {}),
+      ...(description !== undefined
+        ? { description }
+        : {}),
+      metadataSource:
+        metadataSource === undefined
+          ? "multillm-live-catalog"
+          : metadataSource,
+      ...(metadataResolvedFrom !== undefined
+        ? { metadataResolvedFrom }
+        : {}),
+      metadataStatus:
+        asString(catalogRecord.metadata_status) || "live",
+      ...(supportsVision !== undefined
+        ? { supportsVision }
+        : {}),
+      ...(supportsJsonMode !== undefined
+        ? { supportsJsonMode }
+        : {}),
+      ...(supportsAudioInput !== undefined
+        ? { supportsAudioInput }
+        : {}),
+      ...(supportsStreaming !== undefined
+        ? { supportsStreaming }
+        : {}),
+      ...(supportsTools !== undefined && kind !== "chat"
+        ? { supportsTools }
+        : {}),
+      ...(supportsFunctionCalling !== undefined && kind !== "chat"
+        ? { supportsFunctionCalling }
+        : {}),
+      ...(supportsReasoning !== undefined && kind !== "chat"
+        ? { supportsReasoning }
+        : {}),
+      ...(catalogRecord.pricing !== undefined
+        ? { pricing: catalogRecord.pricing }
+        : {}),
     });
   }
 

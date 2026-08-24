@@ -14,7 +14,7 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
 
 - Gemini image generation/editing through Gemini native image models, plus Imagen via its separate `:predict` payload.
 - Gemini Veo 3.1 text-to-video and image/reference-assisted video workflows.
-- NavyAI image, video, chat, usage, model catalog, and TTS support.
+- NavyAI image, video, chat, usage, model catalog, and TTS support, including image-output models served through either native image generation or Chat Completions.
 - Chat attachments for advertised image/file-capable models, plus iframe embedding for chat and generation views.
 - OpenRouter image-capable chat completion models with output modality discovery.
 - Chutes image, video, audio, and chat support with provider-specific settings isolated.
@@ -61,7 +61,7 @@ PROXY_BASE_URL=https://multillm-proxy.cserules.workers.dev
 MULTILLM_API_KEY=your-proxy-key
 ```
 
-Unified chat catalog entries keep their `provider:model` IDs. LinkAPI chat models use the same convention and are routed through the provider-specific proxy endpoint; the chat fallback catalog includes `linkapi:gpt-5.6-luna`. Media catalogs are source-tagged in the UI as `navyai:model`, `nanogpt:model`, or `linkapi:model` so the app can select the correct provider-specific route while using the same proxy credential. The image fallback catalog includes `linkapi:gpt-image-2-c`.
+Unified chat catalog entries keep their `provider:model` IDs and retain safe upstream model details supplied by MultiLLM. LinkAPI chat models use the same convention and are routed through the provider-specific proxy endpoint; the chat fallback catalog includes `linkapi:gpt-5.6-luna`. Media catalogs are source-tagged in the UI as `navyai:model`, `nanogpt:model`, or `linkapi:model` so the app can select the correct provider-specific route while using the same proxy credential. Navy image models follow the endpoint declared in the live catalog, including chat models with image output. The image fallback catalog includes `linkapi:gpt-image-2-c`.
 
 ## Running locally
 

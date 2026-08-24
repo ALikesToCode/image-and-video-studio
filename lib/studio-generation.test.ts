@@ -4,6 +4,10 @@ import assert from "node:assert/strict";
 import { CHUTES_IMAGE_GUIDE_PROMPT } from "./chutes-prompts.ts";
 import { NAVY_CHAT_MODELS, NAVY_IMAGE_MODELS } from "./constants.ts";
 import {
+  buildNavyChatImagePayload,
+  isNavyChatImageEndpoint,
+} from "./navy-chat-image.ts";
+import {
   buildGeminiImagePayload,
   buildGeminiVideoPayload,
   buildNavyImageGenerationPayload,
@@ -88,6 +92,138 @@ test("Navy capability grouping preserves new catalog metadata and buckets", () =
   assert.equal(grouped.image[0]?.id, "image-1");
   assert.equal(grouped.chat[1]?.id, "grok-4.3");
   assert.equal(grouped.chat[1]?.tokenMultiplier, 3);
+});
+
+test("Navy chat image-output models are available in both chat and image catalogs", () => {
+  const grouped = groupNavyModelsByCapability({
+    data: [
+      {
+        id: "gemini-3.1-flash-image",
+        owned_by: "google",
+        endpoint: "/v1/chat/completions",
+        token_multiplier: 45,
+        premium: false,
+        context_window: 131072,
+        max_output_tokens: 32768,
+        input_modalities: ["text", "image"],
+        output_modalities: ["text", "image"],
+        supports_vision: true,
+        supports_image_output: true,
+        metadata_source: "openrouter",
+        metadata_status: "known",
+      },
+    ],
+  });
+
+  assert.deepEqual(grouped.chat.map((model) => model.id), [
+    "gemini-3.1-flash-image",
+  ]);
+  assert.deepEqual(grouped.image.map((model) => model.id), [
+    "gemini-3.1-flash-image",
+  ]);
+  const model = grouped.image[0];
+  assert.equal(model?.endpoint, "/v1/chat/completions");
+  assert.equal(model?.upstreamEndpoint, "/v1/chat/completions");
+  assert.equal(model?.upstreamOwner, "google");
+  assert.equal(model?.tokenMultiplier, 45);
+  assert.equal(model?.supports?.imageGeneration, true);
+  assert.equal(model?.supports?.asyncJobs, undefined);
+  assert.equal(model?.supports?.referenceImages, true);
+  assert.equal(model?.maxReferenceImages, 5);
+});
+
+test("Navy current media catalog keeps every image and video model discoverable", () => {
+  const chatImageModels = [
+    "gemini-3.1-flash-image",
+    "gemini-3.1-flash-lite-image",
+    "gemini-3-pro-image",
+    "gemini-2.5-flash-image",
+  ];
+  const nativeImageModels = [
+    "gpt-image-2",
+    "gpt-image-1.5",
+    "flux",
+    "flux.1-schnell",
+    "flux.2-klein",
+    "z-image",
+    "nano-banana-2",
+    "p-image",
+  ];
+  const videoModels = ["veo-3.1", "gemini-omni"];
+  const grouped = groupNavyModelsByCapability({
+    data: [
+      ...chatImageModels.map((id) => ({
+        id,
+        endpoint: "/v1/chat/completions",
+        input_modalities: ["text", "image"],
+        output_modalities: ["text", "image"],
+        supports_image_output: true,
+      })),
+      ...nativeImageModels.map((id) => ({
+        id,
+        endpoint: "/v1/images/generations",
+        input_modalities: ["text", "image"],
+        output_modalities: ["image"],
+      })),
+      ...videoModels.map((id) => ({
+        id,
+        endpoint: "/v1/images/generations",
+        input_modalities: ["text", "image"],
+        output_modalities: ["video"],
+      })),
+    ],
+  });
+
+  assert.deepEqual(
+    grouped.image.map((model) => model.id),
+    [...chatImageModels, ...nativeImageModels],
+  );
+  assert.deepEqual(
+    grouped.video.map((model) => model.id),
+    videoModels,
+  );
+});
+
+test("Navy chat image payload follows the catalog-declared modalities", () => {
+  const payload = buildNavyChatImagePayload({
+    model: "gemini-3.1-flash-image",
+    prompt: "A lighthouse in a storm",
+    negativePrompt: "watermark",
+    numberOfImages: 2,
+    size: "1024x1024",
+    aspectRatio: "16:9",
+    outputModalities: ["text", "image"],
+    imageUrl: [
+      "data:image/png;base64,AQID",
+      "https://images.example/reference.png",
+    ],
+  });
+
+  assert.deepEqual(payload.modalities, ["image", "text"]);
+  assert.equal(payload.n, 2);
+  assert.deepEqual(payload.image_config, {
+    image_size: "1024x1024",
+    aspect_ratio: "16:9",
+  });
+  const content = payload.messages[0]?.content as Array<
+    Record<string, unknown>
+  >;
+  assert.match(String(content[0]?.text), /Avoid these visual issues: watermark/);
+  assert.deepEqual(content.slice(1), [
+    {
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,AQID" },
+    },
+    {
+      type: "image_url",
+      image_url: { url: "https://images.example/reference.png" },
+    },
+  ]);
+  assert.equal(isNavyChatImageEndpoint("/v1/chat/completions/"), true);
+  assert.equal(
+    isNavyChatImageEndpoint("https://attacker.example/v1/chat/completions"),
+    false,
+  );
 });
 
 test("Navy output modalities take priority over a shared media endpoint", () => {

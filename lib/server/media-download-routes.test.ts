@@ -382,6 +382,113 @@ test("Navy image route returns async job ids without waiting for media", async (
   }
 });
 
+test("Navy image route uses chat completions for catalog-declared image output", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = input instanceof Request ? input.url : String(input);
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return Response.json({
+      id: "chatcmpl_image_123",
+      choices: [
+        {
+          message: {
+            images: [
+              {
+                image_url: {
+                  url: "data:image/webp;base64,AQID",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+  };
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "gemini-3.1-flash-image",
+          modelEndpoint: "/v1/chat/completions",
+          outputModalities: ["text", "image"],
+          prompt: "A lighthouse in a storm",
+          imageUrl: "data:image/png;base64,aW5wdXQ=",
+          size: "1024x1024",
+          aspectRatio: "16:9",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(requestedUrl, "https://api.navy/v1/chat/completions");
+    assert.deepEqual(requestBody, {
+      model: "gemini-3.1-flash-image",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "A lighthouse in a storm" },
+            {
+              type: "image_url",
+              image_url: { url: "data:image/png;base64,aW5wdXQ=" },
+            },
+          ],
+        },
+      ],
+      modalities: ["image", "text"],
+      image_config: {
+        image_size: "1024x1024",
+        aspect_ratio: "16:9",
+      },
+    });
+    assert.deepEqual(payload, {
+      images: [{ data: "AQID", mimeType: "image/webp" }],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Navy image route does not treat arbitrary model endpoints as URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  globalThis.fetch = async (input) => {
+    requestedUrl = input instanceof Request ? input.url : String(input);
+    return Response.json({ id: "job_safe", status: "queued" });
+  };
+
+  try {
+    const response = await navyImagePost(
+      new Request("https://studio.test/api/navy/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "navy-secret",
+        },
+        body: JSON.stringify({
+          model: "flux",
+          modelEndpoint: "https://attacker.example/v1/chat/completions",
+          prompt: "A lighthouse in a storm",
+        }),
+      }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(requestedUrl, "https://api.navy/v1/images/generations");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Navy image route forwards multi-reference image URLs", async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | null = null;

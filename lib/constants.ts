@@ -82,6 +82,8 @@ export type ModelOption = {
     label: string;
     provider?: Provider | string;
     endpoint?: ModelEndpoint;
+    upstreamEndpoint?: string;
+    upstreamOwner?: string;
     inputModalities?: string[] | null;
     outputModalities?: string[] | null;
     premium?: boolean;
@@ -94,6 +96,7 @@ export type ModelOption = {
     category?: string | null;
     description?: string | null;
     metadataSource?: string | null;
+    metadataResolvedFrom?: string | null;
     metadataStatus?: string;
     supportsVision?: boolean | null;
     supportsTools?: boolean | null;

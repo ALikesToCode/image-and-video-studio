@@ -269,12 +269,15 @@ export function ImgGenSettings({
     const selectedOutputModalities = selectedModel?.outputModalities;
     const hasSelectedModelMetadata = Boolean(
         selectedModel?.endpoint ||
+        selectedModel?.upstreamEndpoint ||
+        selectedModel?.upstreamOwner ||
         selectedModel?.requiredPlan ||
         typeof selectedModel?.tokenMultiplier === "number" ||
         selectedModel?.contextWindow !== undefined ||
         selectedModel?.maxOutputTokens !== undefined ||
         selectedModel?.metadataStatus ||
         selectedModel?.metadataSource !== undefined ||
+        selectedModel?.metadataResolvedFrom !== undefined ||
         selectedModel?.modality !== undefined ||
         selectedModel?.tokenizer !== undefined ||
         selectedModel?.supportsVision !== undefined ||
@@ -410,7 +413,13 @@ export function ImgGenSettings({
                     ) : null}
                     {hasSelectedModelMetadata ? (
                         <div className="space-y-1 rounded-lg border border-border/50 bg-secondary/20 p-2 text-[11px] text-muted-foreground">
-                            {selectedModel?.endpoint ? <div>Endpoint: {selectedModel.endpoint}</div> : null}
+                            {selectedModel?.upstreamEndpoint || selectedModel?.endpoint ? (
+                                <div>Provider endpoint: {selectedModel.upstreamEndpoint ?? selectedModel.endpoint}</div>
+                            ) : null}
+                            {selectedModel?.upstreamEndpoint && selectedModel?.endpoint !== selectedModel.upstreamEndpoint ? (
+                                <div>Studio transport: {selectedModel.endpoint}</div>
+                            ) : null}
+                            {selectedModel?.upstreamOwner ? <div>Model owner: {selectedModel.upstreamOwner}</div> : null}
                             {selectedModel?.requiredPlan ? <div>Plan: {selectedModel.requiredPlan}</div> : null}
                             {typeof selectedModel?.tokenMultiplier === "number" ? <div>Token multiplier: {selectedModel.tokenMultiplier}</div> : null}
                             {selectedModel?.contextWindow !== undefined ? <div>Context: {formatCount(selectedModel.contextWindow)}</div> : null}
@@ -424,6 +433,7 @@ export function ImgGenSettings({
                             {selectedModel?.modality !== undefined ? <div>Modality: {selectedModel.modality ?? "unknown"}</div> : null}
                             {selectedModel?.tokenizer !== undefined ? <div>Tokenizer: {selectedModel.tokenizer ?? "unknown"}</div> : null}
                             {selectedModel?.metadataStatus ? <div>Metadata: {selectedModel.metadataStatus}{selectedModel.metadataSource ? ` via ${selectedModel.metadataSource}` : ""}</div> : null}
+                            {selectedModel?.metadataResolvedFrom ? <div>Metadata resolved from: {selectedModel.metadataResolvedFrom}</div> : null}
                             {selectedModel?.maxReferenceImages !== undefined ? <div>Reference images: up to {selectedModel.maxReferenceImages}</div> : null}
                             {selectedModel?.supportedResolutions?.length ? <div>Resolutions: {selectedModel.supportedResolutions.join(", ")}</div> : null}
                             {selectedModel?.fixedOutputImages !== undefined ? <div>Output images: fixed at {selectedModel.fixedOutputImages}</div> : null}

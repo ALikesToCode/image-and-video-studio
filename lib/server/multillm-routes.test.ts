@@ -69,6 +69,15 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
                 name: "Flux",
                 endpoint: "images/generations",
               },
+              {
+                id: "gemini-3.1-flash-image",
+                owned_by: "google",
+                endpoint: "/v1/chat/completions",
+                token_multiplier: 45,
+                input_modalities: ["text", "image"],
+                output_modalities: ["text", "image"],
+                supports_image_output: true,
+              },
             ],
           });
         }
@@ -101,6 +110,10 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
           payload.models.map(({ id, provider }) => ({ id, provider })),
           [
             { id: "navyai:flux", provider: "multillm" },
+            {
+              id: "navyai:gemini-3.1-flash-image",
+              provider: "multillm",
+            },
             { id: "linkapi:gpt-image-2-c", provider: "multillm" },
             {
               id: "linkapi:gemini-3.1-flash-image-preview",
@@ -114,6 +127,16 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
         );
         assert.equal(payload.warnings.length, 1);
         assert.match(payload.warnings[0], /NanoGPT catalog unavailable/);
+        const navyChatImage = payload.models.find(
+          (model) => model.id === "navyai:gemini-3.1-flash-image",
+        ) as Record<string, unknown> | undefined;
+        assert.equal(
+          navyChatImage?.endpoint,
+          "multillm-image-chat-completions",
+        );
+        assert.equal(navyChatImage?.upstreamEndpoint, "/v1/chat/completions");
+        assert.equal(navyChatImage?.upstreamOwner, "google");
+        assert.equal(navyChatImage?.tokenMultiplier, 45);
       }
     );
   });
@@ -365,6 +388,95 @@ test("MultiLLM generates LinkAPI Gemini image models through chat completions", 
           images: [{ data: "AQID", mimeType: "image/webp" }],
         });
       }
+    );
+  });
+});
+
+test("MultiLLM generates Navy chat image models through the declared endpoint", async () => {
+  await withMultiLlmEnv(async () => {
+    let upstreamBody: Record<string, unknown> = {};
+    await withFetch(
+      async (input, init) => {
+        assert.equal(
+          String(input),
+          "https://proxy.test/navyai/v1/chat/completions",
+        );
+        assert.equal(
+          new Headers(init?.headers).get("authorization"),
+          "Bearer server-proxy-secret",
+        );
+        upstreamBody = JSON.parse(String(init?.body)) as Record<
+          string,
+          unknown
+        >;
+        return Response.json({
+          id: "chatcmpl_navy_image",
+          choices: [
+            {
+              message: {
+                content: [
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: "data:image/webp;base64,AQID",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      },
+      async () => {
+        const response = await multiLlmImagePost(
+          new Request("https://studio.test/api/multillm/image", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "navyai:gemini-3.1-flash-image",
+              modelEndpoint: "/v1/chat/completions",
+              outputModalities: ["text", "image"],
+              prompt: "A lighthouse in a storm",
+              negativePrompt: "watermark",
+              numberOfImages: 1,
+              size: "1024x1024",
+              aspectRatio: "16:9",
+              imageDataUrl: "data:image/png;base64,aW5wdXQ=",
+              sync: false,
+            }),
+          }),
+        );
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(upstreamBody, {
+          model: "gemini-3.1-flash-image",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "A lighthouse in a storm\n\nAvoid: watermark",
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: "data:image/png;base64,aW5wdXQ=",
+                  },
+                },
+              ],
+            },
+          ],
+          modalities: ["image", "text"],
+          image_config: {
+            image_size: "1024x1024",
+            aspect_ratio: "16:9",
+          },
+        });
+        assert.deepEqual(await response.json(), {
+          images: [{ data: "AQID", mimeType: "image/webp" }],
+        });
+      },
     );
   });
 });

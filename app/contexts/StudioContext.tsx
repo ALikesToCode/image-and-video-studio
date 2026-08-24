@@ -142,6 +142,7 @@ export type GenerationJob = {
     mode: Mode;
     provider: Provider;
     model: string;
+    modelEndpoint?: string;
     outputModalities?: string[];
     prompt: string;
     apiKey: string;
@@ -388,6 +389,18 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
             const outputModalities = readNullableStringArray(record, "outputModalities", "output_modalities");
             const inputModalities = readNullableStringArray(record, "inputModalities", "input_modalities");
             const endpoint = typeof record.endpoint === "string" ? record.endpoint : undefined;
+            const upstreamEndpoint =
+                typeof record.upstreamEndpoint === "string"
+                    ? record.upstreamEndpoint
+                    : typeof record.upstream_endpoint === "string"
+                        ? record.upstream_endpoint
+                        : undefined;
+            const upstreamOwner =
+                typeof record.upstreamOwner === "string"
+                    ? record.upstreamOwner
+                    : typeof record.upstream_owner === "string"
+                        ? record.upstream_owner
+                        : undefined;
             const provider = typeof record.provider === "string" ? record.provider : undefined;
             const premium = typeof record.premium === "boolean" ? record.premium : undefined;
             const requiredPlan =
@@ -411,6 +424,11 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
             const category = readNullableString(record, "category");
             const description = readNullableString(record, "description");
             const metadataSource = readNullableString(record, "metadataSource", "metadata_source");
+            const metadataResolvedFrom = readNullableString(
+                record,
+                "metadataResolvedFrom",
+                "metadata_resolved_from"
+            );
             const metadataStatus =
                 typeof record.metadataStatus === "string"
                     ? record.metadataStatus
@@ -488,6 +506,8 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                 label,
                 ...(provider ? { provider } : {}),
                 ...(endpoint ? { endpoint } : {}),
+                ...(upstreamEndpoint ? { upstreamEndpoint } : {}),
+                ...(upstreamOwner ? { upstreamOwner } : {}),
                 ...(inputModalities !== undefined ? { inputModalities } : {}),
                 ...(outputModalities !== undefined ? { outputModalities } : {}),
                 ...(typeof premium === "boolean" ? { premium } : {}),
@@ -500,6 +520,7 @@ const sanitizeModelOptions = (models: unknown): ModelOption[] => {
                 ...(category !== undefined ? { category } : {}),
                 ...(description !== undefined ? { description } : {}),
                 ...(metadataSource !== undefined ? { metadataSource } : {}),
+                ...(metadataResolvedFrom !== undefined ? { metadataResolvedFrom } : {}),
                 ...(metadataStatus !== undefined ? { metadataStatus } : {}),
                 ...(supportsVision !== undefined ? { supportsVision } : {}),
                 ...(supportsTools !== undefined ? { supportsTools } : {}),
@@ -1630,6 +1651,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             quality: job.navyImageQuality,
                             negativePrompt: job.negativePrompt,
                             promptAgentModel: job.promptAgentModel,
+                            modelEndpoint: job.modelEndpoint,
+                            outputModalities: job.outputModalities,
                             imageUrl,
                             sync: false,
                         };
@@ -1640,6 +1663,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             numberOfImages: job.imageCount,
                             quality: job.navyImageQuality,
                             negativePrompt: job.negativePrompt,
+                            modelEndpoint: job.modelEndpoint,
+                            outputModalities: job.outputModalities,
                             imageDataUrls: referenceImages.map(
                                 (reference) => reference.dataUrl
                             ),
@@ -2854,6 +2879,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 batchId: `${batchCreatedAt}:${provider}:${activeMode}`,
                 batchCreatedAt,
                 batchOrder: index,
+                modelEndpoint:
+                    selectedModel?.upstreamEndpoint ?? selectedModel?.endpoint,
                 outputModalities: selectedModel?.outputModalities ?? undefined,
                 imageCount,
                 imageRetryAttempts: normalizedImageRetryAttempts,
