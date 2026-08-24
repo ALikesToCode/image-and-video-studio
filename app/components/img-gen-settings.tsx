@@ -38,6 +38,7 @@ import { ModelParameterSettings } from "@/app/components/model-parameter-setting
 import { NavyModelHealthSummary } from "@/app/components/navy-model-health";
 import type { ModelParameterValue } from "@/lib/constants";
 import type { ModelParameterValues } from "@/lib/model-capability-settings";
+import { usesSingleImageSubmissionAttempt } from "@/lib/image-submission-policy";
 import { useState } from "react";
 
 interface ImgGenSettingsProps {
@@ -203,6 +204,8 @@ export function ImgGenSettings({
     const [modelFilter, setModelFilter] = useState("");
     const isOpenRouter = provider === "openrouter";
     const isMultiLlm = provider === "multillm";
+    const usesSingleSubmissionAttempt =
+        usesSingleImageSubmissionAttempt(provider);
     const isImagenModel = model.startsWith("imagen-");
     const isOpenRouterGemini = isOpenRouter && model.includes("gemini");
     const isFluxFamilyModel = model.toLowerCase().includes("flux");
@@ -673,10 +676,10 @@ export function ImgGenSettings({
                         <div className="space-y-2">
                             <Label>Tries per model</Label>
                             <Select
-                                value={imageRetryAttempts.toString()}
+                                value={(usesSingleSubmissionAttempt ? 1 : imageRetryAttempts).toString()}
                                 onValueChange={(value) => setImageRetryAttempts(parseInt(value))}
                             >
-                                <SelectTrigger>
+                                <SelectTrigger disabled={usesSingleSubmissionAttempt}>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -687,6 +690,11 @@ export function ImgGenSettings({
                                     ))}
                                 </SelectContent>
                             </Select>
+                            {usesSingleSubmissionAttempt ? (
+                                <p className="text-xs text-muted-foreground">
+                                    One submission prevents duplicate paid renders after an ambiguous timeout.
+                                </p>
+                            ) : null}
                         </div>
                     </div>
                 )}

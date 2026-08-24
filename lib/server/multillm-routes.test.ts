@@ -137,6 +137,11 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
         assert.equal(navyChatImage?.upstreamEndpoint, "/v1/chat/completions");
         assert.equal(navyChatImage?.upstreamOwner, "google");
         assert.equal(navyChatImage?.tokenMultiplier, 45);
+        const navyNativeImage = payload.models.find(
+          (model) => model.id === "navyai:flux",
+        ) as Record<string, unknown> | undefined;
+        assert.equal(navyNativeImage?.maxOutputImages, 1);
+        assert.equal(navyNativeImage?.fixedOutputImages, 1);
       }
     );
   });
@@ -188,7 +193,7 @@ test("MultiLLM sends LinkAPI Luna chat through the provider route", async () => 
   });
 });
 
-test("MultiLLM image generation strips the source prefix and returns base64 data", async () => {
+test("MultiLLM native Navy images use the one-image payload contract", async () => {
   await withMultiLlmEnv(async () => {
     let upstreamBody: Record<string, unknown> = {};
     await withFetch(
@@ -217,23 +222,114 @@ test("MultiLLM image generation strips the source prefix and returns base64 data
               numberOfImages: 2,
               size: "1024x1024",
               sync: true,
+              parameters: {
+                n: 4,
+                style: "unsupported-override",
+                seed: 42,
+              },
             }),
           })
         );
 
         assert.equal(response.status, 200);
-        assert.deepEqual(upstreamBody, {
-          model: "flux",
-          prompt: "A lighthouse in a storm",
-          n: 2,
-          response_format: "b64_json",
-          size: "1024x1024",
-          sync: true,
-        });
+        assert.equal(upstreamBody.model, "flux");
+        assert.equal("n" in upstreamBody, false);
+        assert.equal(upstreamBody.response_format, "b64_json");
+        assert.equal(upstreamBody.size, "1024x1024");
+        assert.equal("aspect_ratio" in upstreamBody, false);
+        assert.equal(upstreamBody.sync, true);
+        assert.equal(upstreamBody.seed, 42);
+        assert.equal("style" in upstreamBody, false);
+        assert.match(String(upstreamBody.prompt), /A lighthouse in a storm/);
+        assert.match(String(upstreamBody.prompt), /artifact-free rendering/i);
         assert.deepEqual(await response.json(), {
           images: [{ data: "aGVsbG8=", mimeType: "image/png" }],
         });
       }
+    );
+  });
+});
+
+test("MultiLLM sends Navy aspect ratios without copying them into size", async () => {
+  await withMultiLlmEnv(async () => {
+    let upstreamBody: Record<string, unknown> = {};
+    await withFetch(
+      async (input, init) => {
+        assert.equal(
+          String(input),
+          "https://proxy.test/navyai/v1/images/generations",
+        );
+        upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({
+          data: [{ b64_json: "aGVsbG8=", mime_type: "image/png" }],
+        });
+      },
+      async () => {
+        const response = await multiLlmImagePost(
+          new Request("https://studio.test/api/multillm/image", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "navyai:nano-banana-2",
+              prompt: "A lighthouse in a storm",
+              numberOfImages: 4,
+              aspectRatio: "16:9",
+              sync: true,
+            }),
+          }),
+        );
+
+        assert.equal(response.status, 200);
+        assert.equal(upstreamBody.aspect_ratio, "16:9");
+        assert.equal("size" in upstreamBody, false);
+        assert.equal("n" in upstreamBody, false);
+      },
+    );
+  });
+});
+
+test("MultiLLM image errors preserve actionable provider diagnostics", async () => {
+  await withMultiLlmEnv(async () => {
+    await withFetch(
+      async () =>
+        Response.json(
+          {
+            error: {
+              message: "An unexpected provider error occurred",
+              details: {
+                message: "Use one of the supported image sizes.",
+                code: "invalid_image_size",
+                parameter: "size",
+              },
+            },
+          },
+          {
+            status: 400,
+            headers: { "x-request-id": "req_image_123" },
+          },
+        ),
+      async () => {
+        const response = await multiLlmImagePost(
+          new Request("https://studio.test/api/multillm/image", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "navyai:nano-banana-2",
+              prompt: "A lighthouse in a storm",
+              size: "bad-size",
+            }),
+          }),
+        );
+
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), {
+          error: "An unexpected provider error occurred",
+          code: "invalid_image_size",
+          parameter: "size",
+          requestId: "req_image_123",
+          guidance: "Use one of the supported image sizes.",
+        });
+      },
     );
   });
 });
@@ -392,7 +488,7 @@ test("MultiLLM generates LinkAPI Gemini image models through chat completions", 
   });
 });
 
-test("MultiLLM generates Navy chat image models through the declared endpoint", async () => {
+test("MultiLLM recognizes Navy Gemini chat image models without client metadata", async () => {
   await withMultiLlmEnv(async () => {
     let upstreamBody: Record<string, unknown> = {};
     await withFetch(
@@ -434,7 +530,6 @@ test("MultiLLM generates Navy chat image models through the declared endpoint", 
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
               model: "navyai:gemini-3.1-flash-image",
-              modelEndpoint: "/v1/chat/completions",
               outputModalities: ["text", "image"],
               prompt: "A lighthouse in a storm",
               negativePrompt: "watermark",
@@ -574,6 +669,54 @@ test("MultiLLM rejects LinkAPI models on the video route", async () => {
         );
         assert.equal(fetched, false);
       }
+    );
+  });
+});
+
+test("MultiLLM rejects unsafe image and video references before fetching", async () => {
+  await withMultiLlmEnv(async () => {
+    let fetched = false;
+    await withFetch(
+      async () => {
+        fetched = true;
+        throw new Error("fetch must not run");
+      },
+      async () => {
+        const imageResponse = await multiLlmImagePost(
+          new Request("https://studio.test/api/multillm/image", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "navyai:nano-banana-2",
+              prompt: "A lighthouse in a storm",
+              imageDataUrl: "file:///home/user/reference.png",
+            }),
+          }),
+        );
+        const videoResponse = await multiLlmVideoPost(
+          new Request("https://studio.test/api/multillm/video", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "navyai:veo-3.1",
+              prompt: "A lighthouse in a storm",
+              sourceImage: "javascript:alert(1)",
+            }),
+          }),
+        );
+
+        assert.equal(imageResponse.status, 400);
+        assert.match(
+          ((await imageResponse.json()) as { error: string }).error,
+          /HTTPS or valid image data URLs/,
+        );
+        assert.equal(videoResponse.status, 400);
+        assert.match(
+          ((await videoResponse.json()) as { error: string }).error,
+          /HTTPS or valid image data URLs/,
+        );
+        assert.equal(fetched, false);
+      },
     );
   });
 });

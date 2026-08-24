@@ -4,7 +4,7 @@ import {
   getMultiLlmProxyBaseUrl,
   multiLlmAuthorizationHeaders,
   parseVideoJobPayload,
-  readUpstreamError,
+  readUpstreamErrorDetails,
   resolveMultiLlmApiKey,
   type MultiLlmMediaSource,
 } from "@/lib/multillm-proxy";
@@ -57,13 +57,11 @@ export async function POST(request: Request) {
   });
   if (!statusResponse.ok) {
     return Response.json(
-      {
-        error: await readUpstreamError(
-          statusResponse,
-          "Unable to fetch the video job.",
-          [apiKey]
-        ),
-      },
+      await readUpstreamErrorDetails(
+        statusResponse,
+        "Unable to fetch the video job.",
+        [apiKey]
+      ),
       { status: statusResponse.status }
     );
   }

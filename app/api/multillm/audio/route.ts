@@ -2,7 +2,7 @@ import {
   getMultiLlmProxyBaseUrl,
   multiLlmAuthorizationHeaders,
   parseMediaModelId,
-  readUpstreamError,
+  readUpstreamErrorDetails,
   resolveMultiLlmApiKey,
   type MultiLlmMediaSource,
 } from "@/lib/multillm-proxy";
@@ -76,13 +76,11 @@ export async function POST(request: Request) {
   );
   if (!response.ok) {
     return Response.json(
-      {
-        error: await readUpstreamError(
-          response,
-          "MultiLLM audio generation failed.",
-          [apiKey]
-        ),
-      },
+      await readUpstreamErrorDetails(
+        response,
+        "MultiLLM audio generation failed.",
+        [apiKey]
+      ),
       { status: response.status }
     );
   }

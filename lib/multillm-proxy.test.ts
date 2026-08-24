@@ -8,8 +8,10 @@ import {
   parseMediaModelId,
   parseVideoJobPayload,
   readUpstreamError,
+  readUpstreamErrorDetails,
   resolveMultiLlmChatTarget,
   resolveMultiLlmApiKey,
+  sanitizeImageInputUrls,
 } from "./multillm-proxy.ts";
 
 test("keeps LinkAPI Luna in the fallback chat catalog", () => {
@@ -291,6 +293,38 @@ test("parses only supported source-tagged media ids", () => {
   assert.throws(() => parseMediaModelId("hidream"), /source prefix/);
 });
 
+test("accepts only bounded HTTPS or image data references", () => {
+  assert.deepEqual(
+    sanitizeImageInputUrls([
+      "https://media.example/reference.png",
+      "data:image/png;base64,YWJj",
+      "https://media.example/reference.png",
+    ]),
+    [
+      "https://media.example/reference.png",
+      "data:image/png;base64,YWJj",
+    ],
+  );
+  for (const unsafe of [
+    "file:///home/user/reference.png",
+    "javascript:alert(1)",
+    "http://media.example/reference.png",
+    "blob:https://studio.example/stale",
+    "data:text/html;base64,YWJj",
+  ]) {
+    assert.equal(sanitizeImageInputUrls([unsafe]), null);
+  }
+  assert.equal(
+    sanitizeImageInputUrls(
+      Array.from(
+        { length: 6 },
+        (_, index) => `https://media.example/reference-${index}.png`,
+      ),
+    ),
+    null,
+  );
+});
+
 test("normalizes completed and failed media jobs", () => {
   assert.deepEqual(
     parseVideoJobPayload({
@@ -422,4 +456,36 @@ test("prefers the server key and redacts it from upstream errors", async () => {
     if (originalKey === undefined) delete process.env.MULTILLM_API_KEY;
     else process.env.MULTILLM_API_KEY = originalKey;
   }
+});
+
+test("preserves safe upstream diagnostics while redacting credentials", async () => {
+  const apiKey = "server-proxy-secret";
+  const details = await readUpstreamErrorDetails(
+    Response.json(
+      {
+        error: {
+          message: `An unexpected provider error occurred for Bearer ${apiKey}`,
+          details: {
+            message: "The selected image size is not supported.",
+            code: "invalid_image_size",
+            parameter: "size",
+          },
+        },
+      },
+      {
+        status: 400,
+        headers: { "x-request-id": "req_multillm_123" },
+      },
+    ),
+    "MultiLLM request failed.",
+    [apiKey],
+  );
+
+  assert.deepEqual(details, {
+    error: "An unexpected provider error occurred for Bearer [redacted]",
+    code: "invalid_image_size",
+    parameter: "size",
+    requestId: "req_multillm_123",
+    guidance: "The selected image size is not supported.",
+  });
 });

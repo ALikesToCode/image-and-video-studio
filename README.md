@@ -61,7 +61,7 @@ PROXY_BASE_URL=https://multillm-proxy.cserules.workers.dev
 MULTILLM_API_KEY=your-proxy-key
 ```
 
-Unified chat catalog entries keep their `provider:model` IDs and retain safe upstream model details supplied by MultiLLM. LinkAPI chat models use the same convention and are routed through the provider-specific proxy endpoint; the chat fallback catalog includes `linkapi:gpt-5.6-luna`. Media catalogs are source-tagged in the UI as `navyai:model`, `nanogpt:model`, or `linkapi:model` so the app can select the correct provider-specific route while using the same proxy credential. Navy image models follow the endpoint declared in the live catalog, including chat models with image output. The image fallback catalog includes `linkapi:gpt-image-2-c`.
+Unified chat catalog entries keep their `provider:model` IDs and retain safe upstream model details supplied by MultiLLM. LinkAPI chat models use the same convention and are routed through the provider-specific proxy endpoint; the chat fallback catalog includes `linkapi:gpt-5.6-luna`. Media catalogs are source-tagged in the UI as `navyai:model`, `nanogpt:model`, or `linkapi:model` so the app can select the correct provider-specific route while using the same proxy credential. Navy image models follow the endpoint declared in the live catalog, including chat models with image output. Native Navy image requests produce one image per submission and are never replayed automatically after ambiguous failures. The image fallback catalog includes `linkapi:gpt-image-2-c`.
 
 ## Running locally
 

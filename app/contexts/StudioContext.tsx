@@ -97,6 +97,8 @@ import {
     shouldPersistRemoteGenerationJob,
 } from "@/lib/generation-job-persistence";
 import { sanitizeMediaUrl } from "@/lib/media-url";
+import { resolveImageSubmissionAttempts } from "@/lib/image-submission-policy";
+import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
 import {
     backupAndPruneUnsafeMediaRecords,
     partitionGeneratedImages,
@@ -652,11 +654,11 @@ const buildGeneratedImages = (payload: unknown): GeneratedImage[] => {
         .filter((image): image is GeneratedImage => image !== null);
 };
 
-const errorMessageFromPayload = (payload: unknown, fallback: string) => {
-    if (!isRecord(payload)) return fallback;
-    const error = payload.error;
-    return typeof error === "string" && error.trim() ? error : fallback;
-};
+const errorMessageFromPayload = (
+    payload: unknown,
+    fallback: string,
+    status?: number,
+) => formatProviderErrorForDisplay(payload, { fallback, status });
 
 const generationMetadataFromPayload = (payload: unknown) => {
     const root = isRecord(payload) ? payload : {};
@@ -1604,7 +1606,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             let providerRequestId: string | undefined;
 
             const images = await retryAsyncOperation<GeneratedImage[]>({
-                maxAttempts: job.remoteJobId ? 1 : job.imageRetryAttempts,
+                maxAttempts: resolveImageSubmissionAttempts({
+                    provider: job.provider,
+                    remoteJobId: job.remoteJobId,
+                    configuredAttempts: job.imageRetryAttempts ?? DEFAULT_IMAGE_RETRY_ATTEMPTS,
+                }),
                 onAttempt: ({ attempt, maxAttempts }) => {
                     if (maxAttempts <= 1) return;
                     updateJob(job.id, {
@@ -1755,7 +1761,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         });
                         payload = await response.json();
                         if (!response.ok) {
-                            throw new Error(errorMessageFromPayload(payload, "Image generation failed."));
+                            throw new Error(
+                                errorMessageFromPayload(
+                                    payload,
+                                    "Image generation failed.",
+                                    response.status,
+                                )
+                            );
                         }
                     }
 
@@ -1801,7 +1813,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                                     throw new Error(
                                         errorMessageFromPayload(
                                             navyPayload,
-                                            `Unable to poll ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job.`
+                                            `Unable to poll ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job.`,
+                                            pollResponse.status,
                                         )
                                     );
                                 }

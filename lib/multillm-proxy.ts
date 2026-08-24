@@ -1,8 +1,8 @@
 import type { ModelOption } from "@/lib/constants";
 import {
   getUserApiKey,
+  providerErrorDetails,
   providerErrorMessage,
-  redactSecrets,
 } from "@/lib/api-safety";
 import { sanitizeMediaUrl } from "./media-url.ts";
 
@@ -80,10 +80,12 @@ const withProviderMetadata = (record: ModelRecord): ModelRecord => ({
   ...record,
 });
 
-export const isLinkApiChatImageModel = (model: string) =>
+export const isGeminiChatImageModel = (model: string) =>
   /^gemini-[a-z0-9._-]*image(?:[a-z0-9._-]*)$/i.test(
-    model.replace(/^linkapi:/i, "")
+    model.replace(/^(?:navyai|linkapi):/i, "")
   );
+
+export const isLinkApiChatImageModel = isGeminiChatImageModel;
 
 export const resolveMultiLlmChatTarget = (modelRef: string) => {
   const normalizedModel = modelRef.trim();
@@ -276,7 +278,8 @@ export const normalizeModelOptions = (
     const usesNavyImageChat =
       kind === "image" &&
       options.source === "navyai" &&
-      upstreamEndpoint.toLowerCase().includes("/v1/chat/completions") &&
+      (upstreamEndpoint.toLowerCase().includes("/v1/chat/completions") ||
+        isGeminiChatImageModel(rawId)) &&
       modelSupportsKind(record, "image");
     const usesImageChat = usesLinkApiImageChat || usesNavyImageChat;
     const inputModalities = [
@@ -408,6 +411,11 @@ export const normalizeModelOptions = (
         ? { maxReferenceImages: usesImageChat ? 5 : 0 }
         : {}),
       ...(kind === "video" ? { maxReferenceImages: 1 } : {}),
+      ...(kind === "image" &&
+      options.source === "navyai" &&
+      !usesNavyImageChat
+        ? { maxOutputImages: 1, fixedOutputImages: 1 }
+        : {}),
       ...(upstreamEndpoint ? { upstreamEndpoint } : {}),
       ...(upstreamOwner ? { upstreamOwner } : {}),
       ...(typeof catalogRecord.premium === "boolean"
@@ -493,6 +501,23 @@ export const parseMediaModelId = (value: unknown) => {
   return { source: source as MultiLlmMediaSource, model };
 };
 
+export const sanitizeImageInputUrls = (
+  values: unknown[],
+  maxItems = 5,
+) => {
+  if (values.length > maxItems) return null;
+  const sanitized: string[] = [];
+  for (const value of values) {
+    const safeUrl = sanitizeMediaUrl(value, {
+      kind: "image",
+      allowBlob: false,
+    });
+    if (!safeUrl) return null;
+    if (!sanitized.includes(safeUrl)) sanitized.push(safeUrl);
+  }
+  return sanitized;
+};
+
 export const getMultiLlmProxyBaseUrl = () => {
   const configured =
     process.env.PROXY_BASE_URL?.trim() ||
@@ -532,21 +557,32 @@ export const multiLlmErrorMessage = (
 ) =>
   providerErrorMessage(error, fallback, apiKey ? [apiKey] : []).slice(0, 1000);
 
-export const readUpstreamError = async (
+export const readUpstreamErrorDetails = async (
   response: Response,
   fallback: string,
   knownSecrets: string[] = []
 ) => {
   const text = await response.text();
-  if (!text) return fallback;
+  let payload: unknown = text || null;
   try {
-    const payload = JSON.parse(text) as unknown;
-    return providerErrorMessage(payload, fallback, knownSecrets).slice(0, 1000);
+    payload = text ? (JSON.parse(text) as unknown) : null;
   } catch {
     // The upstream sometimes returns plain-text errors.
   }
-  return redactSecrets(text, knownSecrets).trim().slice(0, 1000) || fallback;
+  return providerErrorDetails(payload, fallback, {
+    knownSecrets,
+    response,
+  });
 };
+
+export const readUpstreamError = async (
+  response: Response,
+  fallback: string,
+  knownSecrets: string[] = []
+) =>
+  (
+    await readUpstreamErrorDetails(response, fallback, knownSecrets)
+  ).error;
 
 export type NormalizedImageItem = {
   data?: string;

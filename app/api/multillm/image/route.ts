@@ -2,15 +2,18 @@ import {
   extractImageItems,
   extractJobId,
   getMultiLlmProxyBaseUrl,
+  isGeminiChatImageModel,
   isLinkApiChatImageModel,
   multiLlmAuthorizationHeaders,
   parseMediaModelId,
-  readUpstreamError,
+  readUpstreamErrorDetails,
   resolveMultiLlmApiKey,
+  sanitizeImageInputUrls,
   type MultiLlmMediaSource,
   type NormalizedImageItem,
 } from "@/lib/multillm-proxy";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
+import { buildNavyImageGenerationPayload } from "@/lib/studio-generation";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +94,27 @@ const usesDeclaredImageChatEndpoint = (value: unknown) => {
   );
 };
 
+const NAVY_NATIVE_RESERVED_PARAMETERS = new Set([
+  "model",
+  "prompt",
+  "n",
+  "size",
+  "aspect_ratio",
+  "response_format",
+  "image_url",
+  "negative_prompt",
+  "quality",
+  "style",
+  "sync",
+]);
+
+const navyNativeParameters = (parameters: Record<string, unknown>) =>
+  Object.fromEntries(
+    Object.entries(parameters).filter(
+      ([key]) => !NAVY_NATIVE_RESERVED_PARAMETERS.has(key)
+    )
+  );
+
 export async function POST(request: Request) {
   let body: ImageRequest;
   try {
@@ -128,15 +152,26 @@ export async function POST(request: Request) {
     4,
     Math.max(1, Math.floor(body.numberOfImages ?? 1))
   );
-  const imageInputs = [
+  const requestedImageInputs = [
     ...(body.imageDataUrl ? [body.imageDataUrl] : []),
     ...(Array.isArray(body.imageDataUrls) ? body.imageDataUrls : []),
-  ].filter((value, index, values) => value && values.indexOf(value) === index);
+  ].filter(Boolean);
+  const imageInputs = sanitizeImageInputUrls(requestedImageInputs);
+  if (!imageInputs) {
+    return Response.json(
+      {
+        error:
+          "Reference images must contain at most five HTTPS or valid image data URLs.",
+      },
+      { status: 400 }
+    );
+  }
   const usesLinkApiImageChat =
     source === "linkapi" && isLinkApiChatImageModel(model);
   const usesNavyImageChat =
     source === "navyai" &&
-    usesDeclaredImageChatEndpoint(body.modelEndpoint);
+    (usesDeclaredImageChatEndpoint(body.modelEndpoint) ||
+      isGeminiChatImageModel(model));
   const usesImageChat = usesLinkApiImageChat || usesNavyImageChat;
   const prompt =
     usesImageChat && body.negativePrompt?.trim()
@@ -153,13 +188,15 @@ export async function POST(request: Request) {
         ...(declaredModalities.includes("text") ? ["text"] : []),
       ]
     : ["image", "text"];
+  const parameters =
+    body.parameters &&
+    typeof body.parameters === "object" &&
+    !Array.isArray(body.parameters)
+      ? body.parameters
+      : {};
   const payload: Record<string, unknown> = usesImageChat
     ? {
-        ...(body.parameters &&
-        typeof body.parameters === "object" &&
-        !Array.isArray(body.parameters)
-          ? body.parameters
-          : {}),
+        ...parameters,
         model,
         messages: [
           {
@@ -190,58 +227,54 @@ export async function POST(request: Request) {
             }
           : {}),
       }
-    : {
-        ...(body.parameters &&
-        typeof body.parameters === "object" &&
-        !Array.isArray(body.parameters)
-          ? body.parameters
-          : {}),
-        model,
-        prompt,
-        n: numberOfImages,
-        response_format: source === "linkapi" ? "url" : "b64_json",
-      };
-  if (!usesImageChat && body.size) payload.size = body.size;
-  if (!usesImageChat && body.aspectRatio && source !== "linkapi") {
-    payload.aspect_ratio = body.aspectRatio;
-    if (!body.size && source === "navyai") payload.size = body.aspectRatio;
-  }
-  if (
-    !usesImageChat &&
-    body.negativePrompt &&
-    source !== "linkapi"
-  ) {
-    payload.negative_prompt = body.negativePrompt;
-  }
-  if (
-    !usesImageChat &&
-    body.quality &&
-    (source === "navyai" || source === "linkapi")
-  ) {
-    payload.quality = body.quality;
-  }
-  if (
-    !usesImageChat &&
-    body.style &&
-    (source === "navyai" || source === "linkapi")
-  ) {
-    payload.style = body.style;
-  }
-  if (
-    !usesImageChat &&
-    imageInputs.length &&
-    source !== "linkapi"
-  ) {
-    payload[source === "navyai" ? "image_url" : "input_references"] =
-      imageInputs.length === 1 ? imageInputs[0] : imageInputs;
-  }
-  if (
-    source === "navyai" &&
-    !usesNavyImageChat &&
-    typeof body.sync === "boolean"
-  ) {
-    payload.sync = body.sync;
-  }
+    : source === "navyai"
+      ? {
+          ...navyNativeParameters(parameters),
+          ...buildNavyImageGenerationPayload({
+            model,
+            prompt,
+            size: body.size,
+            numberOfImages,
+            quality: body.quality,
+            style: body.style,
+            imageUrl:
+              imageInputs.length === 0
+                ? undefined
+                : imageInputs.length === 1
+                  ? imageInputs[0]
+                  : imageInputs,
+            negativePrompt: body.negativePrompt,
+            sync: body.sync,
+            responseFormat: "b64_json",
+            aspectRatio: body.aspectRatio,
+          }),
+        }
+      : {
+          ...parameters,
+          model,
+          prompt,
+          n: numberOfImages,
+          response_format: source === "linkapi" ? "url" : "b64_json",
+          ...(body.size ? { size: body.size } : {}),
+          ...(body.aspectRatio && source !== "linkapi"
+            ? { aspect_ratio: body.aspectRatio }
+            : {}),
+          ...(body.negativePrompt && source !== "linkapi"
+            ? { negative_prompt: body.negativePrompt }
+            : {}),
+          ...(body.quality && source === "linkapi"
+            ? { quality: body.quality }
+            : {}),
+          ...(body.style && source === "linkapi"
+            ? { style: body.style }
+            : {}),
+          ...(imageInputs.length && source !== "linkapi"
+            ? {
+                input_references:
+                  imageInputs.length === 1 ? imageInputs[0] : imageInputs,
+              }
+            : {}),
+        };
 
   const response = await fetch(
     `${getMultiLlmProxyBaseUrl()}/${source}/v1/${
@@ -256,13 +289,11 @@ export async function POST(request: Request) {
   );
   if (!response.ok) {
     return Response.json(
-      {
-        error: await readUpstreamError(
-          response,
-          "MultiLLM image generation failed.",
-          [apiKey]
-        ),
-      },
+      await readUpstreamErrorDetails(
+        response,
+        "MultiLLM image generation failed.",
+        [apiKey]
+      ),
       { status: response.status }
     );
   }
@@ -324,13 +355,11 @@ export async function GET(request: Request) {
   );
   if (!response.ok) {
     return Response.json(
-      {
-        error: await readUpstreamError(
-          response,
-          "Unable to fetch the image job.",
-          [apiKey]
-        ),
-      },
+      await readUpstreamErrorDetails(
+        response,
+        "Unable to fetch the image job.",
+        [apiKey]
+      ),
       { status: response.status }
     );
   }

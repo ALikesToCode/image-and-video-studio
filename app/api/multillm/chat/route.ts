@@ -1,7 +1,7 @@
 import {
   getMultiLlmProxyBaseUrl,
   multiLlmAuthorizationHeaders,
-  readUpstreamError,
+  readUpstreamErrorDetails,
   resolveMultiLlmChatTarget,
   resolveMultiLlmApiKey,
 } from "@/lib/multillm-proxy";
@@ -94,13 +94,11 @@ export async function POST(request: Request) {
 
   if (!response.ok) {
     return Response.json(
-      {
-        error: await readUpstreamError(
-          response,
-          "MultiLLM chat completion failed.",
-          [apiKey]
-        ),
-      },
+      await readUpstreamErrorDetails(
+        response,
+        "MultiLLM chat completion failed.",
+        [apiKey]
+      ),
       { status: response.status }
     );
   }

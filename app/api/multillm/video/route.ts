@@ -4,8 +4,9 @@ import {
   multiLlmAuthorizationHeaders,
   parseMediaModelId,
   parseVideoJobPayload,
-  readUpstreamError,
+  readUpstreamErrorDetails,
   resolveMultiLlmApiKey,
+  sanitizeImageInputUrls,
   type MultiLlmMediaSource,
 } from "@/lib/multillm-proxy";
 
@@ -81,12 +82,22 @@ export async function POST(request: Request) {
   if (body.negativePrompt) payload.negative_prompt = body.negativePrompt;
 
   let path: string;
-  const imageInputs = [
+  const requestedImageInputs = [
     ...(body.sourceImage ? [body.sourceImage] : []),
     ...(body.imageDataUrl ? [body.imageDataUrl] : []),
     ...(Array.isArray(body.imageDataUrls) ? body.imageDataUrls : []),
     ...(Array.isArray(body.referenceImages) ? body.referenceImages : []),
-  ].filter((value, index, values) => value && values.indexOf(value) === index);
+  ].filter(Boolean);
+  const imageInputs = sanitizeImageInputUrls(requestedImageInputs);
+  if (!imageInputs) {
+    return Response.json(
+      {
+        error:
+          "Video references must contain at most five HTTPS or valid image data URLs.",
+      },
+      { status: 400 }
+    );
+  }
   if (source === "navyai") {
     path = "/navyai/v1/images/generations";
     payload.sync = false;
@@ -115,13 +126,11 @@ export async function POST(request: Request) {
   });
   if (!response.ok) {
     return Response.json(
-      {
-        error: await readUpstreamError(
-          response,
-          "MultiLLM video generation failed.",
-          [apiKey]
-        ),
-      },
+      await readUpstreamErrorDetails(
+        response,
+        "MultiLLM video generation failed.",
+        [apiKey]
+      ),
       { status: response.status }
     );
   }
@@ -186,13 +195,11 @@ export async function GET(request: Request) {
   });
   if (!response.ok) {
     return Response.json(
-      {
-        error: await readUpstreamError(
-          response,
-          "Unable to fetch the video job.",
-          [apiKey]
-        ),
-      },
+      await readUpstreamErrorDetails(
+        response,
+        "Unable to fetch the video job.",
+        [apiKey]
+      ),
       { status: response.status }
     );
   }
