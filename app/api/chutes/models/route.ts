@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 
 export async function GET(req: Request) {

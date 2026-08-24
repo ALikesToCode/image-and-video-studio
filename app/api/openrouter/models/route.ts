@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 export async function GET(req: Request) {
   const apiKey = req.headers.get("x-user-api-key");
   if (!apiKey) {

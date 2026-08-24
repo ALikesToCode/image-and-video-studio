@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { jsonOrNull, providerErrorDetails } from "@/lib/api-safety";
 import { groupNavyModelsByCapability } from "@/lib/studio-generation";
 

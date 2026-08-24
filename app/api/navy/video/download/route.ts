@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { safeFetchExternalMedia, validateExternalMediaUrl } from "@/lib/server/safe-fetch";
 import { NAVY_MEDIA_HOSTS, shouldAttachNavyAuth } from "@/lib/server/navy-media";
 

@@ -10,7 +10,6 @@ import {
   shouldUseOpenAIResponses,
 } from "@/lib/openai-responses";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 type ChatRequest = {

@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
 
 type TtsRequest = {

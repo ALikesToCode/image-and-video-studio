@@ -12,7 +12,6 @@ import {
 } from "@/lib/multillm-proxy";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 type ImageRequest = {

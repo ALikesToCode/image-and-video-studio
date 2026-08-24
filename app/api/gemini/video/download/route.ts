@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { getUserApiKey } from "@/lib/api-safety";
 import { safeFetchExternalMedia, validateExternalMediaUrl } from "@/lib/server/safe-fetch";
 

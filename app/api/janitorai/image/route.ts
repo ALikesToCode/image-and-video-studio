@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { POST as chutesImagePost } from "@/app/api/chutes/image/route";
 import { POST as geminiImagePost } from "@/app/api/gemini/image/route";
 import { POST as nanoGptImagePost } from "@/app/api/nanogpt/image/route";

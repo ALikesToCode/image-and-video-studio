@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { POST as janitorImagePost } from "@/app/api/janitorai/image/route";
 import {
   janitorAiJsonResponse,

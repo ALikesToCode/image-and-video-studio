@@ -9,7 +9,6 @@ import {
   type MultiLlmModelKind,
 } from "@/lib/multillm-proxy";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 type CatalogTarget = {

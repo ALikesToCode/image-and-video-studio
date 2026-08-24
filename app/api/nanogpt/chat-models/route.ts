@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { getProviderApiKey, providerErrorDetails } from "@/lib/api-safety";
 import {
   normalizeNanoGptChatMeta,

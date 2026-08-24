@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
 
-export const runtime = "edge";
-
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();

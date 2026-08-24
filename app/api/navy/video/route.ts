@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { getUserApiKey, jsonOrNull, providerErrorDetails } from "@/lib/api-safety";
 import {
   buildNavyImageGenerationPayload,

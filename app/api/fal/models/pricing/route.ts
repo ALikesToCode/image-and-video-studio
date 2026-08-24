@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 const buildTargetUrl = (req: Request, baseUrl: string) => {
   const incomingUrl = new URL(req.url);
   const targetUrl = new URL(baseUrl);

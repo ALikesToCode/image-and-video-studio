@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { providerErrorDetails, redactSecrets } from "@/lib/api-safety";
 
 const NAVY_MODEL_STATUS_URL = "https://api.navy/v1/models/status";

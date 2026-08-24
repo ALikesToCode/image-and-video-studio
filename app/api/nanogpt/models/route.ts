@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { providerErrorDetails } from "@/lib/api-safety";
 import {
   normalizeNanoGptImageModels,
