@@ -1,5 +1,7 @@
 import { createParser, type EventSourceMessage } from "eventsource-parser";
 
+import { isOutputTokenLimitReached } from "../llm-output-budget";
+
 type JsonRecord = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -37,7 +39,7 @@ const completedResponseText = (value: JsonRecord) =>
   responsesOutputText(value.response) ||
   (value.type === "response.completed" ? responsesOutputText(value) : "");
 
-export const readAssistantTextResponse = async (response: Response) => {
+export const readAssistantTextResponseResult = async (response: Response) => {
   if (!response.body) {
     throw new Error("No response body.");
   }
@@ -47,12 +49,17 @@ export const readAssistantTextResponse = async (response: Response) => {
   let streamedText = "";
   let completedText = "";
   let raw = "";
+  let outputTokenLimitReached = false;
   const parser = createParser({
     onEvent: (event: EventSourceMessage) => {
       if (event.data === "[DONE]") return;
       try {
         const value = JSON.parse(event.data) as unknown;
         if (!isRecord(value)) return;
+        outputTokenLimitReached =
+          outputTokenLimitReached ||
+          isOutputTokenLimitReached(value) ||
+          isOutputTokenLimitReached(value.response);
         const eventType =
           typeof value.type === "string" ? value.type : event.event;
         if (
@@ -93,15 +100,34 @@ export const readAssistantTextResponse = async (response: Response) => {
     reader.releaseLock();
   }
 
-  if (streamedText.trim()) return streamedText.trim();
-  if (completedText.trim()) return completedText.trim();
+  if (streamedText.trim()) {
+    return {
+      text: streamedText.trim(),
+      outputTokenLimitReached,
+    };
+  }
+  if (completedText.trim()) {
+    return {
+      text: completedText.trim(),
+      outputTokenLimitReached,
+    };
+  }
 
   const rawBody = raw.trim();
-  if (!rawBody.startsWith("{")) return "";
+  if (!rawBody.startsWith("{")) {
+    return { text: "", outputTokenLimitReached };
+  }
   try {
     const value = JSON.parse(rawBody) as unknown;
-    return (chatCompletionText(value) || responsesOutputText(value)).trim();
+    return {
+      text: (chatCompletionText(value) || responsesOutputText(value)).trim(),
+      outputTokenLimitReached:
+        outputTokenLimitReached || isOutputTokenLimitReached(value),
+    };
   } catch {
-    return "";
+    return { text: "", outputTokenLimitReached };
   }
 };
+
+export const readAssistantTextResponse = async (response: Response) =>
+  (await readAssistantTextResponseResult(response)).text;

@@ -32,6 +32,7 @@ import {
   isOpenAIReasoningModel,
   shouldUseOpenAIResponses,
 } from "../openai-responses.ts";
+import { normalizeStudioChatOutputTokens } from "../llm-output-budget.ts";
 
 type StudioChatProvider = "navy" | "chutes" | "nanogpt" | "multillm";
 
@@ -136,11 +137,6 @@ const recoveringNavyFetch = createRecoveringChatFetch(true);
 const recoveringNanoGptFetch = createRecoveringChatFetch(false);
 const recoveringMultiLlmFetch = createRecoveringChatFetch(true);
 
-const maxOutputTokens = (value: unknown) => {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 1024;
-  return Math.min(8192, Math.max(1, Math.trunc(value)));
-};
-
 const safeStreamError = (error: unknown, apiKey: string) => {
   if (InvalidToolInputError.isInstance(error)) {
     return "The model called a tool with invalid inputs.";
@@ -181,6 +177,17 @@ const usageMessageMetadata = (usage: {
   );
   return Object.keys(defined).length ? { usage: defined } : undefined;
 };
+
+const finishMessageMetadata = ({
+  finishReason,
+  usage,
+}: {
+  finishReason: string;
+  usage: Parameters<typeof usageMessageMetadata>[0];
+}) => ({
+  finishReason,
+  ...usageMessageMetadata(usage),
+});
 
 export async function handleAIStudioChatRequest(request: Request) {
   const body = await parseRequestBody(request);
@@ -265,7 +272,7 @@ export async function handleAIStudioChatRequest(request: Request) {
       messages,
       tools,
       toolChoice,
-      maxOutputTokens: maxOutputTokens(body.maxTokens),
+      maxOutputTokens: normalizeStudioChatOutputTokens(body.maxTokens),
       reasoning,
       ...(useOpenAIResponses
         ? {
@@ -290,7 +297,10 @@ export async function handleAIStudioChatRequest(request: Request) {
       sendReasoning: true,
       messageMetadata: ({ part }) =>
         part.type === "finish"
-          ? usageMessageMetadata(part.totalUsage)
+          ? finishMessageMetadata({
+              finishReason: part.finishReason,
+              usage: part.totalUsage,
+            })
           : undefined,
       onError: (error) => safeStreamError(error, apiKey),
     });

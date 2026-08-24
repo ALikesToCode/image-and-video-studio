@@ -635,6 +635,11 @@ export const extractAIChatStreamState = (message: UIMessage) => {
   const thinking: string[] = [];
   const toolCalls: AIChatToolCall[] = [];
   const toolErrors: string[] = [];
+  const messageMetadata = asRecord(message.metadata);
+  const finishReason =
+    typeof messageMetadata?.finishReason === "string"
+      ? messageMetadata.finishReason
+      : null;
 
   for (const part of message.parts) {
     if (part.type === "text") {
@@ -703,6 +708,8 @@ export const extractAIChatStreamState = (message: UIMessage) => {
     thinking: thinking.join(""),
     toolCalls,
     toolErrors,
+    finishReason,
+    outputTokenLimitReached: finishReason === "length",
   };
 };
 

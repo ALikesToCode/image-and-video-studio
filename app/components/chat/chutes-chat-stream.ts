@@ -9,7 +9,11 @@ import {
   type AIChatToolName,
 } from "@/lib/ai-sdk-chat";
 import { toChatCompletionMessages } from "@/lib/chat-tooling";
-import { readAssistantTextResponse } from "@/lib/client/chat-stream-text";
+import { readAssistantTextResponseResult } from "@/lib/client/chat-stream-text";
+import {
+  resolvePromptRewriteOutputTokenBudgets,
+  resolveStudioChatOutputTokenBudgets,
+} from "@/lib/llm-output-budget";
 import {
   areImagePromptsEquivalent,
   buildImagePolicyRecoveryPrompt,
@@ -40,6 +44,7 @@ type ChatStreamClientOptions = {
   reasoningEffort: ReasoningEffort;
   supportsReasoning: boolean;
   isDeepSeekV4Model: boolean;
+  modelMaxOutputTokens?: number | null;
 };
 
 type StreamOptions = {
@@ -90,6 +95,7 @@ export const createChatStreamClient = ({
   reasoningEffort,
   supportsReasoning,
   isDeepSeekV4Model: deepSeekV4,
+  modelMaxOutputTokens,
 }: ChatStreamClientOptions) => {
   const callChatStreaming = async (
     items: ChatMessage[],
@@ -128,70 +134,109 @@ export const createChatStreamClient = ({
             reasoningEffort,
           }
         : {};
-    const transport = new DefaultChatTransport({
-      api: "/api/studio/chat",
-      headers: {
-        "x-user-api-key": apiKey,
-      },
-      prepareSendMessagesRequest: () => ({
-        body: {
-          provider,
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...toChatCompletionMessages(
-              items.filter((item) => !item.transient),
-              {
-                includeReasoningContent:
-                  provider === "navy" ||
-                  provider === "nanogpt" ||
-                  provider === "multillm",
-              },
-            ),
-          ],
-          enabledTools: requestTools,
-          ...(requestTools.length
-            ? { toolChoice: toolChoiceOverride ?? "auto" }
-            : {}),
-          maxTokens: 1024,
-          ...reasoningPayload,
+    const tokenBudgets = resolveStudioChatOutputTokenBudgets({
+      hasTools: requestTools.length > 0,
+      modelMaxOutputTokens,
+    });
+
+    for (const [attemptIndex, maxTokens] of tokenBudgets.entries()) {
+      const hasRetry = attemptIndex < tokenBudgets.length - 1;
+      const transport = new DefaultChatTransport({
+        api: "/api/studio/chat",
+        headers: {
+          "x-user-api-key": apiKey,
         },
-      }),
-    });
-    const stream = await transport.sendMessages({
-      trigger: "submit-message",
-      chatId: `studio-${provider}`,
-      messageId: undefined,
-      messages: [],
-      abortSignal: options.signal,
-    });
-
-    let finalState = {
-      content: "",
-      thinking: "",
-      toolCalls: [] as ToolCall[],
-      toolErrors: [] as string[],
-    };
-    for await (const uiMessage of readUIMessageStream({
-      stream,
-      terminateOnError: true,
-    })) {
-      finalState = extractAIChatStreamState(uiMessage);
-      onUpdate({
-        content: finalState.content,
-        thinking: finalState.thinking,
-        toolCalls: finalState.toolCalls,
+        prepareSendMessagesRequest: () => ({
+          body: {
+            provider,
+            model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...toChatCompletionMessages(
+                items.filter((item) => !item.transient),
+                {
+                  includeReasoningContent:
+                    provider === "navy" ||
+                    provider === "nanogpt" ||
+                    provider === "multillm",
+                },
+              ),
+            ],
+            enabledTools: requestTools,
+            ...(requestTools.length
+              ? { toolChoice: toolChoiceOverride ?? "auto" }
+              : {}),
+            maxTokens,
+            ...reasoningPayload,
+          },
+        }),
       });
+
+      try {
+        const stream = await transport.sendMessages({
+          trigger: "submit-message",
+          chatId: `studio-${provider}`,
+          messageId: undefined,
+          messages: [],
+          abortSignal: options.signal,
+        });
+
+        let finalState = {
+          content: "",
+          thinking: "",
+          toolCalls: [] as ToolCall[],
+          toolErrors: [] as string[],
+          finishReason: null as string | null,
+          outputTokenLimitReached: false,
+        };
+        for await (const uiMessage of readUIMessageStream({
+          stream,
+          terminateOnError: true,
+        })) {
+          finalState = extractAIChatStreamState(uiMessage);
+          onUpdate({
+            content: finalState.content,
+            thinking: finalState.thinking,
+            toolCalls: finalState.toolCalls,
+          });
+        }
+
+        const invalidToolInput = finalState.toolCalls.some(
+          (call) => Boolean(call.input_error),
+        );
+        if (finalState.outputTokenLimitReached || invalidToolInput) {
+          onUpdate({ content: "", thinking: "", toolCalls: [] });
+          if (hasRetry) continue;
+          throw new Error(
+            finalState.outputTokenLimitReached
+              ? "The model reached its output limit before completing the response. No partial prompt was sent. Choose a model with a larger output limit or shorten the request."
+              : "The model returned invalid tool arguments after one retry. No generation request was sent.",
+          );
+        }
+        if (finalState.toolErrors.length) {
+          throw new Error(finalState.toolErrors.join(" "));
+        }
+        return {
+          content: finalState.content,
+          thinking: finalState.thinking,
+          toolCalls: finalState.toolCalls,
+        };
+      } catch (error) {
+        if (isAbortLikeError(error, options.signal)) throw error;
+        const retryableInvalidToolError =
+          error instanceof Error &&
+          /(?:invalid tool|tool (?:call|arguments?).*invalid|called a tool with invalid)/i.test(
+            error.message,
+          );
+        if (hasRetry && retryableInvalidToolError) {
+          onUpdate({ content: "", thinking: "", toolCalls: [] });
+          continue;
+        }
+        throw error;
+      }
     }
 
-    if (finalState.toolErrors.length) {
-      throw new Error(finalState.toolErrors.join(" "));
-    }
-    return {
-      content: finalState.content,
-      thinking: finalState.thinking,
-      toolCalls: finalState.toolCalls,
-    };
+    throw new Error("Chat completion failed before producing a response.");
   };
 
   const recoverImagePromptAfterPolicyFailure = async ({
@@ -255,49 +300,55 @@ export const createChatStreamClient = ({
         activeModel: model,
         nextAttempt,
       });
+    const tokenBudgets =
+      resolvePromptRewriteOutputTokenBudgets(currentPrompt);
 
     for (const recoveryModel of recoveryModels) {
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-user-api-key": apiKey,
-          },
-          body: JSON.stringify({
-            model: recoveryModel,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "You rewrite image-generation prompts after provider moderation rejections. Return only one direct image prompt. Preserve the named primary subject, semantic age band, artistic medium, composition, mood, lighting, camera/framing, and quality level while removing unsafe details. Lead with the primary subject and keep background detail subordinate.",
-              },
-              {
-                role: "user",
-                content: recoveryInstruction,
-              },
-            ],
-            toolChoice: "none",
-            maxTokens: 2200,
-            ...(provider === "navy" &&
-            isDeepSeekV4Model(recoveryModel)
-              ? { thinking: { type: "disabled" } }
-              : {}),
-          }),
-          signal,
-        });
-        if (!response.ok) continue;
-        const recoveredPrompt = normalizeRecoveredImagePrompt(
-          await readAssistantTextResponse(response),
-        );
-        if (
-          recoveredPrompt &&
-          !areImagePromptsEquivalent(recoveredPrompt, currentPrompt)
-        ) {
-          return recoveredPrompt;
+      for (const maxTokens of tokenBudgets) {
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-api-key": apiKey,
+            },
+            body: JSON.stringify({
+              model: recoveryModel,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "You rewrite image-generation prompts after provider moderation rejections. Return only one direct image prompt. Preserve the named primary subject, semantic age band, artistic medium, composition, mood, lighting, camera/framing, and quality level while removing unsafe details. Lead with the primary subject and keep background detail subordinate.",
+                },
+                {
+                  role: "user",
+                  content: recoveryInstruction,
+                },
+              ],
+              toolChoice: "none",
+              maxTokens,
+              ...(provider === "navy" &&
+              isDeepSeekV4Model(recoveryModel)
+                ? { thinking: { type: "disabled" } }
+                : {}),
+            }),
+            signal,
+          });
+          if (!response.ok) break;
+          const result = await readAssistantTextResponseResult(response);
+          if (result.outputTokenLimitReached) continue;
+          const recoveredPrompt = normalizeRecoveredImagePrompt(result.text);
+          if (
+            recoveredPrompt &&
+            !areImagePromptsEquivalent(recoveredPrompt, currentPrompt)
+          ) {
+            return recoveredPrompt;
+          }
+          break;
+        } catch (error) {
+          if (isAbortLikeError(error, signal)) throw error;
+          break;
         }
-      } catch (error) {
-        if (isAbortLikeError(error, signal)) throw error;
       }
     }
 
@@ -321,41 +372,47 @@ export const createChatStreamClient = ({
       targetImageModel: targetModel,
       prompt: currentPrompt,
     });
+    const tokenBudgets =
+      resolvePromptRewriteOutputTokenBudgets(currentPrompt);
     for (const helpModel of recoveryModels) {
-      try {
-        const response = await fetch("/api/navy/chat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-user-api-key": apiKey,
-          },
-          body: JSON.stringify({
-            model: helpModel,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "You are a production image-prompt editor. Return only one direct visual prompt containing the renderable scene and direct visual constraints. Preserve the user's named subject, identity, lawful intent, requested medium, composition, mood, and constraints. Make the primary subject visually dominant and keep secondary background detail subordinate. Never include prompt-writing guidance, model or provider names, policy or safety commentary, retry language, or invisible instructions. Treat the requested medium as authoritative and never add conflicting photography or realism cues unless the user explicitly requests a hybrid.",
-              },
-              { role: "user", content: promptHelpRequest },
-            ],
-            toolChoice: "none",
-            maxTokens: 2200,
-          }),
-          signal,
-        });
-        if (!response.ok) continue;
-        const helpedPrompt = normalizeRecoveredImagePrompt(
-          await readAssistantTextResponse(response),
-        );
-        if (
-          helpedPrompt &&
-          !areImagePromptsEquivalent(helpedPrompt, currentPrompt)
-        ) {
-          return helpedPrompt;
+      for (const maxTokens of tokenBudgets) {
+        try {
+          const response = await fetch("/api/navy/chat", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-api-key": apiKey,
+            },
+            body: JSON.stringify({
+              model: helpModel,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "You are a production image-prompt editor. Return only one direct visual prompt containing the renderable scene and direct visual constraints. Preserve the user's named subject, identity, lawful intent, requested medium, composition, mood, and constraints. Make the primary subject visually dominant and keep secondary background detail subordinate. Never include prompt-writing guidance, model or provider names, policy or safety commentary, retry language, or invisible instructions. Treat the requested medium as authoritative and never add conflicting photography or realism cues unless the user explicitly requests a hybrid.",
+                },
+                { role: "user", content: promptHelpRequest },
+              ],
+              toolChoice: "none",
+              maxTokens,
+            }),
+            signal,
+          });
+          if (!response.ok) break;
+          const result = await readAssistantTextResponseResult(response);
+          if (result.outputTokenLimitReached) continue;
+          const helpedPrompt = normalizeRecoveredImagePrompt(result.text);
+          if (
+            helpedPrompt &&
+            !areImagePromptsEquivalent(helpedPrompt, currentPrompt)
+          ) {
+            return helpedPrompt;
+          }
+          break;
+        } catch (error) {
+          if (isAbortLikeError(error, signal)) throw error;
+          break;
         }
-      } catch (error) {
-        if (isAbortLikeError(error, signal)) throw error;
       }
     }
 

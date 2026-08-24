@@ -133,6 +133,43 @@ test("Studio chat uses AI SDK tool streaming and provider defaults", async () =>
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Studio chat caps large budgets and exposes output-limit finishes", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return upstreamStream([
+      completionChunk({ role: "assistant", content: "Partial response" }),
+      completionChunk({}, "length"),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "secret",
+        },
+        body: JSON.stringify({
+          provider: "chutes",
+          model: "test-model",
+          messages: [{ role: "user", content: "Write a long response." }],
+          maxTokens: 100_000,
+        }),
+      })
+    );
+    const message = await readFinalUIMessage(response);
+    const metadata = message.metadata as Record<string, unknown> | undefined;
+
+    assert.equal(upstreamBody.max_tokens, 32_768);
+    assert.equal(metadata?.finishReason, "length");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("Studio chat retries Navy reasoning envelopes without dropping tools", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
@@ -757,6 +794,7 @@ test("Studio chat streams NanoGPT tools, usage, and Gemini signatures", async ()
     });
     const finish = chunks.find((chunk) => chunk.type === "finish");
     assert.deepEqual(finish?.messageMetadata, {
+      finishReason: "tool-calls",
       usage: {
         inputTokens: 12,
         outputTokens: 3,

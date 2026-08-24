@@ -403,6 +403,7 @@ export function ChutesChat({
     reasoningEffort,
     supportsReasoning: chatModelSupportsReasoning,
     isDeepSeekV4Model: isDeepSeekV4ChatModel,
+    modelMaxOutputTokens: selectedChatModel?.maxOutputTokens,
   });
 
   const runGenerateImage = (

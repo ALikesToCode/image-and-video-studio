@@ -19,6 +19,10 @@ import {
   isOpenAIResponsesModel,
 } from "@/lib/openai-responses";
 import {
+  isOutputTokenLimitReached,
+  resolvePromptRewriteOutputTokenBudgets,
+} from "@/lib/llm-output-budget";
+import {
   buildImageRetryFallbackPrompt,
   buildNavyImageGenerationPayload,
   isNavyGenerationFailed,
@@ -131,37 +135,42 @@ const rewritePromptWithPromptAgent = async ({
   const useResponses = isOpenAIResponsesModel(agentModel);
 
   try {
-    const response = await fetch(
-      `https://api.navy/v1/${
-        useResponses ? "responses" : "chat/completions"
-      }`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(
-          useResponses
-            ? buildOpenAIResponsesPayload({
-                model: agentModel,
-                messages,
-                maxTokens: 2200,
-                stream: false,
-              })
-            : {
-                model: agentModel,
-                stream: false,
-                max_tokens: 2200,
-                messages,
-              }
-        ),
-      }
-    );
+    for (const maxTokens of resolvePromptRewriteOutputTokenBudgets(prompt)) {
+      const response = await fetch(
+        `https://api.navy/v1/${
+          useResponses ? "responses" : "chat/completions"
+        }`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(
+            useResponses
+              ? buildOpenAIResponsesPayload({
+                  model: agentModel,
+                  messages,
+                  maxTokens,
+                  stream: false,
+                })
+              : {
+                  model: agentModel,
+                  stream: false,
+                  max_tokens: maxTokens,
+                  messages,
+                }
+          ),
+        }
+      );
 
-    if (!response.ok) return prompt;
-    const rewritten = extractPromptAgentContent(await jsonOrNull(response));
-    return rewritten || prompt;
+      if (!response.ok) return prompt;
+      const data = await jsonOrNull(response);
+      if (isOutputTokenLimitReached(data)) continue;
+      const rewritten = extractPromptAgentContent(data);
+      return rewritten || prompt;
+    }
+    return prompt;
   } catch {
     return prompt;
   }

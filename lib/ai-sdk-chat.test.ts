@@ -276,6 +276,18 @@ test("AI SDK stream state exposes every completed parallel tool call", () => {
   ]);
 });
 
+test("AI SDK stream state exposes output-limit completion metadata", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-truncated",
+    role: "assistant",
+    metadata: { finishReason: "length" },
+    parts: [{ type: "text", text: "Partial response" }],
+  });
+
+  assert.equal(state.finishReason, "length");
+  assert.equal(state.outputTokenLimitReached, true);
+});
+
 test("AI SDK stream state turns invalid tool input into a resolvable tool call", () => {
   const state = extractAIChatStreamState({
     id: "assistant-invalid-tool",
