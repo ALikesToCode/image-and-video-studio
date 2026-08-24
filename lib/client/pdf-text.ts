@@ -130,6 +130,6 @@ export const extractPdfTextFromFile = async (
       truncatedByPages: totalPages > pages.length && !result.truncatedByChars,
     };
   } finally {
-    await pdf.destroy();
+    await loadingTask.destroy();
   }
 };
