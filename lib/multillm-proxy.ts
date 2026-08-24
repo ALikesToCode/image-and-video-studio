@@ -184,6 +184,47 @@ const truthyCapability = (record: ModelRecord, keys: string[]) => {
   );
 };
 
+const declaredCapability = (record: ModelRecord, keys: string[]) => {
+  const catalogRecord = withProviderMetadata(record);
+  const capabilities = isRecord(catalogRecord.capabilities)
+    ? catalogRecord.capabilities
+    : {};
+  for (const key of keys) {
+    if (typeof catalogRecord[key] === "boolean") {
+      return catalogRecord[key] as boolean;
+    }
+    if (typeof capabilities[key] === "boolean") {
+      return capabilities[key] as boolean;
+    }
+  }
+  return undefined;
+};
+
+const modelOutputModalities = (record: ModelRecord) => {
+  const catalogRecord = withProviderMetadata(record);
+  const capabilities = isRecord(catalogRecord.capabilities)
+    ? catalogRecord.capabilities
+    : {};
+  const architecture = isRecord(catalogRecord.architecture)
+    ? catalogRecord.architecture
+    : {};
+  return [
+    ...asStringList(catalogRecord.output_modalities),
+    ...asStringList(architecture.output_modalities),
+    ...asStringList(capabilities.output_modalities),
+  ];
+};
+
+const imageGeneratorIdPattern =
+  /(?:^|[:/_.-])(?:dall-e|diffusion|flux|gpt-image|hidream|imagen|nano-banana|p-image|z-image)(?:$|[:/_.-])/i;
+const videoGeneratorIdPattern =
+  /(?:^|[:/_.-])(?:cogvideo|kling|seedance|sora|veo|video)(?:$|[:/_.-])/i;
+
+const modelIdLooksLikeImageGenerator = (record: ModelRecord) => {
+  const id = modelIdentity(record);
+  return isGeminiChatImageModel(id) || imageGeneratorIdPattern.test(id);
+};
+
 export const modelSupportsKind = (
   record: ModelRecord,
   kind: Exclude<MultiLlmModelKind, "chat">
@@ -218,26 +259,36 @@ export const modelSupportsKind = (
   }
 
   const usesImageEndpoint = endpoint.includes("images/generations");
-  const usesImageCapableChatEndpoint =
-    (endpoint.includes("chat/completions") ||
-      endpoint.includes("generatecontent")) &&
-    /\b(image|flux|dall-e|imagen|hidream|diffusion)\b/.test(metadata);
-  if (endpoint && !usesImageEndpoint && !usesImageCapableChatEndpoint) {
-    return false;
-  }
-  const hasImageCapability =
-    usesImageEndpoint ||
-    truthyCapability(record, [
-      "supports_image_output",
-      "supports_images",
-      "supports_image_generation",
-    ]) ||
-    /\b(image|flux|dall-e|imagen|hidream|diffusion)\b/.test(metadata);
+  const usesChatEndpoint =
+    endpoint.includes("chat/completions") ||
+    endpoint.includes("generatecontent");
+  const outputModalities = modelOutputModalities(record);
+  const declaresImageOutput = outputModalities.includes("image");
+  const declaresVideoOutput = outputModalities.includes("video");
+  const imageOutputCapability = declaredCapability(record, [
+    "supports_image_output",
+    "supports_images",
+    "supports_image_generation",
+  ]);
+  const isVideoModel =
+    (declaresVideoOutput && !declaresImageOutput) ||
+    truthyCapability(record, ["supports_video_output", "supports_video"]) ||
+    videoGeneratorIdPattern.test(modelIdentity(record));
 
+  if (imageOutputCapability === false || isVideoModel) return false;
+  if (usesImageEndpoint) return true;
+  if (usesChatEndpoint) {
+    return (
+      imageOutputCapability === true ||
+      declaresImageOutput ||
+      modelIdLooksLikeImageGenerator(record)
+    );
+  }
+  if (endpoint) return false;
   return (
-    hasImageCapability &&
-    !truthyCapability(record, ["supports_video_output", "supports_video"]) &&
-    !/\b(video|veo|sora|kling|cogvideo|seedance)\b/.test(metadata)
+    imageOutputCapability === true ||
+    declaresImageOutput ||
+    modelIdLooksLikeImageGenerator(record)
   );
 };
 

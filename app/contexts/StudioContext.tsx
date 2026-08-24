@@ -99,6 +99,7 @@ import {
 import { sanitizeMediaUrl } from "@/lib/media-url";
 import { resolveImageSubmissionAttempts } from "@/lib/image-submission-policy";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
+import { refreshMultiLlmChatWorkspaceCatalogs } from "@/lib/multillm-catalog-refresh";
 import {
     backupAndPruneUnsafeMediaRecords,
     partitionGeneratedImages,
@@ -3269,7 +3270,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setMultiLlmChatModelsLoading(true);
         setMultiLlmChatModelsError(null);
         try {
-            await refreshMultiLlmCatalog("chat");
+            await refreshMultiLlmChatWorkspaceCatalogs(refreshMultiLlmCatalog);
         } catch (error) {
             setMultiLlmChatModelsError(
                 error instanceof Error

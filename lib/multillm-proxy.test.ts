@@ -133,6 +133,43 @@ test("routes catalog-declared Navy chat image models through chat transport", ()
   assert.equal(model?.maxReferenceImages, 5);
 });
 
+test("does not expose vision-only chat models as image generators", () => {
+  const models = normalizeModelOptions(
+    {
+      data: [
+        {
+          id: "gpt-5.6-luna",
+          endpoint: "/v1/chat/completions",
+          input_modalities: ["text", "image", "file"],
+          output_modalities: ["text"],
+          supports_vision: true,
+          supports_image_output: false,
+        },
+        {
+          id: "gemini-3.1-flash-image",
+          endpoint: "/v1/chat/completions",
+          input_modalities: ["text", "image"],
+          output_modalities: ["text", "image"],
+          supports_image_output: true,
+        },
+        {
+          id: "gpt-image-2",
+          endpoint: "/v1/images/generations",
+          input_modalities: ["text", "image"],
+          output_modalities: ["image"],
+          supports_image_output: true,
+        },
+      ],
+    },
+    { source: "navyai", kind: "image" },
+  );
+
+  assert.deepEqual(
+    models.map((model) => model.id),
+    ["navyai:gemini-3.1-flash-image", "navyai:gpt-image-2"],
+  );
+});
+
 test("routes LinkAPI chat models through the provider-specific endpoint", () => {
   assert.deepEqual(resolveMultiLlmChatTarget("linkapi:gpt-5.6-luna"), {
     model: "gpt-5.6-luna",
