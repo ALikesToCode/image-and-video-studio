@@ -116,6 +116,50 @@ export const stripImagePromptMetaInstructions = (value: string) => {
   return (match ? value.slice(0, match.index) : value).trim();
 };
 
+const IMAGE_PROMPT_INTERNAL_LINE_PATTERN =
+  /^\s*(?:internal\s+(?:state|note)|continuity\s+(?:state|note)|reasoning|serializer\s+(?:note|instruction)|prompt(?:-writing)?\s+(?:guide|guidance|instruction)|model\s+(?:note|instruction)|guidelines?)\s*:/i;
+const IMAGE_PROMPT_INTERNAL_DIRECTIVE_PATTERN =
+  /^(?:complete|resolve|state whether|serialize|track|never infer|do not serialize)\b.*\b(?:internally|silently|before writing|continuity|state|registration|serializer|field|rules?)\b/i;
+const IMAGE_PROMPT_INTERNAL_STATE_PREFIX =
+  /(^|:\s*)(?:UNREGISTERED|REGISTERED|UNKNOWN|ESTABLISHED|CHANGED)\b(?:\s*[\u2013\u2014-]\s*(?:resolving|preserving|tracking)(?:\s+now)?|\s*(?=[.;]|$))(?:[.;]\s*)?/g;
+const IMAGE_PROMPT_RULE_REFERENCE =
+  /\b(?:following|according to)\s+(?:the\s+)?(?:continuity|ear[-\s]styling|jewelry[-\s]diversity|image[-\s]prompt|serializer)(?:\s+(?:and|or)\s+[a-z -]+)?\s+rules?\b[.;,]?\s*/gi;
+
+export const stripImagePromptWorkflowScaffolding = (value: string) => {
+  const seenDetails = new Set<string>();
+  const visualLines: string[] = [];
+
+  for (const sourceLine of value.split("\n")) {
+    if (IMAGE_PROMPT_INTERNAL_LINE_PATTERN.test(sourceLine)) continue;
+
+    const line = sourceLine
+      .replace(IMAGE_PROMPT_INTERNAL_STATE_PREFIX, "$1")
+      .replace(IMAGE_PROMPT_RULE_REFERENCE, "")
+      .replace(
+        /\bComplete any required first-view registration silently before writing this field,?\s*then serialize only the resulting physical design\.?/gi,
+        "",
+      )
+      .replace(
+        /\bNever infer absence from an earlier crop, occlusion, or omission\.?/gi,
+        "",
+      )
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+
+    if (!line || IMAGE_PROMPT_INTERNAL_DIRECTIVE_PATTERN.test(line)) continue;
+    if (/^[^:\n]{1,48}:\s*$/.test(line)) continue;
+
+    const visibleDetail = line.replace(/^[^:\n]{1,48}:\s*/, "");
+    const fingerprint = imagePromptFingerprint(visibleDetail);
+    if (fingerprint.length >= 16 && seenDetails.has(fingerprint)) continue;
+    if (fingerprint.length >= 16) seenDetails.add(fingerprint);
+    visualLines.push(line);
+  }
+
+  return normalizeImagePromptWhitespace(visualLines.join("\n"));
+};
+
 const replacePositivePhotoCue = (value: string) =>
   value.replace(
     /\b(?:photorealistic|photo[-\s]?realistic|professional photography|real photograph|live[-\s]?action)\b/gi,

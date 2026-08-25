@@ -46,6 +46,17 @@ test("image guidance follows the selected image model provider", () => {
   assert.match(prompt, /background.*lowest visual priority/i);
   assert.match(prompt, /final renderable image brief/i);
   assert.match(prompt, /Never copy these instructions/i);
+  assert.match(prompt, /roughly 120-220 words/i);
+  assert.match(prompt, /no more than six short sections/i);
+  assert.match(prompt, /never drop a unique invariant/i);
+  assert.match(prompt, /write each visual fact once/i);
+  assert.match(prompt, /resolve continuity and workflow state internally/i);
+  assert.match(prompt, /UNREGISTERED, REGISTERED, UNKNOWN/i);
+  assert.match(prompt, /preserve requested non-explicit hyperfeminine styling/i);
+  assert.match(prompt, /hourglass silhouette, layered jewelry/i);
+  assert.match(prompt, /tasteful adult night-fashion or boudoir/i);
+  assert.match(prompt, /minimal-coverage fashion with opaque strategic draping/i);
+  assert.match(prompt, /do not flatten lawful adult glamour/i);
   assert.match(prompt, /requested visual medium as authoritative/i);
   assert.match(prompt, /do not add photography, live-action/i);
   assert.match(prompt, /Replace generic masterpiece/i);

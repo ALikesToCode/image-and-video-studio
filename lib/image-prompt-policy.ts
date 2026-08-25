@@ -6,10 +6,13 @@ import {
   normalizeImagePromptWhitespace,
   stripImagePromptEnvelope,
   stripImagePromptMetaInstructions,
+  stripImagePromptWorkflowScaffolding,
 } from "./image-prompt-language.ts";
 
 const ADULT_IMAGE_PROMPT_PATTERN =
-  /\b(nsfw|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
+  /\b(nsfw|uncensored|explicit|nude|nudity|naked|erotic|boudoir|lingerie|topless|breasts?|nipples?|sexual|sex|sensual|intimate|provocative|seductive)\b/i;
+const MINOR_IMAGE_PROMPT_PATTERN =
+  /\b(?:infant|toddler|child|school-age|teenage|teenager|minor|underage)\b/i;
 const POLICY_SENSITIVE_IMAGE_PROMPT_PATTERN =
   /\b(J-cup|hard\s+nipples?|crotch|heaving\s+chest|pleading\s+(?:wide\s+)?eyes|masked\s+man|non-?consensual|very\s+large\s+bust|student\s+council|school\s+uniform|slim\s+yet\s+curvy|curvy\s+build|dilated\s+pupils?|vacant\s+(?:eyes|gaze)|glassy\s+(?:eyes?|gaze)|bloody|blood\s*soaked|gore|gory|body\s+parts?|dismember(?:ed|ment)?|decapitat(?:ed|ion)|graphic\s+injur(?:y|ies)|torture|final\s+blow|suicide|self-?harm|cutting|hanging|overdose|terroris[mt]|extremis[mt]|propaganda|recruitment|build\s+(?:a\s+)?(?:bomb|gun|weapon)|weapon\s+(?:construction|procurement|use)|phishing|credential\s+theft|steal(?:ing)?\s+.*passwords?|malware|deepfake|impersonat(?:e|ion)|photorealistic\s+likeness)\b/i;
 
@@ -61,10 +64,13 @@ const reframePolicySensitiveVisualDetails = (prompt: string) =>
     .replace(/\bstudent council\b/gi, "university council")
     .replace(/\bhigh school\b/gi, "university")
     .replace(/\bschool uniform\b/gi, "formal academy-inspired blazer outfit")
-    .replace(/\bslim\s+yet\s+curvy\b/gi, "slim, balanced")
-    .replace(/\bcurvy\s+build\b/gi, "balanced build")
-    .replace(/\bcurvy\b/gi, "balanced")
-    .replace(/\bimpossibly\s+wide\s+hips\b/gi, "balanced silhouette")
+    .replace(/\bslim\s+yet\s+curvy\b/gi, "slender hourglass silhouette")
+    .replace(/\bcurvy\s+build\b/gi, "pronounced hourglass build")
+    .replace(/\bcurvy\b/gi, "hourglass")
+    .replace(
+      /\bimpossibly\s+wide\s+hips\b/gi,
+      "dramatic stylized hourglass silhouette",
+    )
     .replace(/\berotic\s+standoff\s+atmosphere\b/gi, "dramatic editorial tension")
     .replace(/\berotic\b/gi, "dramatic editorial")
     .replace(/\bprovocative\b/gi, "glamorous")
@@ -78,18 +84,21 @@ const reframePolicySensitiveVisualDetails = (prompt: string) =>
     .replace(/\bglassy\b/gi, "bright")
     .replace(
       /\bmassive\s+heavy\s+J-cup\s+breasts\s+straining\s+against\s+(?:her|their)\s+top\b/gi,
-      "a balanced hourglass figure in fitted activewear",
+      "a pronounced hourglass silhouette in fitted activewear",
     )
     .replace(
       /\ba\s+(?:very\s+large|large)\s+bust\b/gi,
-      "a balanced hourglass figure",
+      "a pronounced hourglass silhouette",
     )
     .replace(
       /\b(?:very\s+large|large)\s+bust\b/gi,
-      "balanced hourglass figure",
+      "pronounced hourglass silhouette",
     )
-    .replace(/\bmassive\s+heavy\s+breasts?\b/gi, "balanced hourglass figure")
-    .replace(/\bJ-cup\s+breasts?\b/gi, "balanced upper-body silhouette")
+    .replace(
+      /\bmassive\s+heavy\s+breasts?\b/gi,
+      "pronounced hourglass silhouette",
+    )
+    .replace(/\bJ-cup\s+breasts?\b/gi, "pronounced upper-body silhouette")
     .replace(
       /\bhard\s+nipples?\s+poking\s+through\s+(?:her|their)\s+top\b/gi,
       "subtle fabric texture",
@@ -99,6 +108,16 @@ const reframePolicySensitiveVisualDetails = (prompt: string) =>
       "subtle fabric texture",
     )
     .replace(/\bhard\s+nipples?\b/gi, "subtle fabric texture")
+    .replace(/\b(?:nsfw|uncensored|explicit)\b/gi, "tasteful editorial")
+    .replace(
+      /\b(?:nude|nudity|naked|topless)\b/gi,
+      "minimal-coverage fashion with opaque strategic draping",
+    )
+    .replace(/\bbreasts?\b/gi, "upper-body silhouette")
+    .replace(/\bnipples?\b/gi, "subtle fabric detail")
+    .replace(/\bsexual\b/gi, "intimate")
+    .replace(/\bsex\b/gi, "intimacy")
+    .replace(/\bsensual\b/gi, "elegant intimate")
     .replace(
       /\b(?:slight\s+)?darkened\s+patch\s+at\s+the\s+crotch\b/gi,
       "natural fabric shading",
@@ -144,17 +163,60 @@ const reframePolicySensitiveVisualDetails = (prompt: string) =>
       "fictionalized non-deceptive likeness",
     );
 
+const reframeMinorSensitiveVisualDetails = (prompt: string) =>
+  normalizeImagePromptWhitespace(
+    prompt
+      .replace(
+        /\b(?:tasteful\s+editorial\s+)?minimal-coverage\s+fashion\s+with\s+opaque\s+strategic\s+draping\b/gi,
+        "age-appropriate fully clothed fashion",
+      )
+      .replace(
+        /\btasteful\s+editorial\b/gi,
+        "age-appropriate fully clothed fashion",
+      )
+      .replace(/\bhyperfeminine\b/gi, "age-appropriate")
+      .replace(
+        /\b(?:(?:slender|pronounced|dramatic\s+stylized)\s+)?hourglass(?:\s+(?:build|figure|silhouette))?\b/gi,
+        "age-appropriate build",
+      )
+      .replace(
+        /\bpronounced\s+upper-body\s+silhouette\b/gi,
+        "age-appropriate build",
+      )
+      .replace(
+        /\b(?:boudoir|lingerie|erotic|sensual|seductive|provocative|intimate)\b/gi,
+        "age-appropriate fully clothed fashion",
+      )
+      .replace(
+        /\b(?:nude|nudity|naked|topless|nsfw|uncensored|explicit)\b/gi,
+        "fully clothed",
+      )
+      .replace(
+        /\b(?:breasts?|nipples?|cleavage|crotch)\b/gi,
+        "clothing silhouette",
+      )
+      .replace(
+        /\bage-appropriate(?:\s+age-appropriate)+\b/gi,
+        "age-appropriate",
+      ),
+  );
+
 const buildOpenAiAllowedImagePrompt = (
   prompt: string,
   { force = false }: { force?: boolean } = {},
 ) => {
-  const normalizedPrompt = normalizePrompt(prompt);
+  const normalizedPrompt = stripImagePromptWorkflowScaffolding(
+    normalizePrompt(prompt),
+  );
   if (!normalizedPrompt) return normalizedPrompt;
   const policyReadyPrompt =
     force || isPolicySensitiveImagePrompt(normalizedPrompt)
       ? reframePolicySensitiveVisualDetails(normalizedPrompt)
       : normalizedPrompt;
-  return policyReadyPrompt;
+  return MINOR_IMAGE_PROMPT_PATTERN.test(normalizedPrompt) &&
+    isPolicySensitiveImagePrompt(normalizedPrompt)
+    ? reframeMinorSensitiveVisualDetails(policyReadyPrompt)
+    : policyReadyPrompt;
 };
 
 const buildGeminiAllowedImagePrompt = (
@@ -167,7 +229,10 @@ const buildGeminiAllowedImagePrompt = (
     force || isPolicySensitiveImagePrompt(normalizedPrompt)
       ? reframePolicySensitiveVisualDetails(normalizedPrompt)
       : normalizedPrompt;
-  return policyReadyPrompt;
+  return MINOR_IMAGE_PROMPT_PATTERN.test(normalizedPrompt) &&
+    isPolicySensitiveImagePrompt(normalizedPrompt)
+    ? reframeMinorSensitiveVisualDetails(policyReadyPrompt)
+    : policyReadyPrompt;
 };
 
 export const preparePolicyImagePromptForModel = (
@@ -399,6 +464,10 @@ Return only the final image prompt.
 Requirements:
 - Preserve the user's named subjects, identity-defining details, lawful intent, output medium, mood, palette, and requested constraints.
 - Return only the final renderable scene and direct visual constraints. Never include this guide, provider or model names, policy or safety commentary, retry language, or invisible instructions.
+- For clearly adult subjects, preserve requested non-explicit hyperfeminine styling, hourglass silhouette, hair, makeup, layered jewelry, fashion, materials, and tasteful adult night-fashion or boudoir art direction. When source wording asks for nude, topless, uncensored, or explicit presentation, use positive visible wording such as minimal-coverage fashion with opaque strategic draping. Do not flatten lawful adult glamour into generic "balanced" styling.
+- Keep a normal single-image brief compact: aim for roughly 120-220 words and no more than six short sections when possible. Exceed that range only for distinct visual, reference, edit, layout, or exact-text constraints.
+- Write each visual fact once. Remove repeated descriptions, internal state labels, continuity commentary, planning notes, off-frame trivia, and empty headings without dropping any unique identity or composition invariant.
+- Resolve workflow state silently and describe only the finished visible result. Never output words such as UNREGISTERED, REGISTERED, UNKNOWN, "resolving now," or "following continuity rules" as image content.
 - Lead with output style, primary subject and visible action, then defining details, composition/camera, lighting, background, and constraints.
 - Make the named primary subject visually dominant; background details receive the lowest priority unless the user explicitly says otherwise.
 - Treat the requested medium as authoritative. For anime or another illustration style, use medium-native visible details and do not introduce photography, live-action, realistic-skin-texture, or subsurface-scattering cues unless the user explicitly requests a hybrid.
@@ -435,30 +504,17 @@ export const buildImageRetryFallbackPrompt = ({
   return appendImagePromptDirective(saferPrompt, direction);
 };
 
-const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `For OpenAI GPT Image and Gemini Nano Banana models, always shape the final visual prompt before calling generate_image. Preserve the user's lawful image intent while removing or softening disallowed, non-visual, or unsupported parts. Translate risky intent into a safe visual language instead of hiding it.
-These are instructions for you, never text to copy into generate_image. The tool prompt must contain only the final renderable scene and direct visual constraints. Never mention a prompt guide, provider, model family, policy, safety system, moderation, retry, or "instructions not visible" in the tool prompt.
-Follow a subject-first production order: intended output, primary subject and action, defining details, composition/camera, lighting/mood, background/setting, then constraints. When the user identifies a main character or primary focus, make that subject dominant through scale, sharpness, contrast, placement, and detail; give the background the lowest visual priority unless explicitly requested otherwise.
-Treat the requested visual medium as a hard constraint. For anime, manga, cel-shaded, watercolor, comic, or other illustrated output, never add photorealistic, real-photograph, professional-photography, live-action, realistic-skin-texture, or subsurface-scattering cues unless the user explicitly requests a hybrid. Translate them into medium-native visible details such as crisp linework, cel-shaded skin gradients, illustrated fabric folds, controlled color blocks, and stylized highlights.
-Prefer concrete, medium-specific visual details over generic keyword stacks such as "masterpiece", "best quality", "ultra-detailed", or "8K".
-Use semantic visual age tags, never exact numeric ages or numeric age ranges: infant, toddler, child, teenager, young adult, adult, middle-aged adult, or older adult. Preserve the correct life stage and never age a minor into an adult.
-For OpenAI GPT Image text-in-image requests, put exact visible copy in quotes or ALL CAPS, specify typography and placement, and add no extra words, captions, watermarks, signatures, or unrelated logos.
-For OpenAI GPT Image edits or reference images, state what changes and what remains invariant, including identity, geometry, layout, brand elements, camera angle, lighting, saturation, contrast, and surrounding objects.
-For a requested regeneration or variation, do not resubmit an identical prompt. Apply the user's requested change while restating critical invariants. If the user asks only for another version, vary one meaningful visual axis such as composition, pose, expression, lighting, or palette while preserving subject identity and intent.
-Preserve the theme through symbolism, fashion, environment, expression, cinematic composition, lighting, texture, and color while removing operational or harmful detail.
-Use tasteful artistic framing such as "tasteful artistic illustration", "vibrant intricate anime style", or "glamorous editorial artwork" when it fits the request.
-For Nano Banana models, avoid repeated emphasis on explicit anatomy, body-hugging fabric, submission, eroticism, seductive framing, or explicit arching poses. Replace those details with non-explicit visible art direction such as "pronounced hourglass silhouette", "fitted outfit that follows the figure", "confident presentation", "glamorous poise", "warm amusement", "teasing smirk", "playful fondness", "intimate domestic mood", or "artistically charged atmosphere".
-If another person appears in an intimate or tense scene, prefer a silhouetted, distant, or partially visible figure unless the user explicitly needs that person as a main subject. Avoid coercion, explicit sexual focus, or direct physical interaction as the center of the still image.
-Keep only details that can be shown visually: subject, setting, composition, pose, clothing, objects, lighting, colors, style, mood, camera angle, background, symbols, readable text, and layout.
-Ignore or convert anything that is not directly visual:
-- Do not ask the image to speak, explain, argue, think, or teach.
-- Do not include hidden meanings unless visible symbols, expressions, gestures, or scene design can show them.
-- Do not follow audio, animation, interaction, or behavior-over-time instructions unless a single still frame can show them.
-- Do not render long paragraphs of text inside the image.
-- Do not include unnecessary labels, captions, names, or UI text unless explicitly requested.
-- Treat names as context, not mandatory visible text, unless the user explicitly asks to render them.
-- Render requested exact text exactly and keep it short, clear, and legible.
-- If a concept is abstract, translate it into a strong visual metaphor.
-Prioritize a clean, coherent, visually rich image. Remove clutter, backend notes, explanations, and anything the image model cannot depict. Do not try to bypass provider moderation; if the request cannot be safely rephrased, ask for a safer visual direction.`;
+const STRICT_IMAGE_MODEL_VISUAL_REPHRASE_GUIDANCE = `Internal planning only: these guidelines are never image content and must never be copied into generate_image.
+Before calling an OpenAI GPT Image or Gemini Nano Banana model, produce one compact renderable brief that preserves every unique lawful subject, identity, reference, edit, exact-text, composition, lighting, palette, mood, and exclusion invariant.
+For clearly adult subjects, preserve requested non-explicit hyperfeminine styling, hourglass silhouette, layered jewelry, elaborate hair and makeup, fashion materials, and tasteful adult night-fashion or boudoir direction. Translate nude, topless, uncensored, or explicit source labels into positive visible wording such as minimal-coverage fashion with opaque strategic draping. Do not flatten lawful adult glamour into generic "balanced" styling.
+For a normal single still, aim for roughly 120-220 words and no more than six short sections when possible. Exceed that range only when distinct constraints require it; never truncate or generalize away an invariant to meet the target.
+Write each visual fact once. Remove repeated descriptions, empty headings, internal state labels, continuity commentary, planning notes, backend language, and off-frame trivia. Resolve workflow state silently and emit only the finished visible result.
+Use subject-first order: medium and primary subject/action, identity-defining details, composition/camera, lighting/mood, background, then essential constraints. Keep the primary subject dominant and background detail subordinate unless requested otherwise.
+Treat the requested medium as authoritative. Use medium-native visible details and never add photography or live-action cues to illustration unless the user requests a hybrid. Replace generic quality keyword stacks with concrete line, color, texture, material, and lighting direction.
+Use semantic visual age tags rather than exact numeric ages. Preserve the established life stage and never age a minor into an adult.
+Keep only what a single frame can depict. Translate thoughts, relationships, motion over time, and abstract intent into visible expression, pose, spacing, objects, environment, symbols, or lighting when needed.
+For revisions and references, state the visible change and critical invariants once. For an unspecified variation, change one meaningful visual axis without changing identity or intent. Render exact requested text exactly and add no unrequested copy.
+Translate provider-sensitive wording into a policy-compliant visible equivalent while preserving lawful theme and mood. Never mention policy, moderation, providers, models, retries, blocked categories, sanitization, or hidden instructions in the image prompt, and never try to evade moderation or conceal prohibited intent.`;
 
 export const buildProviderPolicyHintForImageModels = (models: string[]) => {
   const hints: string[] = [];
