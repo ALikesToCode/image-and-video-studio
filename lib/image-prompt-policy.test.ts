@@ -109,6 +109,12 @@ test("prompt-help guidance compacts without dropping unique invariants", () => {
 
   assert.match(request, /roughly 120-220 words/i);
   assert.match(request, /no more than six short sections/i);
+  assert.match(request, /render-only payload for the visual model/i);
+  assert.match(request, /one physically coherent camera height/i);
+  assert.match(request, /present-frame visual evidence/i);
+  assert.match(request, /full-busted hourglass silhouette/i);
+  assert.match(request, /positive visible states/i);
+  assert.match(request, /late-thirties adult/i);
   assert.match(request, /write each visual fact once/i);
   assert.match(request, /without dropping any unique identity or composition invariant/i);
   assert.match(request, /resolve workflow state silently/i);
@@ -552,6 +558,12 @@ test("Chat provider policy hint only appears when selected image models need it"
   assert.match(hint, /never image content/i);
   assert.match(hint, /roughly 120-220 words/i);
   assert.match(hint, /no more than six short sections/i);
+  assert.match(hint, /render-only payload for the visual model/i);
+  assert.match(hint, /one camera height, angle, crop, pose, and hand position/i);
+  assert.match(hint, /current visible evidence/i);
+  assert.match(hint, /full-busted hourglass silhouette/i);
+  assert.match(hint, /secure opaque neckline/i);
+  assert.match(hint, /late-thirties adult/i);
   assert.match(hint, /never truncate or generalize away an invariant/i);
   assert.match(hint, /preserve requested non-explicit hyperfeminine styling/i);
   assert.match(hint, /tasteful adult night-fashion or boudoir direction/i);

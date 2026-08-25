@@ -48,6 +48,12 @@ test("image guidance follows the selected image model provider", () => {
   assert.match(prompt, /Never copy these instructions/i);
   assert.match(prompt, /roughly 120-220 words/i);
   assert.match(prompt, /no more than six short sections/i);
+  assert.match(prompt, /render-only payload for the visual model/i);
+  assert.match(prompt, /resolve alternatives into one camera/i);
+  assert.match(prompt, /present-frame evidence/i);
+  assert.match(prompt, /positive visible states/i);
+  assert.match(prompt, /full-busted hourglass silhouette/i);
+  assert.match(prompt, /secure opaque neckline/i);
   assert.match(prompt, /never drop a unique invariant/i);
   assert.match(prompt, /write each visual fact once/i);
   assert.match(prompt, /resolve continuity and workflow state internally/i);
@@ -60,7 +66,8 @@ test("image guidance follows the selected image model provider", () => {
   assert.match(prompt, /requested visual medium as authoritative/i);
   assert.match(prompt, /do not add photography, live-action/i);
   assert.match(prompt, /Replace generic masterpiece/i);
-  assert.match(prompt, /semantic age band/i);
+  assert.match(prompt, /semantic age wording/i);
+  assert.match(prompt, /late-thirties/i);
   assert.match(prompt, /never resubmit the unchanged prompt/i);
   assert.match(prompt, /prompt_help_model.*terra/i);
   assert.doesNotMatch(prompt, /Flux mode is active/i);
