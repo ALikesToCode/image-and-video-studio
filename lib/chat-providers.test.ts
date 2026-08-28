@@ -47,6 +47,8 @@ test("NanoGPT chat renders its provider-aware controls without audio-only tools"
       setImageModelOrder: () => undefined,
       imageRetryAttempts: 1,
       setImageRetryAttempts: () => undefined,
+      preferMaximumImageQuality: true,
+      setPreferMaximumImageQuality: () => undefined,
     }),
   );
 

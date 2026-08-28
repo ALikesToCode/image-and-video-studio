@@ -34,6 +34,7 @@ import type {
   ReasoningEffort,
   ToolCall,
 } from "./chutes-chat-types";
+import type { ChatTokenUsage } from "@/lib/chat-metrics";
 
 type ChatStreamClientOptions = {
   apiKey: string;
@@ -187,6 +188,7 @@ export const createChatStreamClient = ({
           toolCalls: [] as ToolCall[],
           toolErrors: [] as string[],
           finishReason: null as string | null,
+          usage: undefined as ChatTokenUsage | undefined,
           outputTokenLimitReached: false,
         };
         for await (const uiMessage of readUIMessageStream({
@@ -220,6 +222,7 @@ export const createChatStreamClient = ({
           content: finalState.content,
           thinking: finalState.thinking,
           toolCalls: finalState.toolCalls,
+          usage: finalState.usage,
         };
       } catch (error) {
         if (isAbortLikeError(error, options.signal)) throw error;

@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ensureSelectedModelOption } from "@/lib/model-options";
 import { buildChatGenerationSystemPrompt } from "@/lib/chat-generation-prompt";
+import { summarizeChatMetrics } from "@/lib/chat-metrics";
 import {
   deleteStudioState,
   isStudioStateAvailable,
@@ -90,6 +91,8 @@ export function ChutesChat({
   setImageModelOrder,
   imageRetryAttempts,
   setImageRetryAttempts,
+  preferMaximumImageQuality,
+  setPreferMaximumImageQuality,
   onRefreshModels,
   modelsLoading,
   modelsError,
@@ -429,6 +432,7 @@ export function ChutesChat({
       imagePipelineEnabled,
       imageModelOrder,
       imageRetryAttempts,
+      preferMaximumImageQuality,
       recoverPrompt: recoverImagePromptAfterPolicyFailure,
       requestPromptHelp: requestImagePromptHelp,
     });
@@ -610,6 +614,28 @@ export function ChutesChat({
     handleToolCalls,
   });
 
+  const chatMetrics = useMemo(
+    () =>
+      summarizeChatMetrics({
+        messages,
+        busy,
+        queuedTurns: queuedTurns.length,
+        providerTokensRemaining:
+          provider === "navy"
+            ? navyUsage?.usage.tokens_remaining_today
+            : null,
+        contextWindow: selectedChatModel?.contextWindow,
+      }),
+    [
+      busy,
+      messages,
+      navyUsage?.usage.tokens_remaining_today,
+      provider,
+      queuedTurns.length,
+      selectedChatModel?.contextWindow,
+    ],
+  );
+
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || !shouldAutoScrollRef.current) {
@@ -698,6 +724,9 @@ export function ChutesChat({
           setImageRetryAttempts={
             setImageRetryAttempts
           }
+          preferMaximumImageQuality={preferMaximumImageQuality}
+          setPreferMaximumImageQuality={setPreferMaximumImageQuality}
+          metrics={chatMetrics}
           orderedToolImageModels={
             orderedToolImageModels
           }

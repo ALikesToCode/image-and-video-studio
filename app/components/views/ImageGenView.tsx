@@ -25,6 +25,7 @@ import {
     SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
+import { ImageQualityToggle } from "@/app/components/image-quality-toggle";
 import {
     Dialog,
     DialogContent,
@@ -37,6 +38,10 @@ import {
     modelAcceptsImageReferences,
 } from "@/lib/model-media-capabilities";
 import { mediaExtensionFromMimeType } from "@/lib/media-files";
+import {
+    describeImageQualityRequest,
+    resolveMaximumImageQualityRequest,
+} from "@/lib/image-quality";
 import type { GeneratedImage } from "@/lib/types";
 
 const IMAGE_PROMPT_STARTERS = [
@@ -125,7 +130,35 @@ export function ImageGenView() {
             /resolution|size|aspect/i.test(key) &&
             (typeof value === "string" || typeof value === "number")
     )?.[1];
+    const maximumQualityRequest = resolveMaximumImageQualityRequest({
+        enabled: context.preferMaximumImageQuality,
+        provider: context.provider,
+        model: context.model,
+        modelOption: selectedModel,
+        request: {
+            aspectRatio: context.imageAspect,
+            imageSize:
+                context.provider === "gemini" || context.provider === "openrouter"
+                    ? context.imageSize
+                    : undefined,
+            size:
+                context.provider === "navy" || context.provider === "multillm"
+                    ? context.navyImageSize
+                    : undefined,
+            quality: context.navyImageQuality,
+            resolution:
+                context.provider === "chutes" || context.provider === "nanogpt"
+                    ? context.chutesResolution
+                    : undefined,
+            width: Number(context.chutesWidth) || undefined,
+            height: Number(context.chutesHeight) || undefined,
+            parameters: context.modelParameterValues,
+        },
+    });
     const recipeSize = (() => {
+        if (context.preferMaximumImageQuality) {
+            return describeImageQualityRequest(maximumQualityRequest);
+        }
         if (context.provider === "navy") {
             const size = context.navyImageSize.trim();
             return size && size.toLowerCase() !== "auto" ? size : "Model default";
@@ -368,17 +401,24 @@ export function ImageGenView() {
                             aria-label="Generation recipe"
                             className="relative mb-4 rounded-xl border border-border/60 bg-background/55 p-3"
                         >
-                            <div className="mb-2 flex items-center justify-between gap-3">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                                     <SlidersHorizontal className="h-3.5 w-3.5" />
                                     Generation recipe
                                 </div>
-                                {context.activeJobCount > 0 ? (
-                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                        {context.activeJobCount} active
-                                    </span>
-                                ) : null}
+                                <div className="flex items-center gap-2">
+                                    <ImageQualityToggle
+                                        enabled={context.preferMaximumImageQuality}
+                                        onChange={context.setPreferMaximumImageQuality}
+                                        compact
+                                    />
+                                    {context.activeJobCount > 0 ? (
+                                        <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            {context.activeJobCount} active
+                                        </span>
+                                    ) : null}
+                                </div>
                             </div>
                             <div className="flex flex-wrap gap-1.5 text-[11px]">
                                 <span className="rounded-full border border-border/60 bg-background/80 px-2.5 py-1">

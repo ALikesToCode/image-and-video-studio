@@ -11,6 +11,7 @@ import {
   retryAsyncOperation,
   resolveActiveImageToolModels,
 } from "./studio-generation.ts";
+import { resolveMaximumImageQualityRequest } from "./image-quality.ts";
 import {
   sanitizeChatAttachmentAssets,
   type ChatAttachmentAsset,
@@ -150,14 +151,28 @@ export const buildNanoGptImageToolRequest = ({
   model,
   prompt,
   args,
+  preferMaximumImageQuality = false,
 }: {
   model: ModelOption;
   prompt: string;
   args: Record<string, unknown>;
+  preferMaximumImageQuality?: boolean;
 }) => {
   const requestedResolution = toolStringArgument(args, ["resolution", "size"]);
   const supportedResolutions = model.supportedResolutions ?? [];
-  const resolution = requestedResolution || supportedResolutions[0];
+  const requestedQuality = toolStringArgument(args, ["quality"]);
+  const maximumQuality = resolveMaximumImageQualityRequest({
+    enabled: preferMaximumImageQuality,
+    provider: "nanogpt",
+    model: model.id,
+    modelOption: model,
+    request: {
+      aspectRatio: toolStringArgument(args, ["aspect_ratio", "aspectRatio"]),
+      resolution: requestedResolution,
+      quality: requestedQuality,
+    },
+  });
+  const resolution = maximumQuality.resolution || supportedResolutions[0];
   const supportsReferenceImages =
     model.supports?.referenceImages === true ||
     (model.supports?.referenceImages !== false &&
@@ -167,7 +182,7 @@ export const buildNanoGptImageToolRequest = ({
     ? Math.max(0, model.maxReferenceImages ?? 1)
     : 0;
   const references = toolImageArguments(args).slice(0, maxReferenceImages);
-  const quality = toolStringArgument(args, ["quality"]);
+  const quality = maximumQuality.quality;
   const seed = toolNumberArgument(args, ["seed"]);
   const fixedOutputImages =
     typeof model.fixedOutputImages === "number" && model.fixedOutputImages > 0

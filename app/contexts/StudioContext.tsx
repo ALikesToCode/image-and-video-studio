@@ -102,6 +102,7 @@ import {
 } from "@/lib/generation-job-persistence";
 import { sanitizeMediaUrl } from "@/lib/media-url";
 import { resolveImageSubmissionAttempts } from "@/lib/image-submission-policy";
+import { resolveMaximumImageQualityRequest } from "@/lib/image-quality";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
 import { refreshMultiLlmChatWorkspaceCatalogs } from "@/lib/multillm-catalog-refresh";
 import {
@@ -249,6 +250,7 @@ type StoredSettings = Partial<{
     imagePipelineEnabled: boolean;
     imageModelOrder: string[];
     imageRetryAttempts: number;
+    preferMaximumImageQuality: boolean;
     imageCount: number;
     imageAspect: string;
     imageSize: string;
@@ -749,6 +751,8 @@ interface StudioContextType {
     setImageModelOrder: React.Dispatch<React.SetStateAction<string[]>>;
     imageRetryAttempts: number;
     setImageRetryAttempts: (n: number) => void;
+    preferMaximumImageQuality: boolean;
+    setPreferMaximumImageQuality: (enabled: boolean) => void;
     imageAspect: string;
     setImageAspect: (s: string) => void;
     imageSize: string;
@@ -985,6 +989,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [imagePipelineEnabled, setImagePipelineEnabled] = useState(false);
     const [imageModelOrder, setImageModelOrder] = useState<string[]>([]);
     const [imageRetryAttempts, setImageRetryAttempts] = useState(DEFAULT_IMAGE_RETRY_ATTEMPTS);
+    const [preferMaximumImageQuality, setPreferMaximumImageQuality] = useState(true);
     const [imageAspect, setImageAspect] = useState(AUTO_IMAGE_OPTION);
     const [imageSize, setImageSize] = useState(AUTO_IMAGE_OPTION);
     const [navyImageSize, setNavyImageSize] = useState(AUTO_IMAGE_OPTION);
@@ -2912,6 +2917,34 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
         const jobsToQueue = modelsToRun.map((jobModel, index) => {
             const selectedModel = modelSuggestions.find((entry) => entry.id === jobModel);
+            const modelParameters = buildModelParameterPayload(
+                selectedModel,
+                resolveModelParameterValues(
+                    selectedModel,
+                    readModelParameterPreference(
+                        modelParameterValuesByModel,
+                        provider,
+                        activeMode,
+                        jobModel
+                    )
+                )
+            );
+            const maximumQuality = resolveMaximumImageQualityRequest({
+                enabled: activeMode === "image" && preferMaximumImageQuality,
+                provider,
+                model: jobModel,
+                modelOption: selectedModel,
+                request: {
+                    aspectRatio: imageAspect,
+                    imageSize,
+                    size: normalizedNavyImageSize || AUTO_IMAGE_OPTION,
+                    quality: navyImageQuality,
+                    resolution: chutesResolution,
+                    width: Number(chutesWidth) || undefined,
+                    height: Number(chutesHeight) || undefined,
+                    parameters: modelParameters,
+                },
+            });
             return {
                 id: createId(),
                 status: "queued" as const,
@@ -2930,29 +2963,24 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 imageCount,
                 imageRetryAttempts: normalizedImageRetryAttempts,
                 imageAspect,
-                imageSize,
-                navyImageSize: normalizedNavyImageSize || AUTO_IMAGE_OPTION,
-                navyImageQuality,
+                imageSize: maximumQuality.imageSize ?? imageSize,
+                navyImageSize:
+                    maximumQuality.size ??
+                    (normalizedNavyImageSize || AUTO_IMAGE_OPTION),
+                navyImageQuality: maximumQuality.quality ?? navyImageQuality,
                 chutesGuidanceScale,
-                chutesWidth,
-                chutesHeight,
+                chutesWidth: maximumQuality.width
+                    ? String(maximumQuality.width)
+                    : chutesWidth,
+                chutesHeight: maximumQuality.height
+                    ? String(maximumQuality.height)
+                    : chutesHeight,
                 chutesSteps,
-                chutesResolution,
+                chutesResolution: maximumQuality.resolution ?? chutesResolution,
                 chutesSeed,
                 chutesVideoFps,
                 chutesVideoGuidanceScale,
-                modelParameters: buildModelParameterPayload(
-                    selectedModel,
-                    resolveModelParameterValues(
-                        selectedModel,
-                        readModelParameterPreference(
-                            modelParameterValuesByModel,
-                            provider,
-                            activeMode,
-                            jobModel
-                        )
-                    )
-                ),
+                modelParameters: maximumQuality.parameters ?? modelParameters,
                 videoImage: videoImage || undefined,
                 referenceIds: selectedReferenceIds,
                 videoAspect,
@@ -3510,6 +3538,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             setImageRetryAttempts(
                 normalizeImageRetryAttempts(storedSettings.imageRetryAttempts)
             );
+            setPreferMaximumImageQuality(
+                getBoolean(storedSettings.preferMaximumImageQuality, true)
+            );
 
             const storedImageCount = getNumber(storedSettings.imageCount, 1);
             if (storedImageCount > 0) setImageCount(storedImageCount);
@@ -3857,6 +3888,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             imagePipelineEnabled,
             imageModelOrder: normalizeImageModelOrder(imageModelOrder),
             imageRetryAttempts: normalizeImageRetryAttempts(imageRetryAttempts),
+            preferMaximumImageQuality,
             imageCount,
             imageAspect,
             imageSize,
@@ -3894,6 +3926,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         imagePipelineEnabled,
         imageModelOrder,
         imageRetryAttempts,
+        preferMaximumImageQuality,
         imageCount,
         imageAspect,
         imageSize,
@@ -4219,6 +4252,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         imagePipelineEnabled, setImagePipelineEnabled,
         imageModelOrder, setImageModelOrder,
         imageRetryAttempts, setImageRetryAttempts,
+        preferMaximumImageQuality, setPreferMaximumImageQuality,
         imageAspect, setImageAspect,
         imageSize, setImageSize,
         navyImageSize, setNavyImageSize,

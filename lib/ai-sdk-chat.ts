@@ -14,6 +14,7 @@ import {
   normalizeReasoningEffort,
   shouldOmitToolChoiceForModel,
 } from "./chat-tooling.ts";
+import type { ChatTokenUsage } from "./chat-metrics.ts";
 
 export const AI_CHAT_TOOL_NAMES = [
   "generate_image",
@@ -636,6 +637,23 @@ export const extractAIChatStreamState = (message: UIMessage) => {
   const toolCalls: AIChatToolCall[] = [];
   const toolErrors: string[] = [];
   const messageMetadata = asRecord(message.metadata);
+  const usageMetadata = asRecord(messageMetadata?.usage);
+  const usage = Object.fromEntries(
+    [
+      "inputTokens",
+      "outputTokens",
+      "totalTokens",
+      "cachedInputTokens",
+      "reasoningTokens",
+    ]
+      .map((key) => [key, usageMetadata?.[key]] as const)
+      .filter(
+        (entry): entry is readonly [keyof ChatTokenUsage, number] =>
+          typeof entry[1] === "number" &&
+          Number.isFinite(entry[1]) &&
+          entry[1] >= 0,
+      ),
+  ) as ChatTokenUsage;
   const finishReason =
     typeof messageMetadata?.finishReason === "string"
       ? messageMetadata.finishReason
@@ -709,6 +727,7 @@ export const extractAIChatStreamState = (message: UIMessage) => {
     toolCalls,
     toolErrors,
     finishReason,
+    usage: Object.keys(usage).length ? usage : undefined,
     outputTokenLimitReached: finishReason === "length",
   };
 };

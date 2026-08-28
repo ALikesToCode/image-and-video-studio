@@ -123,6 +123,26 @@ export const sanitizeChatMessages = (
       if (isChatTurnIntent(record.turnIntent)) {
         message.turnIntent = record.turnIntent;
       }
+      if (record.usage && typeof record.usage === "object") {
+        const usageRecord = record.usage as Record<string, unknown>;
+        const usage = Object.fromEntries(
+          [
+            "inputTokens",
+            "outputTokens",
+            "totalTokens",
+            "cachedInputTokens",
+            "reasoningTokens",
+          ]
+            .map((key) => [key, usageRecord[key]])
+            .filter(
+              ([, value]) =>
+                typeof value === "number" &&
+                Number.isFinite(value) &&
+                value >= 0,
+            ),
+        );
+        if (Object.keys(usage).length) message.usage = usage;
+      }
 
       if (Array.isArray(record.toolCalls)) {
         const toolCalls = record.toolCalls

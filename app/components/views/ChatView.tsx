@@ -87,6 +87,8 @@ export function ChatView({ initialInput }: ChatViewProps) {
         setImageModelOrder,
         imageRetryAttempts,
         setImageRetryAttempts,
+        preferMaximumImageQuality,
+        setPreferMaximumImageQuality,
         videoImage,
         videoAspect,
         videoDuration,
@@ -284,6 +286,8 @@ export function ChatView({ initialInput }: ChatViewProps) {
                 setImageModelOrder={setImageModelOrder}
                 imageRetryAttempts={imageRetryAttempts}
                 setImageRetryAttempts={setImageRetryAttempts}
+                preferMaximumImageQuality={preferMaximumImageQuality}
+                setPreferMaximumImageQuality={setPreferMaximumImageQuality}
                 modelsLoading={modelsLoading}
                 modelsError={modelsError}
                 onRefreshModels={onRefreshModels}

@@ -288,6 +288,33 @@ test("AI SDK stream state exposes output-limit completion metadata", () => {
   assert.equal(state.outputTokenLimitReached, true);
 });
 
+test("AI SDK stream state exposes safe token usage metadata", () => {
+  const state = extractAIChatStreamState({
+    id: "assistant-usage",
+    role: "assistant",
+    metadata: {
+      finishReason: "stop",
+      usage: {
+        inputTokens: 120,
+        outputTokens: 30,
+        totalTokens: 150,
+        cachedInputTokens: 20,
+        reasoningTokens: 10,
+        ignored: 999,
+      },
+    },
+    parts: [{ type: "text", text: "Done" }],
+  });
+
+  assert.deepEqual(state.usage, {
+    inputTokens: 120,
+    outputTokens: 30,
+    totalTokens: 150,
+    cachedInputTokens: 20,
+    reasoningTokens: 10,
+  });
+});
+
 test("AI SDK stream state turns invalid tool input into a resolvable tool call", () => {
   const state = extractAIChatStreamState({
     id: "assistant-invalid-tool",

@@ -12,6 +12,7 @@ import type {
   ChatTurnIntent,
 } from "@/lib/chat-tooling";
 import type { AIChatToolCall } from "@/lib/ai-sdk-chat";
+import type { ChatTokenUsage } from "@/lib/chat-metrics";
 import type { NavyUsageResponse } from "@/lib/types";
 
 export type ToolCall = AIChatToolCall;
@@ -30,6 +31,7 @@ export type ChatMessage = {
   attachments?: ChatAttachmentAsset[];
   turnIntent?: ChatTurnIntent;
   transient?: boolean;
+  usage?: ChatTokenUsage;
 };
 
 export type QueuedChatTurn = {
@@ -60,6 +62,8 @@ export type ChutesChatProps = {
   setImageModelOrder: Dispatch<SetStateAction<string[]>>;
   imageRetryAttempts: number;
   setImageRetryAttempts: (value: number) => void;
+  preferMaximumImageQuality: boolean;
+  setPreferMaximumImageQuality: (enabled: boolean) => void;
   onRefreshModels?: () => void;
   modelsLoading?: boolean;
   modelsError?: string | null;

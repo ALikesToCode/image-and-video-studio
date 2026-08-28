@@ -14,6 +14,7 @@ import type {
   ChatProvider,
 } from "@/lib/constants";
 import type { AIChatToolName } from "@/lib/ai-sdk-chat";
+import type { ChatTokenUsage } from "@/lib/chat-metrics";
 import {
   type ChatAttachmentAsset,
   type ChatTurnIntent,
@@ -45,6 +46,7 @@ type ChatStreamResult = {
   content: string;
   thinking: string;
   toolCalls: ToolCall[];
+  usage?: ChatTokenUsage;
 };
 
 type ChatStreamCall = (
@@ -352,6 +354,7 @@ export const useChutesChatRunner = ({
           toolCalls: finalToolCalls.length
             ? finalToolCalls
             : undefined,
+          usage: finalResult.usage,
         };
         currentMessages = [
           ...currentMessages.slice(0, -1),

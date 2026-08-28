@@ -20,8 +20,6 @@ import {
   Minimize2,
   SlidersHorizontal,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
   Video,
 } from "lucide-react";
 
@@ -33,7 +31,9 @@ import {
   CHAT_PROVIDER_OPTIONS,
 } from "@/lib/chat-providers";
 import type { NavyUsageResponse } from "@/lib/types";
+import type { ChatMetricsSummary } from "@/lib/chat-metrics";
 import { cn } from "@/lib/utils";
+import { ImageQualityToggle } from "../image-quality-toggle";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -56,6 +56,8 @@ import {
   NavyUsageFooter,
 } from "./chutes-chat-controls";
 import { ChutesChatModelDetails } from "./chutes-chat-model-details";
+import { ChutesChatMetrics } from "./chutes-chat-metrics";
+import { ChutesChatToolToggle } from "./chutes-chat-tool-toggle";
 import { formatCount } from "./chutes-chat-runtime";
 import {
   REASONING_EFFORT_OPTIONS,
@@ -100,6 +102,9 @@ type ChutesChatHeaderProps = {
   setImagePipelineEnabled: (enabled: boolean) => void;
   imageRetryAttempts: number;
   setImageRetryAttempts: (attempts: number) => void;
+  preferMaximumImageQuality: boolean;
+  setPreferMaximumImageQuality: (enabled: boolean) => void;
+  metrics: ChatMetricsSummary;
   orderedToolImageModels: string[];
   onTogglePipelineModel: (model: string) => void;
   onReorderPipelineModel: (
@@ -136,46 +141,6 @@ type ChutesChatHeaderProps = {
   setFullscreen: Dispatch<SetStateAction<boolean>>;
 };
 
-const ToolToggle = ({
-  enabled,
-  icon,
-  label,
-  onClick,
-}: {
-  enabled: boolean;
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-}) => (
-  <Button
-    type="button"
-    size="sm"
-    variant="ghost"
-    aria-pressed={enabled}
-    onClick={onClick}
-    className={cn(
-      "min-h-10 gap-1.5 border px-3",
-      enabled
-        ? "border-primary/35 bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-        : "border-border bg-background text-foreground hover:border-primary/35 hover:bg-primary/10 hover:text-primary",
-    )}
-  >
-    {enabled ? (
-      <ToggleRight
-        className="h-4 w-4"
-        aria-hidden="true"
-      />
-    ) : (
-      <ToggleLeft
-        className="h-4 w-4"
-        aria-hidden="true"
-      />
-    )}
-    {icon}
-    {label}
-  </Button>
-);
-
 export function ChutesChatHeader({
   provider,
   setProvider,
@@ -203,6 +168,9 @@ export function ChutesChatHeader({
   setImagePipelineEnabled,
   imageRetryAttempts,
   setImageRetryAttempts,
+  preferMaximumImageQuality,
+  setPreferMaximumImageQuality,
+  metrics,
   orderedToolImageModels,
   onTogglePipelineModel,
   onReorderPipelineModel,
@@ -256,7 +224,12 @@ export function ChutesChatHeader({
             : "flex-wrap",
         )}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-3",
+            headerCollapsed ? "shrink-0" : "flex-1",
+          )}
+        >
           <div
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary shadow-sm"
             aria-hidden="true"
@@ -275,6 +248,16 @@ export function ChutesChatHeader({
             </p>
           </div>
         </div>
+
+        {headerCollapsed ? (
+          <div className="hidden min-w-0 flex-1 justify-end xl:flex">
+            <ChutesChatMetrics
+              metrics={metrics}
+              preferMaximumImageQuality={preferMaximumImageQuality}
+              setPreferMaximumImageQuality={setPreferMaximumImageQuality}
+            />
+          </div>
+        ) : null}
 
         <div
           className={cn(
@@ -438,6 +421,12 @@ export function ChutesChatHeader({
               }
               compact
               footer={usageFooter}
+            />
+
+            <ImageQualityToggle
+              enabled={preferMaximumImageQuality}
+              onChange={setPreferMaximumImageQuality}
+              compact
             />
 
             <Dialog>
@@ -877,7 +866,7 @@ export function ChutesChatHeader({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <ToolToggle
+                <ChutesChatToolToggle
                   enabled={toolSettings.image}
                   icon={
                     <ImageIcon
@@ -893,7 +882,7 @@ export function ChutesChatHeader({
                     }))
                   }
                 />
-                <ToolToggle
+                <ChutesChatToolToggle
                   enabled={toolSettings.video}
                   icon={
                     <Video
@@ -909,7 +898,7 @@ export function ChutesChatHeader({
                     }))
                   }
                 />
-                <ToolToggle
+                <ChutesChatToolToggle
                   enabled={toolSettings.audio}
                   icon={
                     <AudioLines

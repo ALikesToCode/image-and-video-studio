@@ -12,6 +12,7 @@ import {
   runImageModelPipelineParallel,
 } from "@/lib/chat-tooling";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
+import { resolveMaximumImageQualityRequest } from "@/lib/image-quality";
 import {
   dataUrlFromBase64,
   fetchAsDataUrl,
@@ -67,6 +68,7 @@ type RunChatImageToolOptions = {
   imagePipelineEnabled: boolean;
   imageModelOrder: string[];
   imageRetryAttempts: number;
+  preferMaximumImageQuality: boolean;
   recoverPrompt: (options: {
     targetModel: string;
     currentPrompt: string;
@@ -97,6 +99,7 @@ export const runChatImageTool = async ({
   imagePipelineEnabled,
   imageModelOrder,
   imageRetryAttempts,
+  preferMaximumImageQuality,
   recoverPrompt,
   requestPromptHelp,
 }: RunChatImageToolOptions) => {
@@ -156,18 +159,36 @@ export const runChatImageTool = async ({
     const targetModelOption = imageModels.find(
       (entry) => entry.id === targetModel,
     );
+    const requestedSize = getStringArg(finalArgs, ["size"]);
+    const requestedAspectRatio = getStringArg(finalArgs, [
+      "aspect_ratio",
+      "aspectRatio",
+    ]);
+    const requestedQuality = getStringArg(finalArgs, ["quality"]);
+    const requestedResolution = getStringArg(finalArgs, ["resolution"]);
+    const requestedWidth = getNumberArg(finalArgs, ["width"]);
+    const requestedHeight = getNumberArg(finalArgs, ["height"]);
+    const maximumQuality = resolveMaximumImageQualityRequest({
+      enabled: preferMaximumImageQuality,
+      provider: targetProvider,
+      model: targetModel,
+      modelOption: targetModelOption,
+      request: {
+        size: requestedSize || undefined,
+        aspectRatio: requestedAspectRatio || undefined,
+        quality: requestedQuality || undefined,
+        resolution: requestedResolution || undefined,
+        width: requestedWidth ?? undefined,
+        height: requestedHeight ?? undefined,
+        parameters: {},
+      },
+    });
     if (targetProvider === "multillm") {
       const prepared = prepareImagePromptForModel(
         targetModel,
         prompt,
         negativePrompt || undefined,
       );
-      const size = getStringArg(finalArgs, ["size"]);
-      const aspectRatio = getStringArg(finalArgs, [
-        "aspect_ratio",
-        "aspectRatio",
-      ]);
-      const quality = getStringArg(finalArgs, ["quality"]);
       const imageInput = getStringOrStringArrayArg(finalArgs, [
         "image_url",
         "image",
@@ -179,9 +200,10 @@ export const runChatImageTool = async ({
           model: targetModel,
           prompt: prepared.prompt,
           negativePrompt: prepared.negativePrompt,
-          size: size || undefined,
-          aspectRatio: aspectRatio || undefined,
-          quality: quality || undefined,
+          size: maximumQuality.size || undefined,
+          aspectRatio: maximumQuality.aspectRatio || undefined,
+          quality: maximumQuality.quality || undefined,
+          parameters: maximumQuality.parameters,
           modelEndpoint:
             targetModelOption?.upstreamEndpoint ??
             targetModelOption?.endpoint,
@@ -212,6 +234,7 @@ export const runChatImageTool = async ({
           model: targetModelOption,
           prompt: prepared.prompt,
           args: finalArgs,
+          preferMaximumImageQuality,
         }),
       };
     }
@@ -222,16 +245,19 @@ export const runChatImageTool = async ({
       "image",
     ]);
     if (targetProvider === "navy") {
-      const size = getStringArg(finalArgs, ["size"]);
-      const quality = getStringArg(finalArgs, ["quality"]);
       const style = getStringArg(finalArgs, ["style"]);
-      if (size) {
+      if (maximumQuality.size) {
         Object.assign(
           baseBody,
-          resolveNavyChatImageSizing(size),
+          resolveNavyChatImageSizing(maximumQuality.size),
         );
       }
-      if (quality) baseBody.quality = quality;
+      if (maximumQuality.aspectRatio) {
+        baseBody.aspectRatio = maximumQuality.aspectRatio;
+      }
+      if (maximumQuality.quality) {
+        baseBody.quality = maximumQuality.quality;
+      }
       if (style) baseBody.style = style;
       if (imageUrl) baseBody.imageUrl = imageUrl;
       baseBody.modelEndpoint =
@@ -242,19 +268,18 @@ export const runChatImageTool = async ({
       const guidanceScale = getNumberArg(finalArgs, [
         "guidance_scale",
       ]);
-      const width = getNumberArg(finalArgs, ["width"]);
-      const height = getNumberArg(finalArgs, ["height"]);
       const steps = getNumberArg(finalArgs, [
         "num_inference_steps",
       ]);
       const seed = getNumberArg(finalArgs, ["seed"]);
-      const resolution = getStringArg(finalArgs, [
-        "resolution",
-      ]);
       baseBody.guidanceScale = guidanceScale ?? undefined;
-      baseBody.width = width ? Math.round(width) : undefined;
-      baseBody.height = height ? Math.round(height) : undefined;
-      baseBody.resolution = resolution || undefined;
+      baseBody.width = maximumQuality.width
+        ? Math.round(maximumQuality.width)
+        : undefined;
+      baseBody.height = maximumQuality.height
+        ? Math.round(maximumQuality.height)
+        : undefined;
+      baseBody.resolution = maximumQuality.resolution || undefined;
       baseBody.numInferenceSteps = steps
         ? Math.round(steps)
         : undefined;

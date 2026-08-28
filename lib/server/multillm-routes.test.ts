@@ -391,20 +391,31 @@ test("MultiLLM sends AIHubMix image models through unified generation", async ()
         });
       },
       async () => {
-        const models = [
-          "aihubmix:gpt-image-2-free",
-          "aihubmix:gemini-3.1-flash-image-preview-free",
-          "aihubmix:doubao-seedream-4-0",
+        const requests = [
+          {
+            model: "aihubmix:gpt-image-2-free",
+            size: "3840x2160",
+          },
+          {
+            model: "aihubmix:gemini-3.1-flash-image-preview-free",
+            size: "4K",
+          },
+          {
+            model: "aihubmix:doubao-seedream-4-0",
+            size: "2048x2048",
+          },
         ];
-        for (const model of models) {
+        for (const request of requests) {
           const response = await multiLlmImagePost(
             new Request("https://studio.test/api/multillm/image", {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
-                model,
+                model: request.model,
                 prompt: "A paper fox",
                 numberOfImages: 1,
+                size: request.size,
+                quality: "high",
               }),
             }),
           );
@@ -417,7 +428,17 @@ test("MultiLLM sends AIHubMix image models through unified generation", async ()
 
         assert.deepEqual(
           upstreamBodies.map((body) => body.model),
-          models,
+          requests.map((request) => request.model),
+        );
+        assert.deepEqual(
+          upstreamBodies.map((body) => ({
+            size: body.size,
+            quality: body.quality,
+          })),
+          requests.map((request) => ({
+            size: request.size,
+            quality: "high",
+          })),
         );
       },
     );

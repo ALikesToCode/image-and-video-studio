@@ -59,3 +59,26 @@ test("persisted chat history drops malformed thought-signature metadata", () => 
 
   assert.equal(messages[0]?.toolCalls?.[0]?.extra_content, undefined);
 });
+
+test("persisted chat history keeps finite token usage and drops invalid fields", () => {
+  const messages = sanitizeChatMessages([
+    {
+      id: "assistant-usage",
+      role: "assistant",
+      content: "Done",
+      usage: {
+        inputTokens: 100,
+        outputTokens: 25,
+        totalTokens: 125,
+        reasoningTokens: -1,
+        cachedInputTokens: "20",
+      },
+    },
+  ]);
+
+  assert.deepEqual(messages[0]?.usage, {
+    inputTokens: 100,
+    outputTokens: 25,
+    totalTokens: 125,
+  });
+});

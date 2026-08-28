@@ -263,9 +263,7 @@ export async function POST(request: Request) {
           ...(body.negativePrompt && source !== "linkapi"
             ? { negative_prompt: body.negativePrompt }
             : {}),
-          ...(body.quality && source === "linkapi"
-            ? { quality: body.quality }
-            : {}),
+          ...(body.quality ? { quality: body.quality } : {}),
           ...(body.style && source === "linkapi"
             ? { style: body.style }
             : {}),

@@ -93,6 +93,22 @@ test("NanoGPT chat image requests honor discovered model capabilities", () => {
   );
 });
 
+test("NanoGPT chat image requests select the largest supported resolution when maximum quality is enabled", () => {
+  const request = buildNanoGptImageToolRequest({
+    model: {
+      id: "catalog-image",
+      label: "Catalog Image",
+      provider: "nanogpt",
+      supportedResolutions: ["1024x1024", "2048x1152", "1536x1024"],
+    },
+    prompt: "An anime city at blue hour",
+    args: {},
+    preferMaximumImageQuality: true,
+  });
+
+  assert.equal(request.resolution, "2048x1152");
+});
+
 test("NanoGPT chat video requests use catalog parameter names and source capability", () => {
   assert.deepEqual(
     buildNanoGptVideoToolRequest({
