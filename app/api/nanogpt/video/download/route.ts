@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   jsonOrNull,
   providerErrorDetails,
   providerErrorMessage,
@@ -121,7 +121,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const apiKey = getProviderApiKey("nanogpt", req);
+  const apiKey = getUserApiKey(req);
   if (!apiKey) {
     return Response.json(
       { error: "Missing NanoGPT API key." },

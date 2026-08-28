@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   isJanitorAiUserscriptRequest,
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
   }
 
   const { prompt, model, aspectRatio, imageSize, numberOfImages } = body;
-  const userApiKey = getProviderApiKey("gemini", req, body);
+  const userApiKey = getUserApiKey(req, body);
   const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!userApiKey || !prompt || !model) {
     return janitorAiJsonResponse(

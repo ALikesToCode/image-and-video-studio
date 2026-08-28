@@ -4,7 +4,7 @@ import { POST as nanoGptImagePost } from "@/app/api/nanogpt/image/route";
 import { GET as navyImageGet, POST as navyImagePost } from "@/app/api/navy/image/route";
 import { POST as openRouterImagePost } from "@/app/api/openrouter/image/route";
 import {
-  getProviderApiKey,
+  getUserApiKey,
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
   providerErrorMessage,
@@ -309,11 +309,7 @@ export async function POST(req: Request) {
 
   const requestedModel = normalizedString(body.model);
   const provider = requestedModel ? providerForModel(requestedModel) : "chutes";
-  const apiKey = getProviderApiKey(
-    provider,
-    req,
-    body as Record<string, unknown>
-  );
+  const apiKey = getUserApiKey(req, body as Record<string, unknown>);
   if (!apiKey) {
     return jsonResponse(req, { error: "Missing API key." }, 400);
   }

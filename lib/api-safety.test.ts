@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  getProviderApiKey,
   getUserApiKey,
   isAllowedJanitorAiCorsOrigin,
   providerErrorDetails,
@@ -301,7 +300,7 @@ test("getUserApiKey accepts Authorization bearer keys for userscripts", () => {
   assert.equal(getUserApiKey(request), "user-secret");
 });
 
-test("getProviderApiKey prefers BYOK request keys over server fallbacks", () => {
+test("getUserApiKey accepts BYOK request keys even when server keys exist", () => {
   const original = process.env.CHUTES_API_KEY;
   process.env.CHUTES_API_KEY = "server-secret";
   const request = new Request("https://studio.test/api/chutes/image", {
@@ -312,7 +311,7 @@ test("getProviderApiKey prefers BYOK request keys over server fallbacks", () => 
   });
 
   try {
-    assert.equal(getProviderApiKey("chutes", request), "header-secret");
+    assert.equal(getUserApiKey(request), "header-secret");
   } finally {
     if (original === undefined) {
       delete process.env.CHUTES_API_KEY;
@@ -322,7 +321,7 @@ test("getProviderApiKey prefers BYOK request keys over server fallbacks", () => 
   }
 });
 
-test("getProviderApiKey accepts the local NAVY_API server env alias", () => {
+test("getUserApiKey ignores direct provider server credentials", () => {
   const originals = {
     NAVY_API_KEY: process.env.NAVY_API_KEY,
     NAVYAI_API_KEY: process.env.NAVYAI_API_KEY,
@@ -335,7 +334,7 @@ test("getProviderApiKey accepts the local NAVY_API server env alias", () => {
   });
 
   try {
-    assert.equal(getProviderApiKey("navy", request), "server-navy-secret");
+    assert.equal(getUserApiKey(request), "");
   } finally {
     for (const [key, value] of Object.entries(originals)) {
       if (value === undefined) {

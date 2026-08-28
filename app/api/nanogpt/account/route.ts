@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   jsonOrNull,
   providerErrorDetails,
 } from "@/lib/api-safety";
@@ -316,7 +316,7 @@ export async function GET(req: Request) {
     return accountJson({ error: usageQuery.error }, { status: 400 });
   }
 
-  const apiKey = getProviderApiKey("nanogpt", req);
+  const apiKey = getUserApiKey(req);
   if (!apiKey) {
     return accountJson(
       { error: "NanoGPT API key is required." },

@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   isJanitorAiUserscriptRequest,
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
@@ -542,7 +542,7 @@ export async function POST(req: Request) {
   } = body;
   const requestedImageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
   const imageUrl = normalizeImageReferencePayload(requestedImageUrl);
-  const userApiKey = getProviderApiKey("navy", req, body);
+  const userApiKey = getUserApiKey(req, body);
   const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!userApiKey || !model || !prompt) {
     return janitorAiJsonResponse(
@@ -689,7 +689,7 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
-  const apiKey = getProviderApiKey("navy", req);
+  const apiKey = getUserApiKey(req);
   const includeUserscriptShape = isJanitorAiUserscriptRequest(req);
 
   if (!id || !apiKey) {

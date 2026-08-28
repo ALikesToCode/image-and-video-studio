@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   isJanitorAiUserscriptRequest,
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
@@ -336,7 +336,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const apiKey = getProviderApiKey("nanogpt", req, body);
+  const apiKey = getUserApiKey(req, body);
   const model = typeof body.model === "string" ? body.model.trim() : "";
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);

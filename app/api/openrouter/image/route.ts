@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   isJanitorAiUserscriptRequest,
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
@@ -136,7 +136,7 @@ export async function POST(req: Request) {
   }
 
   const { model, prompt, aspectRatio, imageSize, outputModalities } = body;
-  const userApiKey = getProviderApiKey("openrouter", req, body);
+  const userApiKey = getUserApiKey(req, body);
   const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!userApiKey || !model || !prompt) {
     return janitorAiJsonResponse(

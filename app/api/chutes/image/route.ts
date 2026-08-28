@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   isJanitorAiUserscriptRequest,
   janitorAiJsonResponse,
   janitorAiOptionsResponse,
@@ -201,7 +201,7 @@ export async function POST(req: Request) {
   }
 
   const { prompt } = body;
-  const apiKey = getProviderApiKey("chutes", req, body);
+  const apiKey = getUserApiKey(req, body);
   const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!apiKey || !prompt) {
     return janitorAiJsonResponse(

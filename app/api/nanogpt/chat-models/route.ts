@@ -1,4 +1,4 @@
-import { getProviderApiKey, providerErrorDetails } from "@/lib/api-safety";
+import { getUserApiKey, providerErrorDetails } from "@/lib/api-safety";
 import {
   normalizeNanoGptChatMeta,
   normalizeNanoGptChatModels,
@@ -16,7 +16,7 @@ const responseHeaders = (authenticated: boolean) => ({
 });
 
 export async function GET(req: Request) {
-  const apiKey = getProviderApiKey("nanogpt", req);
+  const apiKey = getUserApiKey(req);
   const authenticated = Boolean(apiKey);
   const sort = authenticated ? "favorites" : "mostused";
   const url = new URL(CATALOG_URL);

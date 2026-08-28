@@ -1,5 +1,5 @@
 import {
-  getProviderApiKey,
+  getUserApiKey,
   jsonOrNull,
   providerErrorDetails,
   providerErrorMessage,
@@ -305,7 +305,7 @@ export async function POST(req: Request) {
     return Response.json({ error: details.error }, { status: details.status });
   }
 
-  const apiKey = getProviderApiKey("nanogpt", req, body);
+  const apiKey = getUserApiKey(req, body);
   const model = nonEmptyString(body.model) ?? "";
   const prompt = nonEmptyString(body.prompt) ?? "";
   if (!apiKey || !isValidModelId(model) || !prompt) {
@@ -376,7 +376,7 @@ export async function GET(req: Request) {
     searchParams.get("id") ??
     searchParams.get("requestId") ??
     searchParams.get("runId");
-  const apiKey = getProviderApiKey("nanogpt", req);
+  const apiKey = getUserApiKey(req);
   if (!rawId || !apiKey) {
     return Response.json(
       { error: "Missing job id or API key." },
