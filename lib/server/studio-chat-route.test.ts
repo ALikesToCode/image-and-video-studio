@@ -170,6 +170,55 @@ test("Studio chat caps large budgets and exposes output-limit finishes", async (
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Studio chat retries rejected AIHubMix output budgets without dropping tools", async () => {
+  const originalFetch = globalThis.fetch;
+  const upstreamBodies: Record<string, unknown>[] = [];
+  globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    upstreamBodies.push(body);
+    if (Number(body.max_tokens) > 8_192) {
+      return Response.json(
+        { error: { message: "Bad Request" } },
+        { status: 400 }
+      );
+    }
+    return upstreamStream([
+      completionChunk({ role: "assistant", content: "Recovered." }, "stop"),
+    ]);
+  };
+
+  try {
+    const response = await studioChatPost(
+      new Request("https://studio.test/api/studio/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "secret",
+        },
+        body: JSON.stringify({
+          provider: "multillm",
+          model: "aihubmix:gpt-5.5-free",
+          messages: [{ role: "user", content: "Generate an image." }],
+          enabledTools: ["generate_image"],
+          toolChoice: "auto",
+          maxTokens: 16_384,
+        }),
+      })
+    );
+    const streamBody = await response.text();
+
+    assert.equal(upstreamBodies.length, 2);
+    assert.equal(upstreamBodies[0]?.max_tokens, 16_384);
+    assert.equal(upstreamBodies[1]?.max_tokens, 8_192);
+    assert.equal("tools" in upstreamBodies[1], true);
+    assert.equal(upstreamBodies[1]?.tool_choice, "auto");
+    assert.match(streamBody, /Recovered\./);
+    assert.doesNotMatch(streamBody, /"type":"error"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("Studio chat retries Navy reasoning envelopes without dropping tools", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];

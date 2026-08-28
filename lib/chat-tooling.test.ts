@@ -844,6 +844,33 @@ test("Chat recovery payloads can omit unsupported sampling fields", () => {
   assert.equal(omitSampling.payload.max_tokens, 700);
 });
 
+test("Chat recovery lowers rejected large output budgets without dropping tools", () => {
+  const payload = buildChatCompletionPayload({
+    model: "aihubmix:gpt-5.5-free",
+    messages: [{ role: "user", content: "Generate an image." }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+    toolChoice: "auto",
+    maxTokens: 16_384,
+  });
+
+  const recoveries = buildChatCompletionRecoveryPayloads(payload, {
+    providerError: { error: { message: "Bad Request" } },
+  });
+
+  assert.equal(recoveries[0]?.label, "limit-output-tokens");
+  assert.equal(recoveries[0]?.payload.max_tokens, 8_192);
+  assert.equal("tools" in recoveries[0].payload, true);
+  assert.equal(recoveries[0].payload.tool_choice, "auto");
+});
+
 test("Navy chat messages pass assistant reasoning content back for thinking-mode tool turns", () => {
   const messages = toChatCompletionMessages(
     [

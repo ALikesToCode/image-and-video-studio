@@ -487,6 +487,25 @@ export const buildChatCompletionPayload = ({
 const clonePayload = (payload: Record<string, unknown>) =>
   JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
 
+const CHAT_RECOVERY_MAX_OUTPUT_TOKENS = 8_192;
+
+const limitChatRecoveryOutputTokens = (
+  payload: Record<string, unknown>
+) => {
+  const maxTokens = payload.max_tokens;
+  if (
+    typeof maxTokens !== "number" ||
+    !Number.isFinite(maxTokens) ||
+    maxTokens <= CHAT_RECOVERY_MAX_OUTPUT_TOKENS
+  ) {
+    return null;
+  }
+
+  const next = clonePayload(payload);
+  next.max_tokens = CHAT_RECOVERY_MAX_OUTPUT_TOKENS;
+  return next;
+};
+
 const withoutPayloadFields = (
   payload: Record<string, unknown>,
   fields: string[]
@@ -593,15 +612,22 @@ export const buildChatCompletionRecoveryPayloads = (
     candidates.push({ label, payload: candidate });
   };
 
-  const withoutReasoning = stripReasoningContentFromChatPayload(payload);
+  const outputLimited = limitChatRecoveryOutputTokens(payload);
+  addCandidate("limit-output-tokens", outputLimited);
+  const compatibilityBase = outputLimited ?? payload;
+  const withoutReasoning = stripReasoningContentFromChatPayload(
+    compatibilityBase
+  );
   const toolsRequireReasoningDisabled =
     providerRequiresReasoningDisabledForTools(providerError) &&
-    Array.isArray(payload.tools) &&
-    payload.tools.length > 0;
+    Array.isArray(compatibilityBase.tools) &&
+    compatibilityBase.tools.length > 0;
 
   if (toolsRequireReasoningDisabled) {
-    if (payload.reasoning_effort !== "none") {
-      const reasoningDisabled = clonePayload(withoutReasoning ?? payload);
+    if (compatibilityBase.reasoning_effort !== "none") {
+      const reasoningDisabled = clonePayload(
+        withoutReasoning ?? compatibilityBase
+      );
       reasoningDisabled.reasoning_effort = "none";
       delete reasoningDisabled.thinking;
       addCandidate("disable-reasoning-for-tools", reasoningDisabled);
@@ -611,17 +637,17 @@ export const buildChatCompletionRecoveryPayloads = (
 
   addCandidate("strip-reasoning", withoutReasoning);
 
-  const reasoningBase = withoutReasoning ?? payload;
+  const reasoningBase = withoutReasoning ?? compatibilityBase;
   addCandidate(
     "omit-reasoning-controls",
     withoutPayloadFields(reasoningBase, ["reasoning_effort", "thinking"])
   );
   addCandidate("omit-sampling", withoutPayloadFields(reasoningBase, ["temperature"]));
 
-  const toolChoiceBase = withoutReasoning ?? payload;
+  const toolChoiceBase = withoutReasoning ?? compatibilityBase;
   addCandidate("omit-tool-choice", withoutPayloadFields(toolChoiceBase, ["tool_choice"]));
 
-  const textOnlyBase = withoutReasoning ?? payload;
+  const textOnlyBase = withoutReasoning ?? compatibilityBase;
   addCandidate(
     "text-only",
     withoutPayloadFields(textOnlyBase, ["tools", "tool_choice"])
