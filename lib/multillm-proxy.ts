@@ -5,6 +5,10 @@ import {
   providerErrorMessage,
 } from "@/lib/api-safety";
 import { sanitizeMediaUrl } from "./media-url.ts";
+import {
+  MAX_UPSTREAM_ERROR_BYTES,
+  readBoundedTextBody,
+} from "./server/json-body.ts";
 
 export const DEFAULT_MULTILLM_PROXY_BASE_URL =
   "https://multillm-proxy.cserules.workers.dev";
@@ -639,7 +643,10 @@ export const readUpstreamErrorDetails = async (
   fallback: string,
   knownSecrets: string[] = []
 ) => {
-  const text = await response.text();
+  const text = await readBoundedTextBody(
+    response,
+    MAX_UPSTREAM_ERROR_BYTES,
+  ).catch(() => "");
   let payload: unknown = text || null;
   try {
     payload = text ? (JSON.parse(text) as unknown) : null;

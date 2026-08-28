@@ -1,4 +1,6 @@
 export const MAX_API_JSON_REQUEST_BYTES = 72 * 1024 * 1024;
+export const MAX_API_JSON_RESPONSE_BYTES = 72 * 1024 * 1024;
+export const MAX_UPSTREAM_ERROR_BYTES = 64 * 1024;
 
 export class JsonBodyError extends Error {
   readonly status: 400 | 413;
@@ -75,9 +77,8 @@ const readBoundedBytes = async (
   return combineChunks(chunks, totalBytes);
 };
 
-const decodeJson = (bytes: Uint8Array) => {
+const parseJsonText = (text: string) => {
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return JSON.parse(text) as unknown;
   } catch (error) {
     if (error instanceof JsonBodyError) throw error;
@@ -85,13 +86,31 @@ const decodeJson = (bytes: Uint8Array) => {
   }
 };
 
+export const readBoundedTextBody = async (
+  source: JsonBodySource,
+  maxBytes: number,
+) => {
+  validateByteLimit(maxBytes);
+  validateDeclaredLength(source, maxBytes);
+  const bytes = await readBoundedBytes(source, maxBytes);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new JsonBodyError("Invalid UTF-8 response body.", 400);
+  }
+};
+
+export const readJsonResponse = async <T = unknown>(
+  response: Response,
+  maxBytes = MAX_API_JSON_RESPONSE_BYTES,
+): Promise<T> =>
+  parseJsonText(await readBoundedTextBody(response, maxBytes)) as T;
+
 export const readJsonRequestObject = async <T extends object>(
   request: Request,
   maxBytes = MAX_API_JSON_REQUEST_BYTES,
 ): Promise<T> => {
-  validateByteLimit(maxBytes);
-  validateDeclaredLength(request, maxBytes);
-  const value = decodeJson(await readBoundedBytes(request, maxBytes));
+  const value = parseJsonText(await readBoundedTextBody(request, maxBytes));
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new JsonBodyError("JSON payload must be an object.", 400);
   }

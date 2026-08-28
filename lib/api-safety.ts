@@ -1,3 +1,5 @@
+import { readJsonResponse } from "./server/json-body.ts";
+
 const LABELED_SECRET_PATTERNS = [
   /authorization["']?\s*[:=]\s*["']?(?:(?:[A-Za-z][A-Za-z0-9._-]*)\s+[A-Za-z0-9%._~+/=:-]+|(?![A-Za-z][A-Za-z0-9._-]*\s)[A-Za-z0-9%._~+/=:-]+)/gi,
   /x-api-key["']?\s*[:=]\s*["']?[A-Za-z0-9%._~+/=:-]+/gi,
@@ -414,9 +416,12 @@ export const safeErrorResponse = (
     { status }
   );
 
-export const jsonOrNull = async (response: Response) => {
+export const jsonOrNull = async (
+  response: Response,
+  maxBytes?: number,
+) => {
   try {
-    return await response.json();
+    return await readJsonResponse(response, maxBytes);
   } catch {
     return null;
   }

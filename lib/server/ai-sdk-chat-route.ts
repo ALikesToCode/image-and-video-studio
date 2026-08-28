@@ -34,7 +34,9 @@ import {
 } from "../openai-responses.ts";
 import { normalizeStudioChatOutputTokens } from "../llm-output-budget.ts";
 import {
+  MAX_UPSTREAM_ERROR_BYTES,
   jsonBodyErrorDetails,
+  readBoundedTextBody,
   readJsonRequestObject,
 } from "./json-body.ts";
 
@@ -91,7 +93,10 @@ const requestJSONBody = (init?: RequestInit) => {
 
 const responseErrorBody = async (response: Response) => {
   try {
-    const text = await response.clone().text();
+    const text = await readBoundedTextBody(
+      response.clone(),
+      MAX_UPSTREAM_ERROR_BYTES,
+    );
     if (!text) return undefined;
     try {
       return JSON.parse(text) as unknown;

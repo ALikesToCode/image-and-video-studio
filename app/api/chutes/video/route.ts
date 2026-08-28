@@ -3,8 +3,10 @@ import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
 import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
 import { VIDEO_MIME_TYPES } from "@/lib/studio-validation";
 import {
+    MAX_UPSTREAM_ERROR_BYTES,
     JsonBodyError,
     jsonBodyErrorDetails,
+    readBoundedTextBody,
     readJsonRequestObject,
 } from "@/lib/server/json-body";
 
@@ -52,7 +54,10 @@ export async function POST(req: Request) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
+            const errorText = await readBoundedTextBody(
+                response,
+                MAX_UPSTREAM_ERROR_BYTES
+            ).catch(() => "");
             return NextResponse.json(
                 { error: redactSecrets(errorText || "Chutes video generation failed.", [apiKey]) },
                 { status: response.status }

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   JsonBodyError,
   jsonBodyErrorDetails,
+  readJsonResponse,
   readJsonRequestObject,
 } from "./json-body.ts";
 
@@ -70,4 +71,20 @@ test("bounded JSON reader rejects malformed lengths and non-object JSON", async 
     error: "Invalid JSON payload.",
     status: 400,
   });
+});
+
+test("bounded JSON response reader rejects oversized provider bodies", async () => {
+  const valid = Response.json({ status: "completed" });
+  const oversized = new Response('{"status":"completed"}', {
+    headers: { "content-length": "1024" },
+  });
+
+  assert.deepEqual(await readJsonResponse(valid, 64), {
+    status: "completed",
+  });
+  await assert.rejects(
+    readJsonResponse(oversized, 64),
+    (error: unknown) =>
+      error instanceof JsonBodyError && error.status === 413,
+  );
 });
