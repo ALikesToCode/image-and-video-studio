@@ -5,7 +5,7 @@ import {
   useState,
 } from "react";
 
-import type { ChatAttachmentAsset } from "@/lib/chat-tooling";
+import type { ChatAttachmentAsset } from "@/lib/chat-media-persistence";
 import {
   extractPdfTextFromFile,
   isSupportedPdfFile,

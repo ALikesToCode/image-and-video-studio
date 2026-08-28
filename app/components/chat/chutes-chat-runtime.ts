@@ -3,7 +3,7 @@ import type {
   ModelOption,
   Provider,
 } from "@/lib/constants";
-import { isDeepSeekV4Model } from "@/lib/chat-tooling";
+import { isDeepSeekV4Model } from "@/lib/chat-completion";
 
 export const createChatId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {

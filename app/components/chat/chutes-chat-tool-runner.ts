@@ -5,12 +5,14 @@ import type {
 import {
   type ChatImageAsset,
   type ChatMediaAsset,
-  buildCancelledToolResults,
-  repairImageToolArguments,
-  resolveToolArguments,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-media-persistence";
+import { buildCancelledToolResults } from "@/lib/chat-turn-policy";
+import {
+  repairImageToolArguments,
+  resolveToolArguments,
+} from "@/lib/chat-tool-prompts";
 
 import type { ImageToolProgress } from "./chutes-chat-image-tool";
 import {

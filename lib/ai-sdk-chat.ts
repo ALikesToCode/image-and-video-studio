@@ -13,7 +13,7 @@ import {
   normalizeDeepSeekThinkingType,
   normalizeReasoningEffort,
   shouldOmitToolChoiceForModel,
-} from "./chat-tooling.ts";
+} from "./chat-completion.ts";
 import type { ChatTokenUsage } from "./chat-metrics.ts";
 
 export const AI_CHAT_TOOL_NAMES = [

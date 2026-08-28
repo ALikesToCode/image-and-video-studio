@@ -22,8 +22,8 @@ import remarkGfm from "remark-gfm";
 import {
   type ChatAttachmentAsset,
   type ChatMediaAsset,
-  type ChatTurnIntent,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-media-persistence";
+import type { ChatTurnIntent } from "@/lib/chat-turn-policy";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Button } from "../ui/button";

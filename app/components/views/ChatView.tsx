@@ -8,7 +8,8 @@ import {
     type ModelOption,
     type Provider,
 } from "@/lib/constants";
-import { isChatVideoModelSupported, type ChatImageAsset } from "@/lib/chat-tooling";
+import type { ChatImageAsset } from "@/lib/chat-media-persistence";
+import { isChatVideoModelSupported } from "@/lib/chat-media-tool-requests";
 import { sortModelOptionsByProviderAndName } from "@/lib/model-options";
 
 type ChatViewProps = {

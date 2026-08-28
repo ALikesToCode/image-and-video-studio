@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/app/components/ui/button";
-import type { ChatTurnIntent } from "@/lib/chat-tooling";
+import type { ChatTurnIntent } from "@/lib/chat-turn-policy";
 
 type CreatorWelcomeProps = {
   availability: {

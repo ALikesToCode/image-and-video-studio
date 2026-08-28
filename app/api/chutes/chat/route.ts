@@ -1,5 +1,5 @@
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
-import { buildChatCompletionPayload } from "@/lib/chat-tooling";
+import { buildChatCompletionPayload } from "@/lib/chat-completion";
 
 type ChatRequest = {
   apiKey?: string;

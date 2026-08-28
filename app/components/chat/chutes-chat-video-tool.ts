@@ -6,7 +6,7 @@ import {
   buildNanoGptVideoToolRequest,
   isChatVideoModelSupported,
   resolveNavyVideoStartResult,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-media-tool-requests";
 import {
   NAVY_JOB_POLL_INTERVAL_MS,
   NAVY_JOB_POLL_MAX_ATTEMPTS,

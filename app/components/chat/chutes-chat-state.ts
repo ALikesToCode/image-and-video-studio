@@ -21,7 +21,7 @@ import {
   sanitizeChatAttachmentAssets,
   sanitizeChatImageAssets,
   sanitizeChatMediaAssets,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-media-persistence";
 
 import {
   DEFAULT_TOOL_SETTINGS,

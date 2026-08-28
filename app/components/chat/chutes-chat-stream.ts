@@ -8,7 +8,10 @@ import {
   extractAIChatStreamState,
   type AIChatToolName,
 } from "@/lib/ai-sdk-chat";
-import { toChatCompletionMessages } from "@/lib/chat-tooling";
+import {
+  isDeepSeekV4Model,
+  toChatCompletionMessages,
+} from "@/lib/chat-completion";
 import { readAssistantTextResponseResult } from "@/lib/client/chat-stream-text";
 import {
   resolvePromptRewriteOutputTokenBudgets,
@@ -23,7 +26,6 @@ import {
   resolveImagePromptRecoveryChatModels,
   type ImagePromptHelpModel,
 } from "@/lib/studio-generation";
-import { isDeepSeekV4Model } from "@/lib/chat-tooling";
 
 import {
   createChatId,

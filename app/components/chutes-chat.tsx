@@ -25,14 +25,18 @@ import {
 } from "@/lib/studio-state-db";
 import {
   type ChatAttachmentAsset,
-  type ChatMediaPreview,
   type ChatMediaAsset,
-  type ChatTurnIntent,
+} from "@/lib/chat-media-persistence";
+import {
+  type ChatMediaPreview,
   buildChatMediaPreview,
-  isDeepSeekV4Model,
+} from "@/lib/chat-media-tool-requests";
+import {
+  type ChatTurnIntent,
   resolveChatTurnIntent,
-  resolveRequestedImageModels,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-turn-policy";
+import { isDeepSeekV4Model } from "@/lib/chat-completion";
+import { resolveRequestedImageModels } from "@/lib/chat-image-pipeline";
 import { ImageViewer } from "./image-viewer";
 import { mediaExtensionFromMimeType } from "@/lib/media-files";
 import {

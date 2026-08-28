@@ -15,7 +15,7 @@ import type {
 import {
   collectUnsafeChatMediaAssets,
   stripHeavyMediaFromMessagesForStorage,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-media-persistence";
 import { mergeUnsafeMediaBackup } from "@/lib/media-backup";
 import {
   deleteStudioState,

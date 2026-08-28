@@ -22,7 +22,7 @@ import {
   buildChatCompletionRecoveryPayloads,
   isDeepSeekV4Model,
   normalizeReasoningEffort,
-} from "../chat-tooling.ts";
+} from "../chat-completion.ts";
 import {
   getMultiLlmProxyBaseUrl,
   resolveMultiLlmChatTarget,

@@ -2,7 +2,7 @@ import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safet
 import {
   buildChatCompletionPayload,
   buildChatCompletionRecoveryPayloads,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-completion";
 import {
   buildOpenAIResponsesPayload,
   isOpenAIResponsesModel,

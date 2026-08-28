@@ -225,3 +225,17 @@ export const collectUnsafeChatMediaAssets = (
 
   return unsafe;
 };
+
+export const stripHeavyMediaFromMessagesForStorage = <
+  T extends { images?: unknown; media?: unknown; attachments?: unknown }
+>(
+  messages: T[],
+  maxMessages: number
+) =>
+  messages.slice(-maxMessages).map((message) => {
+    const clonedMessage = { ...message };
+    delete clonedMessage.images;
+    delete clonedMessage.media;
+    delete clonedMessage.attachments;
+    return clonedMessage;
+  });

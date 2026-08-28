@@ -26,10 +26,8 @@ import {
 } from "framer-motion";
 
 import type { ModelOption } from "@/lib/constants";
-import type {
-  ChatAttachmentAsset,
-  ChatTurnIntent,
-} from "@/lib/chat-tooling";
+import type { ChatAttachmentAsset } from "@/lib/chat-media-persistence";
+import type { ChatTurnIntent } from "@/lib/chat-turn-policy";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import {

@@ -15,14 +15,14 @@ import type {
 } from "@/lib/constants";
 import type { AIChatToolName } from "@/lib/ai-sdk-chat";
 import type { ChatTokenUsage } from "@/lib/chat-metrics";
+import type { ChatAttachmentAsset } from "@/lib/chat-media-persistence";
+import { buildAssistantToolContextContent } from "@/lib/chat-completion";
 import {
-  type ChatAttachmentAsset,
   type ChatTurnIntent,
-  buildAssistantToolContextContent,
   createSyntheticFallbackToolCall,
   resolveChatTurnIntent,
   resolveChatTurnToolPolicy,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-turn-policy";
 
 import {
   createChatId,

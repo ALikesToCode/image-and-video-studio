@@ -9,8 +9,8 @@ import type {
   ChatAttachmentAsset,
   ChatImageAsset,
   ChatMediaAsset,
-  ChatTurnIntent,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-media-persistence";
+import type { ChatTurnIntent } from "@/lib/chat-turn-policy";
 import type { AIChatToolCall } from "@/lib/ai-sdk-chat";
 import type { ChatTokenUsage } from "@/lib/chat-metrics";
 import type { NavyUsageResponse } from "@/lib/types";

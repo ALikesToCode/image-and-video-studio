@@ -3,14 +3,14 @@ import type {
   ModelOption,
   Provider,
 } from "@/lib/constants";
+import type { ChatImageAsset } from "@/lib/chat-media-persistence";
+import { buildNanoGptImageToolRequest } from "@/lib/chat-media-tool-requests";
 import {
-  type ChatImageAsset,
-  buildNanoGptImageToolRequest,
   normalizeImageToolModelRequest,
-  repairImageToolArguments,
   resolveRequestedImageModels,
   runImageModelPipelineParallel,
-} from "@/lib/chat-tooling";
+} from "@/lib/chat-image-pipeline";
+import { repairImageToolArguments } from "@/lib/chat-tool-prompts";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
 import { resolveMaximumImageQualityRequest } from "@/lib/image-quality";
 import {
