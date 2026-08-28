@@ -180,7 +180,7 @@ test("NanoGPT video download uses the same provider-key precedence as submit and
         if (requestNumber === 1) {
           assert.equal(
             new Headers(init?.headers).get("x-api-key"),
-            "server-fallback-key"
+            "nano-secret"
           );
           return Response.json({
             status: "completed",
