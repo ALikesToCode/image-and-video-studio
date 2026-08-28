@@ -507,6 +507,11 @@ test("AI SDK JSON schemas validate tool inputs at runtime", async () => {
     unexpected: true,
   });
   assert.equal(invalid.success, false);
+
+  const oversized = await schema.validate({
+    prompt: "x".repeat(24_001),
+  });
+  assert.equal(oversized.success, false);
 });
 
 test("Chat tools are disabled only when model metadata explicitly rejects them", () => {

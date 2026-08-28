@@ -121,7 +121,7 @@ export const REASONING_EFFORT_OPTIONS: Array<{
 ];
 
 export const MAX_CHAT_MESSAGES = 120;
-export const MAX_CHAT_TOOL_ROUNDS = 6;
+export const MAX_CHAT_TOOL_ROUNDS = 1;
 export const MAX_CHAT_MODEL_STEPS = MAX_CHAT_TOOL_ROUNDS + 1;
 export const AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 export const MAX_PENDING_ATTACHMENTS = 6;

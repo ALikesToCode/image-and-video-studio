@@ -109,6 +109,7 @@ export const runChatTools = async (
   signal?: AbortSignal,
 ) => {
     const toolMessages: ChatMessage[] = [];
+    const attemptedMediaTools = new Set<string>();
     const orderedToolCalls = [
       ...toolCalls.filter(
         (call) =>
@@ -179,6 +180,23 @@ export const runChatTools = async (
           ),
         );
         continue;
+      }
+      if (
+        toolName === "generate_image" ||
+        toolName === "generate_video" ||
+        toolName === "generate_audio"
+      ) {
+        if (attemptedMediaTools.has(toolName)) {
+          toolMessages.push(
+            toolErrorMessage(
+              toolCall,
+              `Tool error: Only one ${toolName} invocation is allowed per user turn.`,
+              invocationPrompt || undefined,
+            ),
+          );
+          continue;
+        }
+        attemptedMediaTools.add(toolName);
       }
 
       try {

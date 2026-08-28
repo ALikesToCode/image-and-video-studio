@@ -40,6 +40,11 @@ export type AIChatToolCall = {
   };
 };
 
+const TOOL_PROMPT_MAX_LENGTH = 24_000;
+const TOOL_NEGATIVE_PROMPT_MAX_LENGTH = 8_000;
+const TOOL_MEDIA_URL_MAX_LENGTH = 12 * 1024 * 1024;
+const TOOL_IDENTIFIER_MAX_LENGTH = 200;
+
 const IMAGE_TOOL_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -47,25 +52,35 @@ const IMAGE_TOOL_SCHEMA = {
     prompt: {
       type: "string",
       minLength: 1,
+      maxLength: TOOL_PROMPT_MAX_LENGTH,
       description: "The final, production-ready image prompt.",
     },
-    model: { type: "string", minLength: 1 },
+    model: {
+      type: "string",
+      minLength: 1,
+      maxLength: TOOL_IDENTIFIER_MAX_LENGTH,
+    },
     prompt_help_model: {
       type: "string",
       enum: ["auto", "terra", "sol"],
       description:
         "Optional stronger Navy chat model for refining a difficult image prompt before generation. This does not change the selected image model.",
     },
-    negative_prompt: { type: "string" },
+    negative_prompt: {
+      type: "string",
+      maxLength: TOOL_NEGATIVE_PROMPT_MAX_LENGTH,
+    },
     guidance_scale: { type: "number", minimum: 0 },
     width: { type: "integer", minimum: 64, maximum: 8192 },
     height: { type: "integer", minimum: 64, maximum: 8192 },
     resolution: {
       type: "string",
+      maxLength: 64,
       description: "A supported resolution such as 1024x1024.",
     },
     size: {
       type: "string",
+      maxLength: 64,
       description: "A supported output size such as 1024x1024.",
     },
     quality: {
@@ -74,15 +89,24 @@ const IMAGE_TOOL_SCHEMA = {
     },
     style: {
       type: "string",
+      maxLength: 128,
       description:
         "Only use when the selected image model documents a style parameter.",
     },
     image_url: {
       oneOf: [
-        { type: "string", minLength: 1 },
+        {
+          type: "string",
+          minLength: 1,
+          maxLength: TOOL_MEDIA_URL_MAX_LENGTH,
+        },
         {
           type: "array",
-          items: { type: "string", minLength: 1 },
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: TOOL_MEDIA_URL_MAX_LENGTH,
+          },
           minItems: 1,
           maxItems: 5,
         },
@@ -102,21 +126,29 @@ const VIDEO_TOOL_SCHEMA = {
     prompt: {
       type: "string",
       minLength: 1,
+      maxLength: TOOL_PROMPT_MAX_LENGTH,
       description: "The final video prompt.",
     },
-    model: { type: "string", minLength: 1 },
+    model: {
+      type: "string",
+      minLength: 1,
+      maxLength: TOOL_IDENTIFIER_MAX_LENGTH,
+    },
     image: {
       type: "string",
       minLength: 1,
+      maxLength: TOOL_MEDIA_URL_MAX_LENGTH,
       description: "Optional or required source frame, depending on the model.",
     },
     image_url: {
       type: "string",
       minLength: 1,
+      maxLength: TOOL_MEDIA_URL_MAX_LENGTH,
       description: "Optional start-frame URL or data URI.",
     },
     size: {
       type: "string",
+      maxLength: 64,
       description: "Output size or aspect ratio such as 16:9.",
     },
     seconds: { type: "number", minimum: 1, maximum: 60 },
@@ -134,10 +166,19 @@ const AUDIO_TOOL_SCHEMA = {
     input: {
       type: "string",
       minLength: 1,
+      maxLength: TOOL_PROMPT_MAX_LENGTH,
       description: "The exact text to synthesize as speech.",
     },
-    model: { type: "string", minLength: 1 },
-    voice: { type: "string", minLength: 1 },
+    model: {
+      type: "string",
+      minLength: 1,
+      maxLength: TOOL_IDENTIFIER_MAX_LENGTH,
+    },
+    voice: {
+      type: "string",
+      minLength: 1,
+      maxLength: TOOL_IDENTIFIER_MAX_LENGTH,
+    },
     speed: { type: "number", minimum: 0.25, maximum: 4 },
     response_format: {
       type: "string",
@@ -257,6 +298,9 @@ const validateSchemaValue = (
     if (typeof value !== "string") return [`${path} must be a string.`];
     if (typeof schema.minLength === "number" && value.length < schema.minLength) {
       return [`${path} must contain at least ${schema.minLength} character(s).`];
+    }
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) {
+      return [`${path} must contain at most ${schema.maxLength} character(s).`];
     }
   } else if (type === "integer") {
     if (typeof value !== "number" || !Number.isInteger(value)) {
