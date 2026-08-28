@@ -77,7 +77,11 @@ import {
     sanitizeModelParameterDescriptors,
     type ModelParameterValues,
 } from "@/lib/model-capability-settings";
-import { mergeModelOptionLists } from "@/lib/model-options";
+import {
+    mergeImageModelOptionLists,
+    mergeModelOptionLists,
+    sanitizeImageModelOptions,
+} from "@/lib/model-options";
 import {
     getStandaloneVideoModelSupport,
     imageInputMetadataFromDataUrl,
@@ -555,6 +559,10 @@ const mergeModelOptions = (...modelLists: ModelOption[][]): ModelOption[] => {
     return mergeModelOptionLists(modelLists, MAX_CACHED_MODELS);
 };
 
+const mergeImageModelOptions = (...modelLists: ModelOption[][]): ModelOption[] => {
+    return mergeImageModelOptionLists(modelLists, MAX_CACHED_MODELS);
+};
+
 
 
 const createId = () => {
@@ -960,9 +968,13 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [navyImageModels, setNavyImageModels] = useState<ModelOption[]>(NAVY_IMAGE_MODELS);
     const [navyVideoModels, setNavyVideoModels] = useState<ModelOption[]>(NAVY_VIDEO_MODELS);
     const [navyTtsModels, setNavyTtsModels] = useState<ModelOption[]>(NAVY_TTS_MODELS);
-    const [nanoGptImageModels, setNanoGptImageModels] = useState<ModelOption[]>(NANOGPT_IMAGE_MODELS);
+    const [nanoGptImageModels, setNanoGptImageModels] = useState<ModelOption[]>(
+        () => sanitizeImageModelOptions(NANOGPT_IMAGE_MODELS, MAX_CACHED_MODELS)
+    );
     const [nanoGptVideoModels, setNanoGptVideoModels] = useState<ModelOption[]>(NANOGPT_VIDEO_MODELS);
-    const [multiLlmImageModels, setMultiLlmImageModels] = useState<ModelOption[]>(MULTILLM_IMAGE_MODELS);
+    const [multiLlmImageModels, setMultiLlmImageModels] = useState<ModelOption[]>(
+        () => mergeImageModelOptions(MULTILLM_IMAGE_MODELS)
+    );
     const [multiLlmVideoModels, setMultiLlmVideoModels] = useState<ModelOption[]>(MULTILLM_VIDEO_MODELS);
     const [multiLlmAudioModels, setMultiLlmAudioModels] = useState<ModelOption[]>(MULTILLM_AUDIO_MODELS);
 
@@ -1174,12 +1186,21 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             throw new Error(payload?.error ?? "Failed to fetch NanoGPT models.");
         }
         const models = sanitizeModelOptions(payload?.models ?? []);
-        if (!models.length) {
-            throw new Error(`NanoGPT returned no ${targetMode} models.`);
-        }
         if (targetMode === "image") {
-            setNanoGptImageModels(models);
+            const imageModels = sanitizeImageModelOptions(
+                models,
+                MAX_CACHED_MODELS
+            );
+            if (!imageModels.length) {
+                throw new Error("NanoGPT returned no image models.");
+            }
+            setNanoGptImageModels(
+                mergeImageModelOptions(NANOGPT_IMAGE_MODELS, imageModels)
+            );
         } else {
+            if (!models.length) {
+                throw new Error("NanoGPT returned no video models.");
+            }
             setNanoGptVideoModels(models);
         }
     }, []);
@@ -1204,14 +1225,24 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 );
             }
             const models = sanitizeModelOptions(payload?.models ?? []);
+            if (kind === "image") {
+                const imageModels = sanitizeImageModelOptions(
+                    models,
+                    MAX_CACHED_MODELS
+                );
+                if (!imageModels.length) {
+                    throw new Error("MultiLLM returned no image models.");
+                }
+                setMultiLlmImageModels(
+                    mergeImageModelOptions(MULTILLM_IMAGE_MODELS, imageModels)
+                );
+                return imageModels;
+            }
             if (!models.length) {
                 throw new Error(`MultiLLM returned no ${kind} models.`);
             }
             if (kind === "chat") {
                 setMultiLlmChatModels(mergeModelOptions(MULTILLM_CHAT_MODELS, models));
-            }
-            if (kind === "image") {
-                setMultiLlmImageModels(mergeModelOptions(MULTILLM_IMAGE_MODELS, models));
             }
             if (kind === "video") {
                 setMultiLlmVideoModels(mergeModelOptions(MULTILLM_VIDEO_MODELS, models));
@@ -3353,7 +3384,15 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
         const storedNanoGptImageModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.nanoGptImageModels, []);
         if (storedNanoGptImageModels.length) {
-            setNanoGptImageModels(sanitizeModelOptions(storedNanoGptImageModels));
+            setNanoGptImageModels(
+                mergeImageModelOptions(
+                    NANOGPT_IMAGE_MODELS,
+                    sanitizeImageModelOptions(
+                        sanitizeModelOptions(storedNanoGptImageModels),
+                        MAX_CACHED_MODELS
+                    )
+                )
+            );
         }
         const storedNanoGptVideoModels = readLocalStorage<ModelOption[]>(STORAGE_KEYS.nanoGptVideoModels, []);
         if (storedNanoGptVideoModels.length) {
@@ -3365,7 +3404,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         );
         if (storedMultiLlmImageModels.length) {
             setMultiLlmImageModels(
-                mergeModelOptions(
+                mergeImageModelOptions(
                     MULTILLM_IMAGE_MODELS,
                     sanitizeModelOptions(storedMultiLlmImageModels)
                 )

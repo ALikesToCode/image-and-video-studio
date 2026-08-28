@@ -7,6 +7,10 @@ import type {
   ModelParameterType,
   ModelParameterValue,
 } from "./constants";
+import {
+  isImageOutputModelOption,
+  sortModelOptionsByProviderAndName,
+} from "./model-options";
 
 type UnknownRecord = Record<string, unknown>;
 type MediaKind = "image" | "video";
@@ -644,11 +648,19 @@ const normalizeCatalog = (payload: unknown, kind: MediaKind): ModelOption[] => {
   const models: ModelOption[] = [];
   for (const entry of extractCatalogRecords(payload)) {
     const model = normalizeCatalogModel(entry, kind);
-    if (!model || seen.has(model.id)) continue;
+    if (
+      !model ||
+      (kind === "image" && !isImageOutputModelOption(model)) ||
+      seen.has(model.id)
+    ) {
+      continue;
+    }
     seen.add(model.id);
     models.push(model);
   }
-  return models;
+  return kind === "image"
+    ? sortModelOptionsByProviderAndName(models)
+    : models;
 };
 
 export const normalizeNanoGptImageModels = (payload: unknown): ModelOption[] =>

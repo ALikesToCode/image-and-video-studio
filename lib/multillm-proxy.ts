@@ -278,6 +278,7 @@ export const modelSupportsKind = (
     "supports_image_output",
     "supports_images",
     "supports_image_generation",
+    "image_generation",
   ]);
   const isVideoModel =
     (declaresVideoOutput && !declaresImageOutput) ||

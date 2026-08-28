@@ -6,7 +6,9 @@ import {
   filterModelOptions,
   hasModelMetadata,
   isFetchedOnlyModel,
+  mergeImageModelOptionLists,
   mergeModelOptionLists,
+  sanitizeImageModelOptions,
 } from "./model-options.ts";
 import {
   MULTILLM_IMAGE_MODELS,
@@ -142,5 +144,98 @@ test("live AIHubMix models replace matching fallbacks without duplicates", () =>
   assert.equal(
     merged.find((model) => model.id === modelId)?.metadataStatus,
     "live",
+  );
+});
+
+test("cached image catalogs reject text-only entries even with stale image flags", () => {
+  const sanitized = sanitizeImageModelOptions([
+    {
+      id: "nanogpt:llama-3.3-70b",
+      label: "NanoGPT · Llama 3.3 70B",
+      outputModalities: ["text"],
+      supportsImageOutput: true,
+      supports: { imageGeneration: true },
+    },
+    {
+      id: "nanogpt:z-image",
+      label: "NanoGPT · Z Image",
+      outputModalities: ["image"],
+    },
+    {
+      id: "navyai:gpt-image-2",
+      label: "NavyAI · GPT Image 2",
+      supportsImageOutput: true,
+    },
+  ]);
+
+  assert.deepEqual(
+    sanitized.map((model) => model.id),
+    ["nanogpt:z-image", "navyai:gpt-image-2"],
+  );
+});
+
+test("image catalog merges are deduplicated and sorted by provider then name", () => {
+  const merged = mergeImageModelOptionLists([
+    [
+      {
+        id: "navyai:zeta-image",
+        label: "NavyAI · Zeta Image",
+        outputModalities: ["image"],
+      },
+      {
+        id: "linkapi:beta-image",
+        label: "LinkAPI · Beta Image",
+        outputModalities: ["image"],
+      },
+      {
+        id: "aihubmix:gamma-image",
+        label: "AIHubMix · Gamma Image",
+        outputModalities: ["image"],
+      },
+      {
+        id: "linkapi:alpha-image",
+        label: "LinkAPI · Alpha Image fallback",
+        outputModalities: ["image"],
+        metadataStatus: "fallback",
+      },
+    ],
+    [
+      {
+        id: "linkapi:alpha-image",
+        label: "LinkAPI · Alpha Image",
+        outputModalities: ["image"],
+        metadataStatus: "live",
+      },
+    ],
+  ]);
+
+  assert.deepEqual(
+    merged.map(({ id, label, metadataStatus }) => ({
+      id,
+      label,
+      metadataStatus,
+    })),
+    [
+      {
+        id: "aihubmix:gamma-image",
+        label: "AIHubMix · Gamma Image",
+        metadataStatus: undefined,
+      },
+      {
+        id: "linkapi:alpha-image",
+        label: "LinkAPI · Alpha Image",
+        metadataStatus: "live",
+      },
+      {
+        id: "linkapi:beta-image",
+        label: "LinkAPI · Beta Image",
+        metadataStatus: undefined,
+      },
+      {
+        id: "navyai:zeta-image",
+        label: "NavyAI · Zeta Image",
+        metadataStatus: undefined,
+      },
+    ],
   );
 });

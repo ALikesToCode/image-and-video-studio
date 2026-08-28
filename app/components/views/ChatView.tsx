@@ -9,6 +9,7 @@ import {
     type Provider,
 } from "@/lib/constants";
 import { isChatVideoModelSupported, type ChatImageAsset } from "@/lib/chat-tooling";
+import { sortModelOptionsByProviderAndName } from "@/lib/model-options";
 
 type ChatViewProps = {
     initialInput?: string | null;
@@ -136,18 +137,26 @@ export function ChatView({ initialInput }: ChatViewProps) {
                 ? setMultiLlmChatModel
                 : setChutesChatModel;
     const chutesImageToolModels = useMemo(
-        () => appendUniqueModels(CHUTES_IMAGE_MODELS, nanoGptImageModels),
+        () =>
+            sortModelOptionsByProviderAndName(
+                appendUniqueModels(CHUTES_IMAGE_MODELS, nanoGptImageModels)
+            ),
         [nanoGptImageModels]
     );
     const navyImageToolModels = useMemo(
-        () => appendUniqueModels(navyImageModels, nanoGptImageModels),
+        () =>
+            sortModelOptionsByProviderAndName(
+                appendUniqueModels(navyImageModels, nanoGptImageModels)
+            ),
         [navyImageModels, nanoGptImageModels]
     );
     const nanoGptImageToolModels = useMemo(
         () =>
-            appendUniqueModels(
-                nanoGptImageModels,
-                [...navyImageModels, ...CHUTES_IMAGE_MODELS]
+            sortModelOptionsByProviderAndName(
+                appendUniqueModels(
+                    nanoGptImageModels,
+                    [...navyImageModels, ...CHUTES_IMAGE_MODELS]
+                )
             ),
         [nanoGptImageModels, navyImageModels]
     );

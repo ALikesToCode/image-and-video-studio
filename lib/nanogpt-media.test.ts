@@ -6,6 +6,25 @@ import {
   normalizeNanoGptVideoModels,
 } from "./nanogpt-media.ts";
 
+test("excludes text-only records from NanoGPT image catalogs", () => {
+  const models = normalizeNanoGptImageModels({
+    data: [
+      {
+        id: "llama-3.3-70b",
+        name: "Llama 3.3 70B",
+        output_modalities: ["text"],
+      },
+      {
+        id: "z-image",
+        name: "Z Image",
+        output_modalities: ["image"],
+      },
+    ],
+  });
+
+  assert.deepEqual(models.map((model) => model.id), ["z-image"]);
+});
+
 test("normalizes NanoGPT image catalog metadata and preserves slash-containing IDs", () => {
   const models = normalizeNanoGptImageModels({
     object: "list",

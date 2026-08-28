@@ -8,6 +8,7 @@ import {
   type MultiLlmMediaSource,
   type MultiLlmModelKind,
 } from "@/lib/multillm-proxy";
+import { mergeImageModelOptionLists } from "@/lib/model-options";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,6 @@ const catalogTargets: Record<MultiLlmModelKind, CatalogTarget[]> = {
     {
       source: "nanogpt",
       path: "/nanogpt/v1/image-models?detailed=true",
-      assumeKind: true,
     },
     {
       source: "aihubmix",
@@ -120,9 +120,13 @@ export async function GET(request: Request) {
     })
   );
 
-  const models = settled.flatMap((entry) =>
+  const discoveredModels = settled.flatMap((entry) =>
     entry.status === "fulfilled" ? entry.models : []
   );
+  const models =
+    kindParam === "image"
+      ? mergeImageModelOptionLists([discoveredModels])
+      : discoveredModels;
   const warnings = settled.flatMap((entry) =>
     entry.status === "rejected"
       ? [`${entry.source}: ${entry.error}`]

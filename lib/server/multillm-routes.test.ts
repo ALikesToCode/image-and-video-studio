@@ -123,7 +123,25 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
           url,
           "https://proxy.test/nanogpt/v1/image-models?detailed=true"
         );
-        return Response.json({ data: [{ id: "nano-image-free" }] });
+        return Response.json({
+          data: [
+            {
+              id: "llama-3.3-70b",
+              name: "Llama 3.3 70B",
+              output_modalities: ["text"],
+            },
+            {
+              id: "z-image",
+              name: "Z Image",
+              output_modalities: ["image"],
+            },
+            {
+              id: "canvas-pro",
+              name: "Canvas Pro",
+              capabilities: { image_generation: true },
+            },
+          ],
+        });
       },
       async () => {
         const response = await multiLlmModelsGet(
@@ -138,12 +156,18 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
         assert.deepEqual(
           payload.models.map(({ id, provider }) => ({ id, provider })),
           [
-            { id: "navyai:flux", provider: "multillm" },
             {
-              id: "navyai:gemini-3.1-flash-image",
+              id: "aihubmix:doubao-seedream-4-0",
               provider: "multillm",
             },
-            { id: "linkapi:gpt-image-2-c", provider: "multillm" },
+            {
+              id: "aihubmix:gemini-3.1-flash-image-preview-free",
+              provider: "multillm",
+            },
+            {
+              id: "aihubmix:gpt-image-2-free",
+              provider: "multillm",
+            },
             {
               id: "linkapi:gemini-3.1-flash-image-preview",
               provider: "multillm",
@@ -152,20 +176,18 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
               id: "linkapi:gemini-3.1-flash-lite-image",
               provider: "multillm",
             },
+            { id: "linkapi:gpt-image-2-c", provider: "multillm" },
             {
-              id: "nanogpt:nano-image-free",
+              id: "nanogpt:canvas-pro",
               provider: "multillm",
             },
             {
-              id: "aihubmix:gpt-image-2-free",
+              id: "nanogpt:z-image",
               provider: "multillm",
             },
+            { id: "navyai:flux", provider: "multillm" },
             {
-              id: "aihubmix:gemini-3.1-flash-image-preview-free",
-              provider: "multillm",
-            },
-            {
-              id: "aihubmix:doubao-seedream-4-0",
+              id: "navyai:gemini-3.1-flash-image",
               provider: "multillm",
             },
           ]
@@ -207,7 +229,14 @@ test("one MultiLLM image catalog failure preserves other providers", async () =>
         if (
           url === "https://proxy.test/nanogpt/v1/image-models?detailed=true"
         ) {
-          return Response.json({ data: [{ id: "nano-image-free" }] });
+          return Response.json({
+            data: [
+              {
+                id: "nano-image-free",
+                output_modalities: ["image"],
+              },
+            ],
+          });
         }
         assert.equal(url, "https://proxy.test/v1/models");
         return new Response("AIHubMix catalog unavailable", { status: 503 });
@@ -225,9 +254,9 @@ test("one MultiLLM image catalog failure preserves other providers", async () =>
         assert.deepEqual(
           payload.models.map((model) => model.id),
           [
-            "navyai:flux",
             "linkapi:gpt-image-2-c",
             "nanogpt:nano-image-free",
+            "navyai:flux",
           ]
         );
         assert.equal(payload.warnings.length, 1);
