@@ -274,7 +274,11 @@ export function VideoGenView() {
                                 </div>
 
                                 <div className="flex gap-2 justify-end">
-                                    <Button variant="outline" size="sm" onClick={() => window.open(videoUrl, '_blank')}>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => window.open(videoUrl, "_blank", "noopener,noreferrer")}
+                                    >
                                         <Download className="h-4 w-4 mr-2" />
                                         Download
                                     </Button>

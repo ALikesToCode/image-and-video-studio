@@ -1,4 +1,5 @@
 import { getUserApiKey, jsonOrNull, providerErrorDetails } from "@/lib/api-safety";
+import { sanitizeMediaUrl } from "@/lib/media-url";
 import {
   buildNavyImageGenerationPayload,
   isNavyGenerationFailed,
@@ -110,8 +111,12 @@ export async function POST(req: Request) {
       resultItems[0] && typeof resultItems[0] === "object"
         ? (resultItems[0] as Record<string, unknown>)
         : {};
-    const videoUrl = firstData.url ?? firstResult.url;
-    if (typeof videoUrl === "string" && videoUrl) {
+    const videoUrl = sanitizeMediaUrl(firstData.url ?? firstResult.url, {
+      kind: "video",
+      allowData: false,
+      allowBlob: false,
+    });
+    if (videoUrl) {
       return Response.json({ videoUrl, status: dataRecord.status ?? null });
     }
     return Response.json(
@@ -191,11 +196,13 @@ export async function GET(req: Request) {
     resultItems[0] && typeof resultItems[0] === "object"
       ? (resultItems[0] as Record<string, unknown>)
       : {};
-  const url =
+  const url = sanitizeMediaUrl(
     firstResult.url ??
     firstResult.video_url ??
     result.video_url ??
-    result.url;
+    result.url,
+    { kind: "video", allowData: false, allowBlob: false }
+  );
 
   if (!url) {
     return Response.json(

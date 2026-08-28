@@ -1,4 +1,5 @@
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { sanitizeMediaUrl } from "@/lib/media-url";
 import { buildGeminiVideoPayload } from "@/lib/studio-generation";
 import {
   geminiOperationStatusUrl,
@@ -128,10 +129,11 @@ export async function GET(req: Request) {
     return Response.json(
       {
         done: true,
-        error:
-          typeof errorRecord.message === "string"
-            ? errorRecord.message
-            : "Video generation failed.",
+        error: providerErrorMessage(
+          { error: errorRecord },
+          "Video generation failed.",
+          [apiKey]
+        ),
       },
       { status: 502 }
     );
@@ -157,7 +159,11 @@ export async function GET(req: Request) {
     firstSample.video && typeof firstSample.video === "object"
       ? (firstSample.video as Record<string, unknown>)
       : {};
-  const videoUri = typeof video.uri === "string" ? video.uri : null;
+  const videoUri = sanitizeMediaUrl(video.uri, {
+    kind: "video",
+    allowData: false,
+    allowBlob: false,
+  });
 
   if (!videoUri) {
     return Response.json(
