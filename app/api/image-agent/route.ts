@@ -48,6 +48,9 @@ type AgentImage = {
 const MAX_EXTRACTED_IMAGES = 20;
 const MAX_RESULT_DEPTH = 8;
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+const MAX_AGENT_IMAGES = 4;
+const MAX_PROMPT_LENGTH = 24_000;
+const MAX_MODEL_ID_LENGTH = 200;
 
 const normalizedString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
@@ -89,8 +92,15 @@ const uniqueModels = (values: unknown[]) => {
   const models: string[] = [];
   for (const value of values) {
     const model = normalizedString(value);
-    if (!model || models.includes(model)) continue;
+    if (
+      !model ||
+      model.length > MAX_MODEL_ID_LENGTH ||
+      models.includes(model)
+    ) {
+      continue;
+    }
     models.push(model);
+    if (models.length >= MAX_AGENT_IMAGES) break;
   }
   return models;
 };
@@ -289,8 +299,18 @@ export async function POST(req: Request) {
   if (!prompt) {
     return janitorAiJsonResponse(req, { error: "Prompt required." }, { status: 400 });
   }
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    return janitorAiJsonResponse(
+      req,
+      { error: `Prompt must contain at most ${MAX_PROMPT_LENGTH} characters.` },
+      { status: 400 }
+    );
+  }
 
-  const maxImages = positiveInteger(body.maxImages) ?? 1;
+  const maxImages = Math.min(
+    positiveInteger(body.maxImages) ?? 1,
+    MAX_AGENT_IMAGES
+  );
   const models = resolveModels(body).slice(0, Math.max(maxImages, 1));
   const images: AgentImage[] = [];
   const seedUsed = integerOrNull(body.seed);

@@ -143,3 +143,90 @@ test("image-agent route OPTIONS allows JanitorAI agent headers", async () => {
   assert.match(allowHeaders, /x-janitorai-source/i);
   assert.match(allowHeaders, /x-janitorai-agent/i);
 });
+
+test("image-agent route caps client-controlled paid generation fan-out", async () => {
+  const originalFetch = globalThis.fetch;
+  const restoreEnv = temporarilyUnsetEnv(["CHUTES_API_KEY"]);
+  let providerCalls = 0;
+
+  globalThis.fetch = async () => {
+    providerCalls += 1;
+    return Response.json({
+      image: `data:image/png;base64,${Buffer.from(`image-${providerCalls}`).toString("base64")}`,
+      mimeType: "image/png",
+    });
+  };
+
+  try {
+    const response = await imageAgentPost(
+      new Request("https://studio.test/api/image-agent", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer userscript-secret",
+          origin: "https://janitorai.com",
+        },
+        body: JSON.stringify({
+          source: "janitorai",
+          provider: "image-agent",
+          action: "generate",
+          mode: "image-agent",
+          prompt: "Generate a four-image study.",
+          models: [
+            "z-image-turbo",
+            "chutes-hidream",
+            "chroma",
+            "JuggernautXL-Ragnarok",
+            "Qwen-Image-2512",
+            "another-model",
+          ],
+          maxImages: 10_000,
+          imagePipelineEnabled: true,
+        }),
+      })
+    );
+    const payload = (await response.json()) as { images?: unknown[] };
+
+    assert.equal(response.status, 200);
+    assert.equal(providerCalls, 4);
+    assert.equal(payload.images?.length, 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv();
+  }
+});
+
+test("image-agent route rejects oversized prompts before provider calls", async () => {
+  const originalFetch = globalThis.fetch;
+  let providerCalled = false;
+  globalThis.fetch = async () => {
+    providerCalled = true;
+    return Response.json({ image: "data:image/png;base64,AQID" });
+  };
+
+  try {
+    const response = await imageAgentPost(
+      new Request("https://studio.test/api/image-agent", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer userscript-secret",
+          origin: "https://janitorai.com",
+        },
+        body: JSON.stringify({
+          source: "janitorai",
+          provider: "image-agent",
+          action: "generate",
+          mode: "image-agent",
+          prompt: "x".repeat(24_001),
+        }),
+      })
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(providerCalled, false);
+    assert.match(await response.text(), /at most 24000 characters/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
