@@ -33,6 +33,10 @@ import {
   shouldUseOpenAIResponses,
 } from "../openai-responses.ts";
 import { normalizeStudioChatOutputTokens } from "../llm-output-budget.ts";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "./json-body.ts";
 
 type StudioChatProvider = "navy" | "chutes" | "nanogpt" | "multillm";
 
@@ -60,6 +64,10 @@ const NATIVE_IMAGE_URLS = {
   "image/*": [/^https?:\/\//],
 };
 
+const MAX_STUDIO_CHAT_MESSAGES = 120;
+const MAX_STUDIO_CHAT_MODEL_ID_LENGTH = 200;
+const MAX_STUDIO_CHAT_INSTRUCTIONS_LENGTH = 64_000;
+
 const isStudioChatProvider = (value: unknown): value is StudioChatProvider =>
   value === "navy" ||
   value === "chutes" ||
@@ -68,14 +76,6 @@ const isStudioChatProvider = (value: unknown): value is StudioChatProvider =>
 
 const isRecoverableChatStatus = (status: number) =>
   status === 400 || status === 422;
-
-const parseRequestBody = async (request: Request) => {
-  try {
-    return (await request.json()) as StudioChatRequest;
-  } catch {
-    return null;
-  }
-};
 
 const requestJSONBody = (init?: RequestInit) => {
   if (typeof init?.body !== "string") return null;
@@ -190,9 +190,15 @@ const finishMessageMetadata = ({
 });
 
 export async function handleAIStudioChatRequest(request: Request) {
-  const body = await parseRequestBody(request);
-  if (!body) {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+  let body: StudioChatRequest;
+  try {
+    body = await readJsonRequestObject<StudioChatRequest>(request);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json(
+      { error: details.error },
+      { status: details.status },
+    );
   }
 
   if (!isStudioChatProvider(body.provider)) {
@@ -203,17 +209,38 @@ export async function handleAIStudioChatRequest(request: Request) {
   }
 
   const model = typeof body.model === "string" ? body.model.trim() : "";
+  if (model.length > MAX_STUDIO_CHAT_MODEL_ID_LENGTH) {
+    return Response.json({ error: "Invalid chat model." }, { status: 400 });
+  }
+  if (
+    !Array.isArray(body.messages) ||
+    body.messages.length === 0 ||
+    body.messages.length > MAX_STUDIO_CHAT_MESSAGES
+  ) {
+    return Response.json(
+      { error: `Chat requires 1-${MAX_STUDIO_CHAT_MESSAGES} messages.` },
+      { status: 400 },
+    );
+  }
   const modelMessages = toAIModelMessages(body.messages);
   const instructions = modelMessages
     .filter((message) => message.role === "system")
     .map((message) => message.content)
     .join("\n\n");
+  if (instructions.length > MAX_STUDIO_CHAT_INSTRUCTIONS_LENGTH) {
+    return Response.json(
+      {
+        error: `System instructions must contain at most ${MAX_STUDIO_CHAT_INSTRUCTIONS_LENGTH} characters.`,
+      },
+      { status: 400 },
+    );
+  }
   const messages = modelMessages.filter((message) => message.role !== "system");
   const apiKey =
     body.provider === "multillm"
       ? resolveMultiLlmApiKey(request, body.apiKey)
       : getUserApiKey(request, body as unknown as Record<string, unknown>);
-  if (!apiKey || !model || !Array.isArray(body.messages) || !messages.length) {
+  if (!apiKey || !model || !messages.length) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
   }
 
