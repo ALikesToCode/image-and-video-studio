@@ -609,12 +609,14 @@ export const resolveMultiLlmApiKey = (
   request: Request,
   bodyApiKey?: unknown
 ) => {
-  const serverKey = asString(process.env.MULTILLM_API_KEY);
-  if (serverKey) return serverKey;
-  return getUserApiKey(
+  const userKey = getUserApiKey(
     request,
     asString(bodyApiKey) ? { apiKey: asString(bodyApiKey) } : undefined
   );
+  if (userKey) return userKey;
+  const serverKey = asString(process.env.MULTILLM_API_KEY);
+  if (serverKey) return serverKey;
+  return "";
 };
 
 export const multiLlmAuthorizationHeaders = (

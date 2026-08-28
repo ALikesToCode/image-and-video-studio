@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   getProviderApiKey,
   getUserApiKey,
+  isAllowedJanitorAiCorsOrigin,
   providerErrorDetails,
   providerErrorMessage,
   redactSecrets,
@@ -300,7 +301,7 @@ test("getUserApiKey accepts Authorization bearer keys for userscripts", () => {
   assert.equal(getUserApiKey(request), "user-secret");
 });
 
-test("getProviderApiKey prefers server env keys over BYOK request keys", () => {
+test("getProviderApiKey prefers BYOK request keys over server fallbacks", () => {
   const original = process.env.CHUTES_API_KEY;
   process.env.CHUTES_API_KEY = "server-secret";
   const request = new Request("https://studio.test/api/chutes/image", {
@@ -311,7 +312,7 @@ test("getProviderApiKey prefers server env keys over BYOK request keys", () => {
   });
 
   try {
-    assert.equal(getProviderApiKey("chutes", request), "server-secret");
+    assert.equal(getProviderApiKey("chutes", request), "header-secret");
   } finally {
     if (original === undefined) {
       delete process.env.CHUTES_API_KEY;
@@ -331,7 +332,6 @@ test("getProviderApiKey accepts the local NAVY_API server env alias", () => {
   delete process.env.NAVYAI_API_KEY;
   process.env.NAVY_API = "server-navy-secret";
   const request = new Request("https://studio.test/api/navy/image", {
-    headers: { "x-user-api-key": "user-secret" },
   });
 
   try {
@@ -344,5 +344,24 @@ test("getProviderApiKey accepts the local NAVY_API server env alias", () => {
         process.env[key] = value;
       }
     }
+  }
+});
+
+test("JanitorAI CORS accepts only canonical HTTPS origins", () => {
+  assert.equal(isAllowedJanitorAiCorsOrigin("https://janitorai.com"), true);
+  assert.equal(
+    isAllowedJanitorAiCorsOrigin("https://chat.janitorai.com"),
+    true
+  );
+  for (const origin of [
+    "http://janitorai.com",
+    "ftp://janitorai.com",
+    "https://janitorai.com/",
+    "https://janitorai.com/path",
+    "https://janitorai.com.evil.example",
+    "https://evil.example?janitorai.com",
+    "https://user:password@janitorai.com",
+  ]) {
+    assert.equal(isAllowedJanitorAiCorsOrigin(origin), false, origin);
   }
 });

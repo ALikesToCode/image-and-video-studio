@@ -544,7 +544,7 @@ test("normalizes image outputs from OpenAI-compatible chat completions", () => {
   );
 });
 
-test("prefers the server key and redacts it from upstream errors", async () => {
+test("prefers the caller key and redacts it from upstream errors", async () => {
   const originalKey = process.env.MULTILLM_API_KEY;
   process.env.MULTILLM_API_KEY = "server-proxy-secret";
   try {
@@ -555,19 +555,19 @@ test("prefers the server key and redacts it from upstream errors", async () => {
     });
     assert.equal(
       resolveMultiLlmApiKey(request),
-      "server-proxy-secret"
+      "browser-proxy-key"
     );
     const message = await readUpstreamError(
       new Response(
         JSON.stringify({
-          error: { message: "Rejected Bearer server-proxy-secret" },
+          error: { message: "Rejected Bearer browser-proxy-key" },
         }),
         { status: 401 }
       ),
       "Proxy request failed.",
-      ["server-proxy-secret"]
+      ["browser-proxy-key"]
     );
-    assert.doesNotMatch(message, /server-proxy-secret/);
+    assert.doesNotMatch(message, /browser-proxy-key/);
   } finally {
     if (originalKey === undefined) delete process.env.MULTILLM_API_KEY;
     else process.env.MULTILLM_API_KEY = originalKey;

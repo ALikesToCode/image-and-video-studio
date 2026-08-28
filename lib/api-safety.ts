@@ -66,11 +66,13 @@ export const getProviderApiKey = (
   req: Request,
   body?: Record<string, unknown> | null
 ) => {
+  const userApiKey = getUserApiKey(req, body);
+  if (userApiKey) return userApiKey;
   for (const envKey of PROVIDER_ENV_KEYS[provider]) {
     const apiKey = process.env[envKey]?.trim();
     if (apiKey) return apiKey;
   }
-  return getUserApiKey(req, body);
+  return "";
 };
 
 export const isJanitorAiUserscriptRequest = (
@@ -87,7 +89,17 @@ export const isJanitorAiUserscriptRequest = (
 
 export const isAllowedJanitorAiCorsOrigin = (origin: string) => {
   try {
-    const hostname = new URL(origin).hostname.toLowerCase();
+    const normalizedOrigin = origin.trim();
+    const url = new URL(normalizedOrigin);
+    if (
+      url.protocol !== "https:" ||
+      url.origin !== normalizedOrigin ||
+      url.username ||
+      url.password
+    ) {
+      return false;
+    }
+    const hostname = url.hostname.toLowerCase();
     return CORS_ALLOWED_SUFFIXES.some(
       (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`)
     );
