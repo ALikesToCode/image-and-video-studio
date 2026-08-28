@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { sanitizeMediaUrl } from "./media-url.ts";
+import { normalizeInlineMediaData, sanitizeMediaUrl } from "./media-url.ts";
 
 test("media URLs allow HTTPS and media-kind data URLs", () => {
   assert.equal(
@@ -51,6 +51,42 @@ test("blob URLs require an explicit live-runtime allowance", () => {
     sanitizeMediaUrl("blob:javascript:alert(1)", {
       kind: "video",
       allowBlob: true,
+    }),
+    null
+  );
+});
+
+test("inline media normalization validates MIME, base64, and decoded size", () => {
+  assert.deepEqual(
+    normalizeInlineMediaData("YWJj", {
+      kind: "image",
+      mimeType: "image/png",
+      maxBytes: 3,
+    }),
+    {
+      dataUrl: "data:image/png;base64,YWJj",
+      mimeType: "image/png",
+      data: "YWJj",
+    }
+  );
+  assert.equal(
+    normalizeInlineMediaData("not base64!", {
+      kind: "image",
+      mimeType: "image/png",
+    }),
+    null
+  );
+  assert.equal(
+    normalizeInlineMediaData("YWJj", {
+      kind: "image",
+      mimeType: "image/svg+xml",
+    }),
+    null
+  );
+  assert.equal(
+    sanitizeMediaUrl("data:image/png;base64,YWJj", {
+      kind: "image",
+      maxBytes: 2,
     }),
     null
   );

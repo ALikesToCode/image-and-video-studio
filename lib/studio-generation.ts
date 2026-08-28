@@ -15,6 +15,7 @@ import {
   isOpenAiImageModel,
   preparePolicyImagePromptForModel,
 } from "./image-prompt-policy.ts";
+import { normalizeImageReferencePayload } from "./media-reference.ts";
 import {
   IMAGE_MIME_TYPES,
   dataUrlToInlineData,
@@ -1247,22 +1248,7 @@ export const mergeGeneratedImagesInDisplayOrder = (
     return left.id.localeCompare(right.id);
   });
 
-export const normalizeNavyImageUrlPayload = (
-  imageUrl?: string | string[] | null,
-  maxItems = 5,
-) => {
-  if (Array.isArray(imageUrl)) {
-    const urls = imageUrl
-      .map((url) => (typeof url === "string" ? url.trim() : ""))
-      .filter(Boolean)
-      .slice(0, maxItems);
-    return urls.length ? urls : undefined;
-  }
-
-  if (typeof imageUrl !== "string") return undefined;
-  const trimmed = imageUrl.trim();
-  return trimmed || undefined;
-};
+export const normalizeNavyImageUrlPayload = normalizeImageReferencePayload;
 
 export const buildNavyImageGenerationPayload = ({
   model,

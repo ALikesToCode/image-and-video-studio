@@ -91,6 +91,34 @@ test("AI SDK chat messages preserve OpenAI-compatible image attachments", () => 
   );
 });
 
+test("AI SDK chat messages discard unsafe and malformed image attachments", () => {
+  const messages = toAIModelMessages([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Describe only safe attachments." },
+        { type: "image_url", image_url: { url: "file:///tmp/private.png" } },
+        { type: "image_url", image_url: { url: "http://example.com/image.png" } },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/svg+xml;base64,AQID" },
+        },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,not-valid!" },
+        },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(messages, [
+    {
+      role: "user",
+      content: [{ type: "text", text: "Describe only safe attachments." }],
+    },
+  ]);
+});
+
 test("AI SDK request normalization preserves defaults and DeepSeek tool support", () => {
   assert.deepEqual(
     normalizeAIChatRequestBody({

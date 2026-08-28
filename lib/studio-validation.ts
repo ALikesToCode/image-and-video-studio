@@ -122,7 +122,8 @@ export const parseDataUrl = (
     ...IMAGE_MIME_TYPES,
     ...VIDEO_MIME_TYPES,
     ...AUDIO_MIME_TYPES,
-  ]
+  ],
+  maxBytes?: number
 ): ParsedDataUrl | null => {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -136,6 +137,14 @@ export const parseDataUrl = (
   if (!parts.includes("base64")) return null;
   if (!isAllowedMimeType(mimeType, allowedMimeTypes)) return null;
   if (!data || data.length % 4 === 1 || !BASE64_PATTERN.test(data)) return null;
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  const decodedBytes = Math.floor((data.length * 3) / 4) - padding;
+  if (
+    maxBytes !== undefined &&
+    (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || decodedBytes > maxBytes)
+  ) {
+    return null;
+  }
 
   return {
     dataUrl: `data:${mimeType};base64,${data}`,

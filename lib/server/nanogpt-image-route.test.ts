@@ -275,6 +275,80 @@ test("NanoGPT image route drops references for text-only models", async () => {
   }
 });
 
+test("NanoGPT image route rejects unsafe reference URLs before fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetched = false;
+  globalThis.fetch = async () => {
+    fetched = true;
+    throw new Error("fetch must not run");
+  };
+
+  try {
+    const response = await nanoGptImagePost(
+      new Request("https://studio.test/api/nanogpt/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "nano-secret",
+        },
+        body: JSON.stringify({
+          model: "qwen-image",
+          prompt: "Edit this reference",
+          imageUrl: "file:///tmp/reference.png",
+          modelCapabilities: { supportsReferenceImages: true },
+        }),
+      })
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(fetched, false);
+    assert.match((await response.json()).error, /HTTPS or valid image data/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("NanoGPT image route discards unsafe and malformed provider outputs", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      data: [
+        { url: "file:///tmp/result.png" },
+        { url: "javascript:alert(1)" },
+        { b64_json: "not base64!", mime_type: "image/png" },
+        { b64_json: "AQID", mime_type: "image/svg+xml" },
+        { url: "https://cdn.example.test/result.png" },
+      ],
+    });
+
+  try {
+    const response = await nanoGptImagePost(
+      new Request("https://studio.test/api/nanogpt/image", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-user-api-key": "nano-secret",
+        },
+        body: JSON.stringify({
+          model: "qwen-image",
+          prompt: "A lighthouse",
+        }),
+      })
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).images, [
+      {
+        url: "https://cdn.example.test/result.png",
+        mimeType: "image/png",
+        model: "qwen-image",
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("NanoGPT image route preserves safe structured upstream errors", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

@@ -7,6 +7,15 @@ import {
   providerErrorDetails,
 } from "@/lib/api-safety";
 import { NANOGPT_IMAGE_MODELS } from "@/lib/constants";
+import {
+  normalizeInlineMediaData,
+  sanitizeMediaUrl,
+} from "@/lib/media-url";
+import {
+  IMAGE_MIME_TYPES,
+  isAllowedMimeType,
+  normalizeMimeType,
+} from "@/lib/studio-validation";
 
 type ImageModelCapabilities = {
   supportedResolutions?: string[];
@@ -53,6 +62,7 @@ type ImagePayload = {
 
 const MAX_OUTPUT_IMAGES = 20;
 const MAX_INPUT_REFERENCES = 24;
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -122,16 +132,6 @@ const collectInputReferences = (value: unknown, output: string[]) => {
   }
 };
 
-const isSupportedImageReference = (value: string) => {
-  if (value.startsWith("data:image/")) return true;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password;
-  } catch {
-    return false;
-  }
-};
-
 const normalizeInputReferences = (body: ImageRequest) => {
   const rawInputs: string[] = [];
   collectStringOrArray(body.imageDataUrl, rawInputs);
@@ -140,11 +140,18 @@ const normalizeInputReferences = (body: ImageRequest) => {
   collectStringOrArray(body.imageUrls, rawInputs);
   collectStringOrArray(body.image_url, rawInputs);
   collectInputReferences(body.input_references, rawInputs);
+  if (rawInputs.length > MAX_INPUT_REFERENCES) return null;
 
   const inputs: string[] = [];
   for (const input of rawInputs) {
-    if (!isSupportedImageReference(input)) continue;
-    if (!inputs.includes(input)) inputs.push(input);
+    const safeInput = sanitizeMediaUrl(input, {
+      kind: "image",
+      allowBlob: false,
+      allowData: true,
+      maxBytes: MAX_IMAGE_BYTES,
+    });
+    if (!safeInput) return null;
+    if (!inputs.includes(safeInput)) inputs.push(safeInput);
   }
   return inputs;
 };
@@ -237,23 +244,42 @@ const normalizeImages = (data: unknown, model: string) => {
       : [];
   const images: ImagePayload[] = [];
 
-  for (const item of candidates) {
+  const safeMimeType = (value: unknown) => {
+    const mimeType = normalizeMimeType(value);
+    if (!mimeType) return "image/png";
+    return isAllowedMimeType(mimeType, IMAGE_MIME_TYPES) ? mimeType : null;
+  };
+  const addValue = (value: unknown, mimeType: string) => {
+    const inline = normalizeInlineMediaData(value, {
+      kind: "image",
+      mimeType,
+      maxBytes: MAX_IMAGE_BYTES,
+    });
+    if (inline) {
+      images.push({ data: inline.data, mimeType: inline.mimeType, model });
+      return true;
+    }
+    const url = sanitizeMediaUrl(value, {
+      kind: "image",
+      allowBlob: false,
+      allowData: false,
+    });
+    if (url) {
+      images.push({ url, mimeType, model });
+      return true;
+    }
+    return false;
+  };
+
+  for (const item of candidates.slice(0, MAX_OUTPUT_IMAGES)) {
     if (typeof item === "string") {
-      if (item.startsWith("https://")) {
-        images.push({ url: item, mimeType: "image/png", model });
-      } else {
-        images.push({ data: item, mimeType: "image/png", model });
-      }
+      addValue(item, "image/png");
       continue;
     }
     const record = asRecord(item);
     if (!record) continue;
-    const mimeType =
-      typeof record.mimeType === "string"
-        ? record.mimeType
-        : typeof record.mime_type === "string"
-          ? record.mime_type
-          : "image/png";
+    const mimeType = safeMimeType(record.mimeType ?? record.mime_type);
+    if (!mimeType) continue;
     const data =
       typeof record.b64_json === "string"
         ? record.b64_json
@@ -262,13 +288,8 @@ const normalizeImages = (data: unknown, model: string) => {
           : typeof record.image === "string"
             ? record.image
             : "";
-    if (data) {
-      images.push({ data, mimeType, model });
-      continue;
-    }
-    if (typeof record.url === "string" && record.url) {
-      images.push({ url: record.url, mimeType, model });
-    }
+    if (data && addValue(data, mimeType)) continue;
+    addValue(record.url, mimeType);
   }
 
   return images;
@@ -340,8 +361,19 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  const normalizedInputReferences = normalizeInputReferences(body);
+  if (!normalizedInputReferences) {
+    return janitorAiJsonResponse(
+      req,
+      {
+        error:
+          "Image references must be bounded HTTPS or valid image data URLs.",
+      },
+      { status: 400 }
+    );
+  }
   const inputReferences = clampInputReferences(
-    normalizeInputReferences(body),
+    normalizedInputReferences,
     capabilities,
   );
   const normalizedPayload: Record<string, unknown> = {

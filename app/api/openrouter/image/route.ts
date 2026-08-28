@@ -6,6 +6,7 @@ import {
   jsonOrNull,
   providerErrorMessage,
 } from "@/lib/api-safety";
+import { normalizeInlineMediaData, sanitizeMediaUrl } from "@/lib/media-url";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import { IMAGE_MIME_TYPES } from "@/lib/studio-validation";
 import {
@@ -39,12 +40,6 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
-};
-
-const parseDataUrl = (value: string) => {
-  const match = /^data:([^;]+);base64,(.*)$/.exec(value);
-  if (!match) return null;
-  return { mimeType: match[1], data: match[2] };
 };
 
 const fetchImageAsBase64 = async (url: string) => {
@@ -240,12 +235,20 @@ export async function POST(req: Request) {
     if (typeof url !== "string") {
       continue;
     }
-    const dataUrl = parseDataUrl(url);
+    const dataUrl = normalizeInlineMediaData(url, {
+      kind: "image",
+      maxBytes: 50 * 1024 * 1024,
+    });
     if (dataUrl) {
       payloadImages.push({ data: dataUrl.data, mimeType: dataUrl.mimeType });
       continue;
     }
-    payloadImages.push(await fetchImageAsBase64(url));
+    const safeUrl = sanitizeMediaUrl(url, {
+      kind: "image",
+      allowBlob: false,
+      allowData: false,
+    });
+    if (safeUrl) payloadImages.push(await fetchImageAsBase64(safeUrl));
   }
 
   if (!payloadImages.length) {

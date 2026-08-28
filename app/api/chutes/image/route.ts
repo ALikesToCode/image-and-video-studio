@@ -6,6 +6,10 @@ import {
   jsonOrNull,
   providerErrorMessage,
 } from "@/lib/api-safety";
+import {
+  normalizeInlineMediaData,
+  sanitizeMediaUrl,
+} from "@/lib/media-url";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import { readBoundedMediaBody } from "@/lib/server/media-response";
 import { IMAGE_MIME_TYPES } from "@/lib/studio-validation";
@@ -39,12 +43,6 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer | Uint8Array) => {
   return btoa(binary);
 };
 
-const parseDataUrl = (value: string) => {
-  const match = /^data:([^;]+);base64,(.*)$/.exec(value);
-  if (!match) return null;
-  return { mimeType: match[1], data: match[2] };
-};
-
 const toRecord = (value: unknown): Record<string, unknown> | null => {
   if (value && typeof value === "object") {
     return value as Record<string, unknown>;
@@ -57,16 +55,29 @@ const extractFromJson = (data: unknown) => {
   const urls: string[] = [];
   const record = toRecord(data) ?? {};
   const addBase64 = (value: unknown, mimeType?: string) => {
-    if (typeof value !== "string") return;
-    const dataUrl = parseDataUrl(value);
-    if (dataUrl) {
-      images.push({ data: dataUrl.data, mimeType: dataUrl.mimeType });
-      return;
-    }
-    images.push({ data: value, mimeType: mimeType ?? "image/png" });
+    const inline = normalizeInlineMediaData(value, {
+      kind: "image",
+      mimeType: mimeType ?? "image/png",
+      maxBytes: 50 * 1024 * 1024,
+    });
+    if (inline) images.push({ data: inline.data, mimeType: inline.mimeType });
   };
   const addUrl = (value: unknown) => {
-    if (typeof value === "string") urls.push(value);
+    const inline = normalizeInlineMediaData(value, {
+      kind: "image",
+      maxBytes: 50 * 1024 * 1024,
+    });
+    if (inline) {
+      images.push({ data: inline.data, mimeType: inline.mimeType });
+      return true;
+    }
+    const url = sanitizeMediaUrl(value, {
+      kind: "image",
+      allowBlob: false,
+      allowData: false,
+    });
+    if (url) urls.push(url);
+    return Boolean(url);
   };
 
   const mimeType =
@@ -93,11 +104,7 @@ const extractFromJson = (data: unknown) => {
   if (Array.isArray(candidates)) {
     for (const item of candidates) {
       if (typeof item === "string") {
-        if (item.startsWith("http")) {
-          addUrl(item);
-        } else {
-          addBase64(item);
-        }
+        if (!addUrl(item)) addBase64(item);
         continue;
       }
       const candidate = toRecord(item);

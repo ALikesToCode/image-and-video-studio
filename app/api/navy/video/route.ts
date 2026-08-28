@@ -1,6 +1,10 @@
 import { getUserApiKey, jsonOrNull, providerErrorDetails } from "@/lib/api-safety";
 import { sanitizeMediaUrl } from "@/lib/media-url";
 import {
+  hasMediaReferencePayload,
+  normalizeImageReferencePayload,
+} from "@/lib/media-reference";
+import {
   buildNavyImageGenerationPayload,
   isNavyGenerationFailed,
   isNavyGenerationPending,
@@ -46,10 +50,20 @@ export async function POST(req: Request) {
 
   const { model, prompt, size, negativePrompt, seed, seconds, aspectRatio, responseFormat } =
     body;
-  const imageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
+  const requestedImageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
+  const imageUrl = normalizeImageReferencePayload(requestedImageUrl);
   const userApiKey = getUserApiKey(req, body);
   if (!userApiKey || !model || !prompt) {
     return Response.json({ error: "Missing required fields." }, { status: 400 });
+  }
+  if (hasMediaReferencePayload(requestedImageUrl) && !imageUrl) {
+    return Response.json(
+      {
+        error:
+          "Image references must contain at most five HTTPS or valid image data URLs.",
+      },
+      { status: 400 }
+    );
   }
 
   const response = await fetch("https://api.navy/v1/images/generations", {

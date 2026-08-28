@@ -15,6 +15,7 @@ import {
   shouldOmitToolChoiceForModel,
 } from "./chat-completion.ts";
 import type { ChatTokenUsage } from "./chat-metrics.ts";
+import { sanitizeMediaUrl } from "./media-url.ts";
 
 export const AI_CHAT_TOOL_NAMES = [
   "generate_image",
@@ -377,10 +378,15 @@ const messageText = (content: unknown) => {
 };
 
 const imageURL = (value: unknown) => {
-  if (typeof value !== "string" || !value.trim()) return null;
+  const safeUrl = sanitizeMediaUrl(value, {
+    kind: "image",
+    allowBlob: false,
+    allowData: true,
+    maxBytes: 50 * 1024 * 1024,
+  });
+  if (!safeUrl) return null;
   try {
-    const url = new URL(value);
-    return ["data:", "http:", "https:"].includes(url.protocol) ? url : null;
+    return new URL(safeUrl);
   } catch {
     return null;
   }

@@ -5,6 +5,7 @@ import { POST as chutesAudioPost } from "../../app/api/chutes/audio/route.ts";
 import { POST as chutesImagePost } from "../../app/api/chutes/image/route.ts";
 import { POST as chutesVideoPost } from "../../app/api/chutes/video/route.ts";
 import { POST as navyTtsPost } from "../../app/api/navy/tts/route.ts";
+import { POST as openRouterImagePost } from "../../app/api/openrouter/image/route.ts";
 
 const withFetch = async (
   fetchImpl: typeof fetch,
@@ -128,6 +129,76 @@ test("Navy TTS route rejects non-audio provider bodies", async () => {
       assert.equal(response.status, 502);
       assert.deepEqual(await response.json(), {
         error: "NavyAI returned invalid audio data.",
+      });
+    }
+  );
+});
+
+test("Chutes image route rejects malformed inline provider output", async () => {
+  await withFetch(
+    async () =>
+      Response.json({
+        image: "not base64!",
+        mimeType: "image/png",
+        url: "file:///tmp/result.png",
+      }),
+    async () => {
+      const response = await chutesImagePost(
+        new Request("https://studio.test/api/chutes/image", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-user-api-key": "chutes-secret",
+          },
+          body: JSON.stringify({ prompt: "A lighthouse" }),
+        })
+      );
+
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), {
+        error: "No images were returned by the model.",
+      });
+    }
+  );
+});
+
+test("OpenRouter image route rejects unsafe provider image URLs", async () => {
+  let fetchCount = 0;
+  await withFetch(
+    async () => {
+      fetchCount += 1;
+      return Response.json({
+        choices: [
+          {
+            message: {
+              images: [
+                { image_url: { url: "javascript:alert(1)" } },
+                { image_url: { url: "data:image/svg+xml;base64,AQID" } },
+              ],
+            },
+          },
+        ],
+      });
+    },
+    async () => {
+      const response = await openRouterImagePost(
+        new Request("https://studio.test/api/openrouter/image", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-user-api-key": "openrouter-secret",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-image",
+            prompt: "A lighthouse",
+          }),
+        })
+      );
+
+      assert.equal(response.status, 502);
+      assert.equal(fetchCount, 1);
+      assert.deepEqual(await response.json(), {
+        error: "No valid images were returned by the model.",
       });
     }
   );

@@ -9,6 +9,10 @@ import {
 } from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import {
+  hasMediaReferencePayload,
+  normalizeImageReferencePayload,
+} from "@/lib/media-reference";
+import {
   IMAGE_MIME_TYPES,
   normalizeNavyJobId,
   parseDataUrl,
@@ -531,13 +535,24 @@ export async function POST(req: Request) {
     aspectRatio,
     promptAgentModel,
   } = body;
-  const imageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
+  const requestedImageUrl = body.imageUrl ?? body.imageUrls ?? body.image_url;
+  const imageUrl = normalizeImageReferencePayload(requestedImageUrl);
   const userApiKey = getProviderApiKey("navy", req, body);
   const includeUserscriptShape = isJanitorAiUserscriptRequest(req, body);
   if (!userApiKey || !model || !prompt) {
     return janitorAiJsonResponse(
       req,
       { error: "Missing required fields." },
+      { status: 400 }
+    );
+  }
+  if (hasMediaReferencePayload(requestedImageUrl) && !imageUrl) {
+    return janitorAiJsonResponse(
+      req,
+      {
+        error:
+          "Image references must contain at most five HTTPS or valid image data URLs.",
+      },
       { status: 400 }
     );
   }

@@ -2,6 +2,7 @@ import {
   AUDIO_MIME_TYPES,
   IMAGE_MIME_TYPES,
   VIDEO_MIME_TYPES,
+  normalizeMimeType,
   parseDataUrl,
 } from "./studio-validation.ts";
 
@@ -11,6 +12,7 @@ type SanitizeMediaUrlOptions = {
   kind: MediaKind;
   allowBlob?: boolean;
   allowData?: boolean;
+  maxBytes?: number;
 };
 
 const MIME_TYPES_BY_KIND: Record<MediaKind, readonly string[]> = {
@@ -42,6 +44,7 @@ export const sanitizeMediaUrl = (
     kind,
     allowBlob = false,
     allowData = true,
+    maxBytes,
   }: SanitizeMediaUrlOptions
 ) => {
   if (typeof value !== "string") return null;
@@ -50,7 +53,11 @@ export const sanitizeMediaUrl = (
 
   if (/^data:/i.test(trimmed)) {
     if (!allowData) return null;
-    return parseDataUrl(trimmed, MIME_TYPES_BY_KIND[kind])?.dataUrl ?? null;
+    return parseDataUrl(
+      trimmed,
+      MIME_TYPES_BY_KIND[kind],
+      maxBytes
+    )?.dataUrl ?? null;
   }
 
   let parsed: URL;
@@ -69,6 +76,30 @@ export const sanitizeMediaUrl = (
   }
 
   return null;
+};
+
+export const normalizeInlineMediaData = (
+  value: unknown,
+  {
+    kind,
+    mimeType,
+    maxBytes,
+  }: { kind: MediaKind; mimeType?: unknown; maxBytes?: number }
+) => {
+  const allowedMimeTypes = MIME_TYPES_BY_KIND[kind];
+  const parsed = parseDataUrl(value, allowedMimeTypes, maxBytes);
+  if (parsed) return parsed;
+  if (typeof value !== "string") return null;
+
+  const normalizedMimeType = normalizeMimeType(mimeType);
+  if (!(allowedMimeTypes as readonly string[]).includes(normalizedMimeType)) {
+    return null;
+  }
+  return parseDataUrl(
+    `data:${normalizedMimeType};base64,${value.replace(/\s/g, "")}`,
+    allowedMimeTypes,
+    maxBytes
+  );
 };
 
 export const isSafeMediaUrl = (

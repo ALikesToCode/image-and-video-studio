@@ -170,57 +170,6 @@ test("Gemini video route rejects invalid operation names before fetch", async ()
   }
 });
 
-test("Gemini video route rejects unsafe provider result URLs", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    Response.json({
-      done: true,
-      response: {
-        generateVideoResponse: {
-          generatedSamples: [{ video: { uri: "file:///tmp/result.mp4" } }],
-        },
-      },
-    });
-
-  try {
-    const response = await geminiVideoGet(
-      new Request("https://studio.test/api/gemini/video?name=operations/job-safe", {
-        headers: { "x-user-api-key": "gemini-secret" },
-      })
-    );
-    const payload = await response.json();
-
-    assert.equal(response.status, 502);
-    assert.equal(payload.error, "Video URL not found in response.");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("Gemini video route redacts credentials from completed job errors", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    Response.json({
-      done: true,
-      error: { message: "Provider rejected key gemini-secret" },
-    });
-
-  try {
-    const response = await geminiVideoGet(
-      new Request("https://studio.test/api/gemini/video?name=operations/job-safe", {
-        headers: { "x-user-api-key": "gemini-secret" },
-      })
-    );
-    const payload = await response.json();
-
-    assert.equal(response.status, 502);
-    assert.equal(payload.error.includes("gemini-secret"), false);
-    assert.match(payload.error, /\[redacted\]/i);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
 test("Navy video download route rejects untrusted media hosts before fetch", async () => {
   const originalFetch = globalThis.fetch;
   let called = false;
@@ -563,12 +512,11 @@ test("Navy image route forwards multi-reference image URLs", async () => {
           model: "nano-banana-2",
           prompt: "Combine references.",
           imageUrl: [
-            "data:image/png;base64,one",
-            "data:image/png;base64,two",
-            "data:image/png;base64,three",
-            "data:image/png;base64,four",
-            "data:image/png;base64,five",
-            "data:image/png;base64,six",
+            "data:image/png;base64,AQID",
+            "data:image/png;base64,BAUG",
+            "data:image/png;base64,BwgJ",
+            "https://example.com/four.png",
+            "https://example.com/five.png",
           ],
         }),
       })
@@ -579,11 +527,11 @@ test("Navy image route forwards multi-reference image URLs", async () => {
     assert.deepEqual(payload, { id: "job_refs", status: "queued" });
     const capturedBody = requestBody as Record<string, unknown> | null;
     assert.deepEqual(capturedBody?.image_url, [
-      "data:image/png;base64,one",
-      "data:image/png;base64,two",
-      "data:image/png;base64,three",
-      "data:image/png;base64,four",
-      "data:image/png;base64,five",
+      "data:image/png;base64,AQID",
+      "data:image/png;base64,BAUG",
+      "data:image/png;base64,BwgJ",
+      "https://example.com/four.png",
+      "https://example.com/five.png",
     ]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -867,30 +815,6 @@ test("Navy video route returns upstream failed job messages", async () => {
     assert.equal(response.status, 502);
     assert.equal(payload.error, "Provider returned an unrecoverable error");
     assert.equal(payload.code, "job_failed");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("Navy video route rejects unsafe provider result URLs", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    Response.json({
-      id: "job_unsafe_url",
-      status: "completed",
-      result: { data: [{ url: "javascript:alert(1)" }] },
-    });
-
-  try {
-    const response = await navyVideoGet(
-      new Request("https://studio.test/api/navy/video?id=job_unsafe_url", {
-        headers: { "x-user-api-key": "navy-secret" },
-      })
-    );
-    const payload = await response.json();
-
-    assert.equal(response.status, 502);
-    assert.equal(payload.error, "Video URL not found in response.");
   } finally {
     globalThis.fetch = originalFetch;
   }

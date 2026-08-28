@@ -619,19 +619,12 @@ test("Navy image payload accepts up to five reference image URLs", () => {
   );
   assert.deepEqual(
     normalizeNavyImageUrlPayload([
-      "data:image/png;base64,one",
-      "data:image/png;base64,two",
-      "data:image/png;base64,three",
-      "data:image/png;base64,four",
-      "data:image/png;base64,five",
-      "data:image/png;base64,six",
+      "data:image/png;base64,AQID",
+      "https://example.com/two.png",
     ]),
     [
-      "data:image/png;base64,one",
-      "data:image/png;base64,two",
-      "data:image/png;base64,three",
-      "data:image/png;base64,four",
-      "data:image/png;base64,five",
+      "data:image/png;base64,AQID",
+      "https://example.com/two.png",
     ]
   );
 
@@ -639,15 +632,37 @@ test("Navy image payload accepts up to five reference image URLs", () => {
     model: "nano-banana-2",
     prompt: "Combine these references.",
     imageUrl: [
-      "data:image/png;base64,one",
-      "data:image/png;base64,two",
+      "data:image/png;base64,AQID",
+      "data:image/png;base64,BAUG",
     ],
   });
 
   assert.deepEqual(payload.image_url, [
-    "data:image/png;base64,one",
-    "data:image/png;base64,two",
+    "data:image/png;base64,AQID",
+    "data:image/png;base64,BAUG",
   ]);
+});
+
+test("Navy image payload rejects unsafe and excessive references", () => {
+  for (const value of [
+    "file:///tmp/reference.png",
+    "javascript:alert(1)",
+    "data:image/svg+xml;base64,AQID",
+    "data:image/png;base64,not-valid!",
+  ]) {
+    assert.equal(normalizeNavyImageUrlPayload(value), undefined);
+  }
+  assert.equal(
+    normalizeNavyImageUrlPayload([
+      "https://example.com/1.png",
+      "https://example.com/2.png",
+      "https://example.com/3.png",
+      "https://example.com/4.png",
+      "https://example.com/5.png",
+      "https://example.com/6.png",
+    ]),
+    undefined
+  );
 });
 
 test("Navy image payload folds negative prompts into prompt text for non-Flux models", () => {

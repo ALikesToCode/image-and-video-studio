@@ -4,7 +4,10 @@ import {
   janitorAiOptionsResponse,
   providerErrorMessage,
 } from "@/lib/api-safety";
-import { IMAGE_MIME_TYPES, parseDataUrl } from "@/lib/studio-validation";
+import {
+  normalizeInlineMediaData,
+  sanitizeMediaUrl,
+} from "@/lib/media-url";
 
 type ImageAgentMessage = {
   role?: unknown;
@@ -41,6 +44,10 @@ type AgentImage = {
   prompt: string;
   generationTag: string;
 };
+
+const MAX_EXTRACTED_IMAGES = 20;
+const MAX_RESULT_DEPTH = 8;
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 
 const normalizedString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
@@ -96,22 +103,25 @@ const resolveModels = (body: ImageAgentRequest) => {
     : ["z-image-turbo"];
 };
 
-const dataUrlFromBase64 = (data: string, mimeType: string) =>
-  `data:${mimeType};base64,${data.replace(/\s/g, "")}`;
-
 const directImageUrl = (value: unknown) => {
-  const parsed = parseDataUrl(value, IMAGE_MIME_TYPES);
-  if (parsed) return parsed.dataUrl;
-  const text = normalizedString(value);
-  if (/^https?:\/\//i.test(text)) return text;
-  return "";
+  return (
+    sanitizeMediaUrl(value, {
+      kind: "image",
+      allowBlob: false,
+      allowData: true,
+      maxBytes: MAX_IMAGE_BYTES,
+    }) ?? ""
+  );
 };
 
 const base64ImageUrl = (value: unknown, mimeType: string) => {
-  const parsed = parseDataUrl(value, IMAGE_MIME_TYPES);
-  if (parsed) return parsed.dataUrl;
-  const text = normalizedString(value);
-  return text ? dataUrlFromBase64(text, mimeType || "image/png") : "";
+  return (
+    normalizeInlineMediaData(value, {
+      kind: "image",
+      mimeType: mimeType || "image/png",
+      maxBytes: MAX_IMAGE_BYTES,
+    })?.dataUrl ?? ""
+  );
 };
 
 const recordMimeType = (record: Record<string, unknown>) =>
@@ -124,18 +134,32 @@ const extractImageUrls = (payload: unknown, fallbackModel: string) => {
   const seen = new Set<string>();
 
   const add = (imageUrl: string, model: string) => {
-    if (!imageUrl || seen.has(imageUrl)) return;
+    if (
+      !imageUrl ||
+      seen.has(imageUrl) ||
+      urls.length >= MAX_EXTRACTED_IMAGES
+    ) {
+      return;
+    }
     seen.add(imageUrl);
     urls.push({ imageUrl, model: model || fallbackModel });
   };
 
-  const visit = (value: unknown, model = fallbackModel, mimeType = "image/png") => {
+  const visit = (
+    value: unknown,
+    model = fallbackModel,
+    mimeType = "image/png",
+    depth = 0
+  ) => {
+    if (depth > MAX_RESULT_DEPTH || urls.length >= MAX_EXTRACTED_IMAGES) return;
     if (typeof value === "string") {
-      add(base64ImageUrl(value, mimeType), model);
+      add(directImageUrl(value) || base64ImageUrl(value, mimeType), model);
       return;
     }
     if (Array.isArray(value)) {
-      for (const item of value) visit(item, model, mimeType);
+      for (const item of value.slice(0, MAX_EXTRACTED_IMAGES)) {
+        visit(item, model, mimeType, depth + 1);
+      }
       return;
     }
 
@@ -153,14 +177,14 @@ const extractImageUrls = (payload: unknown, fallbackModel: string) => {
       if (direct) {
         add(direct, nextModel);
       } else {
-        visit(record[key], nextModel, nextMimeType);
+        visit(record[key], nextModel, nextMimeType, depth + 1);
       }
     }
     for (const key of ["data", "b64_json", "base64", "image_base64"]) {
       if (typeof record[key] === "string") {
         add(base64ImageUrl(record[key], nextMimeType), nextModel);
       } else {
-        visit(record[key], nextModel, nextMimeType);
+        visit(record[key], nextModel, nextMimeType, depth + 1);
       }
     }
     for (const key of [
@@ -170,7 +194,7 @@ const extractImageUrls = (payload: unknown, fallbackModel: string) => {
       "generations",
       "artifacts",
     ]) {
-      visit(record[key], nextModel, nextMimeType);
+      visit(record[key], nextModel, nextMimeType, depth + 1);
     }
   };
 
