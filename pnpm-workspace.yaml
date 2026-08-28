@@ -1,6 +1,10 @@
 packages:
   - .
 
+blockExoticSubdeps: true
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade
+
 overrides:
   "@babel/core": 7.29.6
   body-parser: 2.3.0
