@@ -12,6 +12,10 @@ import {
 } from "@/lib/media-url";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import { readBoundedMediaBody } from "@/lib/server/media-response";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 import { IMAGE_MIME_TYPES } from "@/lib/studio-validation";
 
 type ImageRequest = {
@@ -185,12 +189,13 @@ export async function OPTIONS(req: Request) {
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
-    body = (await req.json()) as ImageRequest;
-  } catch {
+    body = await readJsonRequestObject<ImageRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
     return janitorAiJsonResponse(
       req,
-      { error: "Invalid JSON payload." },
-      { status: 400 }
+      { error: details.error },
+      { status: details.status }
     );
   }
 

@@ -1,4 +1,8 @@
 import { getUserApiKey } from "@/lib/api-safety";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 import { safeFetchExternalMedia, validateExternalMediaUrl } from "@/lib/server/safe-fetch";
 
 type DownloadRequest = {
@@ -9,9 +13,10 @@ type DownloadRequest = {
 export async function POST(req: Request) {
   let body: DownloadRequest;
   try {
-    body = (await req.json()) as DownloadRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<DownloadRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const { uri } = body;

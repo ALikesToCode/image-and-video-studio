@@ -2,12 +2,17 @@ import { NextResponse } from "next/server";
 import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
 import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
 import { VIDEO_MIME_TYPES } from "@/lib/studio-validation";
+import {
+    JsonBodyError,
+    jsonBodyErrorDetails,
+    readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 const MAX_VIDEO_BYTES = 256 * 1024 * 1024;
 
 export async function POST(req: Request) {
     try {
-        const body = await req.json();
+        const body = await readJsonRequestObject<Record<string, unknown>>(req);
         const { prompt, image, fps, guidance_scale_2, model } = body;
         const apiKey = getUserApiKey(req, body);
 
@@ -73,6 +78,13 @@ export async function POST(req: Request) {
         }
 
     } catch (error) {
+        if (error instanceof JsonBodyError) {
+            const details = jsonBodyErrorDetails(error);
+            return NextResponse.json(
+                { error: details.error },
+                { status: details.status }
+            );
+        }
         return NextResponse.json(
             { error: redactSecrets(error, []) || "Internal Server Error" },
             { status: 500 }

@@ -8,6 +8,10 @@ import {
   normalizeInlineMediaData,
   sanitizeMediaUrl,
 } from "@/lib/media-url";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 type ImageAgentMessage = {
   role?: unknown;
@@ -266,12 +270,13 @@ export async function OPTIONS(req: Request) {
 export async function POST(req: Request) {
   let body: ImageAgentRequest;
   try {
-    body = (await req.json()) as ImageAgentRequest;
-  } catch {
+    body = await readJsonRequestObject<ImageAgentRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
     return janitorAiJsonResponse(
       req,
-      { error: "Invalid JSON payload." },
-      { status: 400 }
+      { error: details.error },
+      { status: details.status }
     );
   }
 

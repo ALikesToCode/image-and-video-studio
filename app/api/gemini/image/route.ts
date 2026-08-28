@@ -13,6 +13,10 @@ import {
   supportsSaferImagePromptRetry,
 } from "@/lib/studio-generation";
 import { normalizeGeminiImageModelId } from "@/lib/studio-validation";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 type ImageRequest = {
   apiKey?: string;
@@ -115,12 +119,13 @@ export async function OPTIONS(req: Request) {
 export async function POST(req: Request) {
   let body: ImageRequest;
   try {
-    body = (await req.json()) as ImageRequest;
-  } catch {
+    body = await readJsonRequestObject<ImageRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
     return janitorAiJsonResponse(
       req,
-      { error: "Invalid JSON payload." },
-      { status: 400 }
+      { error: details.error },
+      { status: details.status }
     );
   }
 

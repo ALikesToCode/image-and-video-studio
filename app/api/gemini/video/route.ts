@@ -2,6 +2,10 @@ import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safet
 import { sanitizeMediaUrl } from "@/lib/media-url";
 import { buildGeminiVideoPayload } from "@/lib/studio-generation";
 import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
+import {
   geminiOperationStatusUrl,
   normalizeGeminiOperationName,
   normalizeGeminiVideoModelId,
@@ -23,9 +27,10 @@ type VideoRequest = {
 export async function POST(req: Request) {
   let body: VideoRequest;
   try {
-    body = (await req.json()) as VideoRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<VideoRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const { prompt, model, aspectRatio, resolution, durationSeconds, negativePrompt } =

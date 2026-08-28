@@ -26,6 +26,10 @@ import {
   resolveActiveImageToolModels,
 } from "@/lib/studio-generation";
 import { IMAGE_MIME_TYPES, parseDataUrl } from "@/lib/studio-validation";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 type JanitorAiImageRequest = {
   apiKey?: string;
@@ -279,9 +283,10 @@ export async function OPTIONS(req: Request) {
 export async function POST(req: Request) {
   let body: JanitorAiImageRequest;
   try {
-    body = (await req.json()) as JanitorAiImageRequest;
-  } catch {
-    return jsonResponse(req, { error: "Invalid JSON payload." }, 400);
+    body = await readJsonRequestObject<JanitorAiImageRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return jsonResponse(req, { error: details.error }, details.status);
   }
 
   if (normalizedLower(body.source) !== "janitorai") {

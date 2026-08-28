@@ -2,12 +2,17 @@ import { NextResponse } from "next/server";
 import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
 import { AUDIO_MIME_TYPES } from "@/lib/studio-validation";
 import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
+import {
+    JsonBodyError,
+    jsonBodyErrorDetails,
+    readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
 
 export async function POST(req: Request) {
     try {
-        const body = await req.json();
+        const body = await readJsonRequestObject<Record<string, unknown>>(req);
         const { prompt, text, model, speed, speaker, maxDuration } = body;
         const apiKey = getUserApiKey(req, body);
 
@@ -42,11 +47,11 @@ export async function POST(req: Request) {
                   speaker:
                       typeof speaker === "number"
                           ? speaker
-                          : Number.parseInt(speaker, 10) || 1,
+                          : Number.parseInt(String(speaker), 10) || 1,
                   max_duration_ms:
                       typeof maxDuration === "number"
                           ? maxDuration
-                          : Number.parseInt(maxDuration, 10) || 10000,
+                          : Number.parseInt(String(maxDuration), 10) || 10000,
               }
             : {
                   text: resolvedText,
@@ -83,6 +88,13 @@ export async function POST(req: Request) {
         }
 
     } catch (error) {
+        if (error instanceof JsonBodyError) {
+            const details = jsonBodyErrorDetails(error);
+            return NextResponse.json(
+                { error: details.error },
+                { status: details.status }
+            );
+        }
         return NextResponse.json(
             { error: redactSecrets(error, []) || "Internal Server Error" },
             { status: 500 }
