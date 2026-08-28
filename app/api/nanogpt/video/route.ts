@@ -5,6 +5,10 @@ import {
   providerErrorMessage,
 } from "@/lib/api-safety";
 import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
+import {
   AUDIO_MIME_TYPES,
   IMAGE_MIME_TYPES,
   VIDEO_MIME_TYPES,
@@ -295,11 +299,10 @@ const retryAfterMs = (response: Response, fallbackMs = 5_000) => {
 export async function POST(req: Request) {
   let body: VideoRequest;
   try {
-    const payload = asRecord(await req.json());
-    if (!payload) throw new Error("Invalid JSON object");
-    body = payload as VideoRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<VideoRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const apiKey = getProviderApiKey("nanogpt", req, body);

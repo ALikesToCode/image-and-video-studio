@@ -5,6 +5,10 @@ import {
   normalizeImageReferencePayload,
 } from "@/lib/media-reference";
 import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
+import {
   buildNavyImageGenerationPayload,
   isNavyGenerationFailed,
   isNavyGenerationPending,
@@ -43,9 +47,10 @@ const retryAfterMs = (response: Response, fallbackMs = 8_000) => {
 export async function POST(req: Request) {
   let body: VideoRequest;
   try {
-    body = (await req.json()) as VideoRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<VideoRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const { model, prompt, size, negativePrompt, seed, seconds, aspectRatio, responseFormat } =

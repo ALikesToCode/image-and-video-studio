@@ -6,6 +6,10 @@ import {
   resolveMultiLlmApiKey,
   type MultiLlmMediaSource,
 } from "@/lib/multillm-proxy";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
 import { AUDIO_MIME_TYPES } from "@/lib/studio-validation";
 
@@ -25,9 +29,10 @@ type AudioRequest = {
 export async function POST(request: Request) {
   let body: AudioRequest;
   try {
-    body = (await request.json()) as AudioRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<AudioRequest>(request);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const apiKey = resolveMultiLlmApiKey(request, body.apiKey);

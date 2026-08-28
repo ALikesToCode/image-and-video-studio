@@ -9,6 +9,10 @@ import {
   buildOpenAIResponsesPayload,
   shouldUseOpenAIResponses,
 } from "@/lib/openai-responses";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +30,10 @@ type ChatRequest = {
 export async function POST(request: Request) {
   let body: ChatRequest;
   try {
-    body = (await request.json()) as ChatRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<ChatRequest>(request);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const apiKey = resolveMultiLlmApiKey(request, body.apiKey);

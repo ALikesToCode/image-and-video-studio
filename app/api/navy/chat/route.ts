@@ -7,6 +7,10 @@ import {
   buildOpenAIResponsesPayload,
   isOpenAIResponsesModel,
 } from "@/lib/openai-responses";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 type ChatRequest = {
   apiKey?: string;
@@ -64,9 +68,10 @@ const streamingResponse = (response: Response, recoveryLabel?: string) =>
 export async function POST(req: Request) {
   let body: ChatRequest;
   try {
-    body = (await req.json()) as ChatRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<ChatRequest>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const {

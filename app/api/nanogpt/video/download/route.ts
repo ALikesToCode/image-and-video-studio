@@ -5,6 +5,10 @@ import {
   providerErrorMessage,
 } from "@/lib/api-safety";
 import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
+import {
   safeFetchExternalMedia,
   validateExternalMediaUrl,
 } from "@/lib/server/safe-fetch";
@@ -95,11 +99,10 @@ const trustedDownloadUrl = (value: string) => {
 export async function POST(req: Request) {
   let body: UnknownRecord;
   try {
-    const parsed = asRecord(await req.json());
-    if (!parsed) throw new Error("Invalid JSON object");
-    body = parsed;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<UnknownRecord>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const bodyKeys = Object.keys(body);

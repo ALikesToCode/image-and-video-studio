@@ -12,6 +12,10 @@ import {
   type MultiLlmMediaSource,
   type NormalizedImageItem,
 } from "@/lib/multillm-proxy";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import { readBoundedMediaBody } from "@/lib/server/media-response";
 import { buildNavyImageGenerationPayload } from "@/lib/studio-generation";
@@ -120,9 +124,10 @@ const navyNativeParameters = (parameters: Record<string, unknown>) =>
 export async function POST(request: Request) {
   let body: ImageRequest;
   try {
-    body = (await request.json()) as ImageRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<ImageRequest>(request);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const apiKey = resolveMultiLlmApiKey(request, body.apiKey);

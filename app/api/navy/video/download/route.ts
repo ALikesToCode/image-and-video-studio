@@ -1,12 +1,17 @@
 import { safeFetchExternalMedia, validateExternalMediaUrl } from "@/lib/server/safe-fetch";
 import { NAVY_MEDIA_HOSTS, shouldAttachNavyAuth } from "@/lib/server/navy-media";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 
 export async function POST(req: Request) {
   let body: { url?: string };
   try {
-    body = (await req.json()) as { url?: string };
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<{ url?: string }>(req);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const url = body.url;

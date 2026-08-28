@@ -8,6 +8,10 @@ import {
   resolveMultiLlmApiKey,
   type MultiLlmMediaSource,
 } from "@/lib/multillm-proxy";
+import {
+  jsonBodyErrorDetails,
+  readJsonRequestObject,
+} from "@/lib/server/json-body";
 import { shouldAttachNavyAuth } from "@/lib/server/navy-media";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 
@@ -34,9 +38,10 @@ const statusUrl = (
 export async function POST(request: Request) {
   let body: DownloadRequest;
   try {
-    body = (await request.json()) as DownloadRequest;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+    body = await readJsonRequestObject<DownloadRequest>(request);
+  } catch (error) {
+    const details = jsonBodyErrorDetails(error);
+    return Response.json({ error: details.error }, { status: details.status });
   }
 
   const id = body.id?.trim() ?? "";
