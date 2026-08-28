@@ -10,6 +10,7 @@ import {
 } from "@/lib/multillm-proxy";
 import {
   jsonBodyErrorDetails,
+  readJsonResponse,
   readJsonRequestObject,
 } from "@/lib/server/json-body";
 import { shouldAttachNavyAuth } from "@/lib/server/navy-media";
@@ -71,7 +72,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = parseVideoJobPayload(await statusResponse.json());
+  let statusPayload: unknown;
+  try {
+    statusPayload = await readJsonResponse(statusResponse);
+  } catch {
+    return Response.json(
+      { error: "MultiLLM returned invalid video job data." },
+      { status: 502 }
+    );
+  }
+  const parsed = parseVideoJobPayload(statusPayload);
   if (!parsed.done) {
     return Response.json(
       { error: "MultiLLM video is not ready yet." },

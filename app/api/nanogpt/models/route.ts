@@ -3,6 +3,7 @@ import {
   normalizeNanoGptImageModels,
   normalizeNanoGptVideoModels,
 } from "@/lib/nanogpt-media";
+import { readJsonResponse } from "@/lib/server/json-body";
 
 const CATALOG_URLS = {
   image: "https://nano-gpt.com/api/v1/images/models",
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
 
   let payload: unknown;
   try {
-    payload = await response.json();
+    payload = await readJsonResponse(response, 8 * 1024 * 1024);
   } catch {
     return Response.json(
       { error: "Unable to parse NanoGPT model catalog." },

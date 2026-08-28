@@ -1,3 +1,6 @@
+import { providerErrorDetails } from "@/lib/api-safety";
+import { readJsonResponse } from "@/lib/server/json-body";
+
 const buildTargetUrl = (req: Request, baseUrl: string) => {
   const incomingUrl = new URL(req.url);
   const targetUrl = new URL(baseUrl);
@@ -16,14 +19,35 @@ export async function GET(req: Request) {
     headers.Authorization = `Key ${apiKey}`;
   }
 
-  const response = await fetch(targetUrl.toString(), {
-    headers: Object.keys(headers).length ? headers : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(targetUrl.toString(), {
+      headers: Object.keys(headers).length ? headers : undefined,
+    });
+  } catch (error) {
+    return Response.json(
+      providerErrorDetails(error, "Unable to fetch models.", {
+        knownSecrets: apiKey ? [apiKey] : [],
+      }),
+      { status: 502 }
+    );
+  }
 
-  const data = await response.json();
+  let data: unknown;
+  try {
+    data = await readJsonResponse(response, 8 * 1024 * 1024);
+  } catch {
+    return Response.json(
+      { error: "Unable to parse model catalog." },
+      { status: 502 }
+    );
+  }
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Unable to fetch models." },
+      providerErrorDetails(data, "Unable to fetch models.", {
+        knownSecrets: apiKey ? [apiKey] : [],
+        response,
+      }),
       { status: response.status }
     );
   }

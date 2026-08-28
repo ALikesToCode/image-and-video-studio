@@ -1,3 +1,6 @@
+import { providerErrorDetails } from "@/lib/api-safety";
+import { readJsonResponse } from "@/lib/server/json-body";
+
 export async function GET(req: Request) {
   const apiKey = req.headers.get("x-user-api-key");
   if (!apiKey) {
@@ -10,16 +13,37 @@ export async function GET(req: Request) {
     targetUrl.searchParams.set(key, value);
   });
 
-  const response = await fetch(targetUrl.toString(), {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(targetUrl.toString(), {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+  } catch (error) {
+    return Response.json(
+      providerErrorDetails(error, "Unable to fetch models.", {
+        knownSecrets: [apiKey],
+      }),
+      { status: 502 }
+    );
+  }
 
-  const data = await response.json();
+  let data: unknown;
+  try {
+    data = await readJsonResponse(response, 8 * 1024 * 1024);
+  } catch {
+    return Response.json(
+      { error: "Unable to parse OpenRouter model catalog." },
+      { status: 502 }
+    );
+  }
   if (!response.ok) {
     return Response.json(
-      { error: data?.error?.message ?? "Unable to fetch models." },
+      providerErrorDetails(data, "Unable to fetch models.", {
+        knownSecrets: [apiKey],
+        response,
+      }),
       { status: response.status }
     );
   }

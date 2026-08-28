@@ -11,6 +11,7 @@ import {
 } from "@/lib/multillm-proxy";
 import {
   jsonBodyErrorDetails,
+  readJsonResponse,
   readJsonRequestObject,
 } from "@/lib/server/json-body";
 import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
@@ -159,7 +160,15 @@ export async function POST(request: Request) {
     }
   }
 
-  const responsePayload = (await response.json()) as unknown;
+  let responsePayload: unknown;
+  try {
+    responsePayload = await readJsonResponse(response);
+  } catch {
+    return Response.json(
+      { error: "MultiLLM returned invalid video data." },
+      { status: 502 }
+    );
+  }
   const parsed = parseVideoJobPayload(responsePayload);
   if (parsed.videoUrl) {
     return Response.json(parsed);
@@ -221,7 +230,15 @@ export async function GET(request: Request) {
     );
   }
 
-  const payload = (await response.json()) as unknown;
+  let payload: unknown;
+  try {
+    payload = await readJsonResponse(response);
+  } catch {
+    return Response.json(
+      { error: "MultiLLM returned invalid video job data." },
+      { status: 502 }
+    );
+  }
   const parsed = parseVideoJobPayload(payload);
   return Response.json(parsed);
 }

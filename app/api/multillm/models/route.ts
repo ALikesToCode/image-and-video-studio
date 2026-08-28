@@ -9,6 +9,7 @@ import {
   type MultiLlmModelKind,
 } from "@/lib/multillm-proxy";
 import { mergeImageModelOptionLists } from "@/lib/model-options";
+import { readJsonResponse } from "@/lib/server/json-body";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +96,7 @@ export async function GET(request: Request) {
             )
           );
         }
-        const payload = (await response.json()) as unknown;
+        const payload = await readJsonResponse(response, 8 * 1024 * 1024);
         return {
           status: "fulfilled" as const,
           models: normalizeModelOptions(payload, {

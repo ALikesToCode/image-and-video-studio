@@ -14,6 +14,7 @@ import {
 } from "@/lib/multillm-proxy";
 import {
   jsonBodyErrorDetails,
+  readJsonResponse,
   readJsonRequestObject,
 } from "@/lib/server/json-body";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
@@ -331,7 +332,15 @@ export async function POST(request: Request) {
     });
   }
 
-  const responsePayload = (await response.json()) as unknown;
+  let responsePayload: unknown;
+  try {
+    responsePayload = await readJsonResponse(response);
+  } catch {
+    return Response.json(
+      { error: "MultiLLM returned invalid image data." },
+      { status: 502 }
+    );
+  }
   const items = extractImageItems(responsePayload);
   if (items.length) {
     return Response.json({
@@ -385,7 +394,15 @@ export async function GET(request: Request) {
     );
   }
 
-  const payload = (await response.json()) as unknown;
+  let payload: unknown;
+  try {
+    payload = await readJsonResponse(response);
+  } catch {
+    return Response.json(
+      { error: "MultiLLM returned invalid image job data." },
+      { status: 502 }
+    );
+  }
   const status = jobStatus(payload);
   if (["failed", "error", "canceled", "cancelled"].includes(status)) {
     return Response.json({

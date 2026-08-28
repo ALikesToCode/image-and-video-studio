@@ -7,6 +7,7 @@ import {
     JsonBodyError,
     jsonBodyErrorDetails,
     readBoundedTextBody,
+    readJsonResponse,
     readJsonRequestObject,
 } from "@/lib/server/json-body";
 
@@ -66,8 +67,14 @@ export async function POST(req: Request) {
 
         const contentType = response.headers.get("content-type") ?? "";
         if (contentType.includes("application/json")) {
-            const data = await response.json();
-            return NextResponse.json(data);
+            try {
+                return NextResponse.json(await readJsonResponse(response));
+            } catch {
+                return NextResponse.json(
+                    { error: "Chutes returned invalid video data." },
+                    { status: 502 }
+                );
+            }
         }
 
         try {

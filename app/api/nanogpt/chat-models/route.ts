@@ -3,6 +3,7 @@ import {
   normalizeNanoGptChatMeta,
   normalizeNanoGptChatModels,
 } from "@/lib/nanogpt-chat";
+import { readJsonResponse } from "@/lib/server/json-body";
 
 const CATALOG_URL = "https://nano-gpt.com/api/v1/models";
 const PUBLIC_CACHE_CONTROL =
@@ -41,7 +42,7 @@ export async function GET(req: Request) {
 
   let payload: unknown;
   try {
-    payload = await response.json();
+    payload = await readJsonResponse(response, 8 * 1024 * 1024);
   } catch {
     if (!response.ok) {
       return Response.json(

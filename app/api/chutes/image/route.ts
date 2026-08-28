@@ -14,6 +14,7 @@ import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import { readBoundedMediaBody } from "@/lib/server/media-response";
 import {
   jsonBodyErrorDetails,
+  readJsonResponse,
   readJsonRequestObject,
 } from "@/lib/server/json-body";
 import { IMAGE_MIME_TYPES } from "@/lib/studio-validation";
@@ -299,7 +300,7 @@ export async function POST(req: Request) {
 
   let data: unknown;
   try {
-    data = await response.json();
+    data = await readJsonResponse(response);
   } catch {
     return janitorAiJsonResponse(
       req,

@@ -1,4 +1,5 @@
 import { providerErrorDetails, redactSecrets } from "@/lib/api-safety";
+import { readJsonResponse } from "@/lib/server/json-body";
 
 const NAVY_MODEL_STATUS_URL = "https://api.navy/v1/models/status";
 const CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300";
@@ -92,7 +93,7 @@ export async function GET(req: Request) {
 
   let payload: unknown;
   try {
-    payload = await response.json();
+    payload = await readJsonResponse(response, 8 * 1024 * 1024);
   } catch {
     return Response.json(
       { error: "Unable to parse Navy model status response." },
