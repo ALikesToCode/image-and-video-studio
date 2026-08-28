@@ -1,3 +1,5 @@
+import { readBoundedMediaBody } from "./media-response";
+
 export type SafeFetchOptions = {
   allowedHosts: string[];
   allowedContentTypes: string[];
@@ -119,49 +121,6 @@ export const validateExternalMediaUrl = (
   return url;
 };
 
-const isAllowedContentType = (
-  contentType: string | null,
-  allowedContentTypes: string[]
-) => {
-  const normalized = (contentType ?? "").split(";")[0].trim().toLowerCase();
-  return allowedContentTypes.some((allowed) =>
-    normalized.startsWith(allowed.toLowerCase())
-  );
-};
-
-const readBoundedBody = async (response: Response, maxBytes: number) => {
-  const contentLength = response.headers.get("content-length");
-  if (contentLength && Number(contentLength) > maxBytes) {
-    throw new Error("Media response is too large.");
-  }
-
-  if (!response.body) return new Uint8Array();
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      throw new Error("Media response is too large.");
-    }
-    chunks.push(value);
-  }
-
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-};
-
 export async function safeFetchExternalMedia(
   url: string,
   options: SafeFetchOptions
@@ -207,18 +166,18 @@ export async function safeFetchExternalMedia(
         throw new Error("Unable to download media.");
       }
 
-      const contentType = response.headers.get("content-type");
-      if (!isAllowedContentType(contentType, options.allowedContentTypes)) {
-        throw new Error(
-          `Unexpected media content type: ${contentType ?? "unknown"}.`
-        );
-      }
-
-      const body = await readBoundedBody(response, options.maxBytes);
+      const { bytes: body, contentType } = await readBoundedMediaBody(response, {
+        allowedContentTypes: options.allowedContentTypes,
+        maxBytes: options.maxBytes,
+      });
       const headers = new Headers();
-      if (contentType) headers.set("Content-Type", contentType);
+      headers.set("Content-Type", contentType);
       headers.set("Content-Length", String(body.byteLength));
-      return new Response(body, {
+      const responseBody = body.buffer.slice(
+        body.byteOffset,
+        body.byteOffset + body.byteLength
+      ) as ArrayBuffer;
+      return new Response(responseBody, {
         status: 200,
         headers,
       });

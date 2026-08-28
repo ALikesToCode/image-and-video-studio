@@ -311,7 +311,7 @@ const inlineImagePayload = (
 const downloadGeneratedImage = async (url: string): Promise<NavyImagePayload> => {
   const response = await safeFetchExternalMedia(url, {
     allowedHosts: NAVY_MEDIA_HOSTS,
-    allowedContentTypes: ["image/"],
+    allowedContentTypes: [...IMAGE_MIME_TYPES],
     maxBytes: 50 * 1024 * 1024,
     timeoutMs: 30_000,
     allowRedirects: true,

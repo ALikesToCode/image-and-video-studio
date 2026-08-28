@@ -7,6 +7,8 @@ import {
   providerErrorMessage,
 } from "@/lib/api-safety";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
+import { readBoundedMediaBody } from "@/lib/server/media-response";
+import { IMAGE_MIME_TYPES } from "@/lib/studio-validation";
 
 type ImageRequest = {
   apiKey?: string;
@@ -27,8 +29,8 @@ type ImagePayload = {
   model?: string;
 };
 
-const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
-  const bytes = new Uint8Array(buffer);
+const arrayBufferToBase64 = (buffer: ArrayBuffer | Uint8Array) => {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const chunkSize = 0x8000;
   let binary = "";
   for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -120,7 +122,7 @@ const extractFromJson = (data: unknown) => {
 const downloadImage = async (url: string) => {
   const response = await safeFetchExternalMedia(url, {
     allowedHosts: ["chutes.ai", ".chutes.ai"],
-    allowedContentTypes: ["image/"],
+    allowedContentTypes: [...IMAGE_MIME_TYPES],
     maxBytes: 50 * 1024 * 1024,
     timeoutMs: 30_000,
     allowRedirects: true,
@@ -255,14 +257,26 @@ export async function POST(req: Request) {
   }
 
   if (contentType.startsWith("image/")) {
-    const buffer = await response.arrayBuffer();
+    let media;
+    try {
+      media = await readBoundedMediaBody(response, {
+        allowedContentTypes: IMAGE_MIME_TYPES,
+        maxBytes: 50 * 1024 * 1024,
+      });
+    } catch {
+      return janitorAiJsonResponse(
+        req,
+        { error: "Chutes returned invalid image data." },
+        { status: 502 }
+      );
+    }
     return janitorAiJsonResponse(
       req,
       imageResponsePayload(
         [
           {
-            data: arrayBufferToBase64(buffer),
-            mimeType: contentType.split(";")[0] ?? "image/png",
+            data: arrayBufferToBase64(media.bytes),
+            mimeType: media.contentType,
           },
         ],
         model,

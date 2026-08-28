@@ -94,6 +94,28 @@ test("safeFetchExternalMedia rejects wrong content type", async () => {
   }
 });
 
+test("safeFetchExternalMedia does not accept a content-type prefix spoof", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response("not a png", {
+      headers: { "content-type": "image/png-malformed" },
+    });
+
+  try {
+    await assert.rejects(
+      safeFetchExternalMedia("https://media.example.com/image.png", {
+        allowedHosts,
+        allowedContentTypes: ["image/png"],
+        maxBytes: 100,
+        timeoutMs: 1000,
+      }),
+      /content type/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("safeFetchExternalMedia rejects oversized bodies from content-length and stream", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

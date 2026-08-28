@@ -1,7 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
+import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
+import { VIDEO_MIME_TYPES } from "@/lib/studio-validation";
 
-export async function POST(req: NextRequest) {
+const MAX_VIDEO_BYTES = 256 * 1024 * 1024;
+
+export async function POST(req: Request) {
     try {
         const body = await req.json();
         const { prompt, image, fps, guidance_scale_2, model } = body;
@@ -56,13 +60,17 @@ export async function POST(req: NextRequest) {
             return NextResponse.json(data);
         }
 
-        const buffer = await response.arrayBuffer();
-        return new NextResponse(buffer, {
-            headers: {
-                "Content-Type": contentType || "video/mp4",
-                "Content-Length": buffer.byteLength.toString(),
-            },
-        });
+        try {
+            return proxyBoundedMediaResponse(response, {
+                allowedContentTypes: VIDEO_MIME_TYPES,
+                maxBytes: MAX_VIDEO_BYTES,
+            });
+        } catch {
+            return NextResponse.json(
+                { error: "Chutes returned invalid video data." },
+                { status: 502 }
+            );
+        }
 
     } catch (error) {
         return NextResponse.json(

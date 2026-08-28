@@ -13,7 +13,9 @@ import {
   type NormalizedImageItem,
 } from "@/lib/multillm-proxy";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
+import { readBoundedMediaBody } from "@/lib/server/media-response";
 import { buildNavyImageGenerationPayload } from "@/lib/studio-generation";
+import { IMAGE_MIME_TYPES } from "@/lib/studio-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +40,8 @@ type ImageRequest = {
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
 
-const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
-  const bytes = new Uint8Array(buffer);
+const arrayBufferToBase64 = (buffer: ArrayBuffer | Uint8Array) => {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const chunkSize = 0x8000;
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
@@ -57,7 +59,7 @@ const materializeImages = async (items: NormalizedImageItem[]) =>
       const mediaUrl = new URL(item.url!);
       const response = await safeFetchExternalMedia(mediaUrl.toString(), {
         allowedHosts: [mediaUrl.hostname],
-        allowedContentTypes: ["image/"],
+        allowedContentTypes: [...IMAGE_MIME_TYPES],
         maxBytes: MAX_IMAGE_BYTES,
         timeoutMs: IMAGE_DOWNLOAD_TIMEOUT_MS,
         allowRedirects: true,
@@ -302,11 +304,23 @@ export async function POST(request: Request) {
 
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.startsWith("image/")) {
+    let media;
+    try {
+      media = await readBoundedMediaBody(response, {
+        allowedContentTypes: IMAGE_MIME_TYPES,
+        maxBytes: MAX_IMAGE_BYTES,
+      });
+    } catch {
+      return Response.json(
+        { error: "MultiLLM returned invalid image data." },
+        { status: 502 }
+      );
+    }
     return Response.json({
       images: [
         {
-          data: arrayBufferToBase64(await response.arrayBuffer()),
-          mimeType: contentType.split(";")[0],
+          data: arrayBufferToBase64(media.bytes),
+          mimeType: media.contentType,
         },
       ],
     });

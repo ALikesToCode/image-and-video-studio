@@ -6,8 +6,12 @@ import {
   resolveMultiLlmApiKey,
   type MultiLlmMediaSource,
 } from "@/lib/multillm-proxy";
+import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
+import { AUDIO_MIME_TYPES } from "@/lib/studio-validation";
 
 export const dynamic = "force-dynamic";
+
+const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
 
 type AudioRequest = {
   apiKey?: string;
@@ -85,17 +89,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const headers = new Headers();
-  headers.set(
-    "Content-Type",
-    response.headers.get("content-type") ?? "audio/mpeg"
-  );
-  const disposition = response.headers.get("content-disposition");
-  if (disposition) headers.set("Content-Disposition", disposition);
-  headers.set("Cache-Control", "no-store");
-
-  return new Response(response.body, {
-    status: response.status,
-    headers,
-  });
+  try {
+    return proxyBoundedMediaResponse(response, {
+      allowedContentTypes: AUDIO_MIME_TYPES,
+      maxBytes: MAX_AUDIO_BYTES,
+    });
+  } catch {
+    return Response.json(
+      { error: "MultiLLM returned invalid audio data." },
+      { status: 502 }
+    );
+  }
 }

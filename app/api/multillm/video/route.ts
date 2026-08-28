@@ -9,8 +9,12 @@ import {
   sanitizeImageInputUrls,
   type MultiLlmMediaSource,
 } from "@/lib/multillm-proxy";
+import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
+import { VIDEO_MIME_TYPES } from "@/lib/studio-validation";
 
 export const dynamic = "force-dynamic";
+
+const MAX_VIDEO_BYTES = 256 * 1024 * 1024;
 
 type VideoRequest = {
   apiKey?: string;
@@ -137,9 +141,17 @@ export async function POST(request: Request) {
 
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.startsWith("video/")) {
-    return new Response(response.body, {
-      headers: { "Content-Type": contentType },
-    });
+    try {
+      return proxyBoundedMediaResponse(response, {
+        allowedContentTypes: VIDEO_MIME_TYPES,
+        maxBytes: MAX_VIDEO_BYTES,
+      });
+    } catch {
+      return Response.json(
+        { error: "MultiLLM returned invalid video data." },
+        { status: 502 }
+      );
+    }
   }
 
   const responsePayload = (await response.json()) as unknown;

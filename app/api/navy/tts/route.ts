@@ -1,4 +1,8 @@
 import { getUserApiKey, jsonOrNull, providerErrorMessage } from "@/lib/api-safety";
+import { readBoundedMediaBody } from "@/lib/server/media-response";
+import { AUDIO_MIME_TYPES } from "@/lib/studio-validation";
+
+const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
 
 type TtsRequest = {
   apiKey?: string;
@@ -9,8 +13,7 @@ type TtsRequest = {
   responseFormat?: string;
 };
 
-const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
-  const bytes = new Uint8Array(buffer);
+const bytesToBase64 = (bytes: Uint8Array) => {
   const chunkSize = 0x8000;
   let binary = "";
   for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -67,12 +70,22 @@ export async function POST(req: Request) {
     );
   }
 
-  const contentType = response.headers.get("content-type") ?? "audio/mpeg";
-  const buffer = await response.arrayBuffer();
+  let media;
+  try {
+    media = await readBoundedMediaBody(response, {
+      allowedContentTypes: AUDIO_MIME_TYPES,
+      maxBytes: MAX_AUDIO_BYTES,
+    });
+  } catch {
+    return Response.json(
+      { error: "NavyAI returned invalid audio data." },
+      { status: 502 }
+    );
+  }
   return Response.json({
     audio: {
-      data: arrayBufferToBase64(buffer),
-      mimeType: contentType.split(";")[0] ?? "audio/mpeg",
+      data: bytesToBase64(media.bytes),
+      mimeType: media.contentType,
     },
   });
 }

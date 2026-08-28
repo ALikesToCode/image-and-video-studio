@@ -1,7 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getUserApiKey, redactSecrets } from "@/lib/api-safety";
+import { AUDIO_MIME_TYPES } from "@/lib/studio-validation";
+import { proxyBoundedMediaResponse } from "@/lib/server/media-response";
 
-export async function POST(req: NextRequest) {
+const MAX_AUDIO_BYTES = 64 * 1024 * 1024;
+
+export async function POST(req: Request) {
     try {
         const body = await req.json();
         const { prompt, text, model, speed, speaker, maxDuration } = body;
@@ -66,19 +70,17 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Return the audio file (stream)
-        // We can proxy the blob directly
-        const audioBlob = await response.blob();
-
-        // Convert to ArrayBuffer to send via Next.js Response
-        const buffer = await audioBlob.arrayBuffer();
-
-        return new NextResponse(buffer, {
-            headers: {
-                "Content-Type": response.headers.get("content-type") ?? "audio/mpeg",
-                "Content-Length": buffer.byteLength.toString(),
-            },
-        });
+        try {
+            return proxyBoundedMediaResponse(response, {
+                allowedContentTypes: AUDIO_MIME_TYPES,
+                maxBytes: MAX_AUDIO_BYTES,
+            });
+        } catch {
+            return NextResponse.json(
+                { error: "Chutes returned invalid audio data." },
+                { status: 502 }
+            );
+        }
 
     } catch (error) {
         return NextResponse.json(
