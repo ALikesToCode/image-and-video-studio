@@ -90,11 +90,40 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
             ],
           });
         }
+        if (url === "https://proxy.test/v1/models") {
+          return Response.json({
+            data: [
+              {
+                id: "aihubmix:gpt-image-2-free",
+                capabilities: { supports_images: true },
+              },
+              {
+                id: "aihubmix:gemini-3.1-flash-image-preview-free",
+                capabilities: { supports_images: true },
+              },
+              {
+                id: "aihubmix:doubao-seedream-4-0",
+                capabilities: { supports_images: true },
+              },
+              {
+                id: "aihubmix:gpt-5.5-free",
+                capabilities: { supports_images: false },
+              },
+              {
+                id: "aihubmix:nano-banana-undocumented-free",
+              },
+              {
+                id: "navyai:gpt-image-2",
+                capabilities: { supports_images: true },
+              },
+            ],
+          });
+        }
         assert.equal(
           url,
           "https://proxy.test/nanogpt/v1/image-models?detailed=true"
         );
-        return new Response("NanoGPT catalog unavailable", { status: 503 });
+        return Response.json({ data: [{ id: "nano-image-free" }] });
       },
       async () => {
         const response = await multiLlmModelsGet(
@@ -123,10 +152,25 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
               id: "linkapi:gemini-3.1-flash-lite-image",
               provider: "multillm",
             },
+            {
+              id: "nanogpt:nano-image-free",
+              provider: "multillm",
+            },
+            {
+              id: "aihubmix:gpt-image-2-free",
+              provider: "multillm",
+            },
+            {
+              id: "aihubmix:gemini-3.1-flash-image-preview-free",
+              provider: "multillm",
+            },
+            {
+              id: "aihubmix:doubao-seedream-4-0",
+              provider: "multillm",
+            },
           ]
         );
-        assert.equal(payload.warnings.length, 1);
-        assert.match(payload.warnings[0], /NanoGPT catalog unavailable/);
+        assert.deepEqual(payload.warnings, []);
         const navyChatImage = payload.models.find(
           (model) => model.id === "navyai:gemini-3.1-flash-image",
         ) as Record<string, unknown> | undefined;
@@ -142,6 +186,53 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
         ) as Record<string, unknown> | undefined;
         assert.equal(navyNativeImage?.maxOutputImages, 1);
         assert.equal(navyNativeImage?.fixedOutputImages, 1);
+      }
+    );
+  });
+});
+
+test("one MultiLLM image catalog failure preserves other providers", async () => {
+  await withMultiLlmEnv(async () => {
+    await withFetch(
+      async (input) => {
+        const url = String(input);
+        if (url === "https://proxy.test/navyai/v1/models") {
+          return Response.json({
+            data: [{ id: "flux", endpoint: "images/generations" }],
+          });
+        }
+        if (url === "https://proxy.test/linkapi/v1/models") {
+          return Response.json({ data: [{ id: "gpt-image-2-c" }] });
+        }
+        if (
+          url === "https://proxy.test/nanogpt/v1/image-models?detailed=true"
+        ) {
+          return Response.json({ data: [{ id: "nano-image-free" }] });
+        }
+        assert.equal(url, "https://proxy.test/v1/models");
+        return new Response("AIHubMix catalog unavailable", { status: 503 });
+      },
+      async () => {
+        const response = await multiLlmModelsGet(
+          new Request("https://studio.test/api/multillm/models?kind=image")
+        );
+        const payload = (await response.json()) as {
+          models: Array<{ id: string }>;
+          warnings: string[];
+        };
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(
+          payload.models.map((model) => model.id),
+          [
+            "navyai:flux",
+            "linkapi:gpt-image-2-c",
+            "nanogpt:nano-image-free",
+          ]
+        );
+        assert.equal(payload.warnings.length, 1);
+        assert.match(payload.warnings[0], /^aihubmix:/);
+        assert.match(payload.warnings[0], /AIHubMix catalog unavailable/);
       }
     );
   });
@@ -246,6 +337,60 @@ test("MultiLLM native Navy images use the one-image payload contract", async () 
           images: [{ data: "aGVsbG8=", mimeType: "image/png" }],
         });
       }
+    );
+  });
+});
+
+test("MultiLLM sends AIHubMix image models through unified generation", async () => {
+  await withMultiLlmEnv(async () => {
+    const upstreamBodies: Record<string, unknown>[] = [];
+    await withFetch(
+      async (input, init) => {
+        assert.equal(
+          String(input),
+          "https://proxy.test/v1/images/generations",
+        );
+        assert.equal(
+          new Headers(init?.headers).get("authorization"),
+          "Bearer server-proxy-secret",
+        );
+        upstreamBodies.push(
+          JSON.parse(String(init?.body)) as Record<string, unknown>,
+        );
+        return Response.json({
+          data: [{ b64_json: "aGVsbG8=", mime_type: "image/png" }],
+        });
+      },
+      async () => {
+        const models = [
+          "aihubmix:gpt-image-2-free",
+          "aihubmix:gemini-3.1-flash-image-preview-free",
+          "aihubmix:doubao-seedream-4-0",
+        ];
+        for (const model of models) {
+          const response = await multiLlmImagePost(
+            new Request("https://studio.test/api/multillm/image", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                model,
+                prompt: "A paper fox",
+                numberOfImages: 1,
+              }),
+            }),
+          );
+
+          assert.equal(response.status, 200);
+          assert.deepEqual(await response.json(), {
+            images: [{ data: "aGVsbG8=", mimeType: "image/png" }],
+          });
+        }
+
+        assert.deepEqual(
+          upstreamBodies.map((body) => body.model),
+          models,
+        );
+      },
     );
   });
 });

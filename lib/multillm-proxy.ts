@@ -9,7 +9,11 @@ import { sanitizeMediaUrl } from "./media-url.ts";
 export const DEFAULT_MULTILLM_PROXY_BASE_URL =
   "https://multillm-proxy.cserules.workers.dev";
 
-export type MultiLlmMediaSource = "navyai" | "nanogpt" | "linkapi";
+export type MultiLlmMediaSource =
+  | "navyai"
+  | "nanogpt"
+  | "linkapi"
+  | "aihubmix";
 export type MultiLlmModelKind = "chat" | "image" | "video" | "audio";
 
 type ModelRecord = Record<string, unknown>;
@@ -18,6 +22,7 @@ const SOURCE_LABELS: Record<MultiLlmMediaSource, string> = {
   navyai: "NavyAI",
   nanogpt: "NanoGPT",
   linkapi: "LinkAPI",
+  aihubmix: "AIHubMix",
 };
 
 const isRecord = (value: unknown): value is ModelRecord =>
@@ -215,6 +220,10 @@ const modelOutputModalities = (record: ModelRecord) => {
   ];
 };
 
+const hasDeclaredImageOutput = (record: ModelRecord) =>
+  truthyCapability(record, ["supports_images", "supports_image_output"]) ||
+  modelOutputModalities(record).includes("image");
+
 const imageGeneratorIdPattern =
   /(?:^|[:/_.-])(?:dall-e|diffusion|flux|gpt-image|hidream|imagen|nano-banana|p-image|z-image)(?:$|[:/_.-])/i;
 const videoGeneratorIdPattern =
@@ -298,28 +307,41 @@ export const normalizeModelOptions = (
     source?: MultiLlmMediaSource;
     kind?: Exclude<MultiLlmModelKind, "chat">;
     assumeKind?: boolean;
+    idPrefix?: string;
+    requireDeclaredImageOutput?: boolean;
   } = {}
 ): ModelOption[] => {
   const { records, scoped } = extractModelRecords(payload, options.kind);
+  const requiredIdPrefix = options.idPrefix?.trim().toLowerCase();
+  const sourceRecords = requiredIdPrefix
+    ? records.filter((record) =>
+        modelIdentity(record).toLowerCase().startsWith(requiredIdPrefix),
+      )
+    : records;
+  const declaredOutputRecords = options.requireDeclaredImageOutput
+    ? sourceRecords.filter(hasDeclaredImageOutput)
+    : sourceRecords;
   const filtered =
     options.kind && !options.assumeKind && !scoped
-      ? records.filter((record) => modelSupportsKind(record, options.kind!))
-      : records;
+      ? declaredOutputRecords.filter((record) =>
+          modelSupportsKind(record, options.kind!),
+        )
+      : declaredOutputRecords;
   const deduplicated = new Map<string, ModelOption>();
 
   for (const record of filtered) {
     const catalogRecord = withProviderMetadata(record);
     const rawId = modelIdentity(record);
     if (!rawId) continue;
-    const id = options.source
-      ? `${options.source}:${rawId.replace(
-          new RegExp(`^${options.source}:`),
-          ""
-        )}`
+    const sourceModelId = options.source
+      ? rawId.replace(new RegExp(`^${options.source}:`, "i"), "")
       : rawId;
+    const id = options.source
+      ? `${options.source}:${sourceModelId}`
+      : sourceModelId;
     const label = options.source
-      ? `${SOURCE_LABELS[options.source]} · ${modelLabel(record, rawId)}`
-      : modelLabel(record, rawId);
+      ? `${SOURCE_LABELS[options.source]} · ${modelLabel(record, sourceModelId)}`
+      : modelLabel(record, sourceModelId);
     const kind = options.kind ?? "chat";
     const usesLinkApiImageChat =
       kind === "image" &&
@@ -541,11 +563,12 @@ export const parseMediaModelId = (value: unknown) => {
   if (
     (source !== "navyai" &&
       source !== "nanogpt" &&
-      source !== "linkapi") ||
+      source !== "linkapi" &&
+      source !== "aihubmix") ||
     !model
   ) {
     throw new Error(
-      "Media model must include a navyai:, nanogpt:, or linkapi: source prefix."
+      "Media model must include a navyai:, nanogpt:, linkapi:, or aihubmix: source prefix."
     );
   }
 

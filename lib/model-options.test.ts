@@ -8,7 +8,10 @@ import {
   isFetchedOnlyModel,
   mergeModelOptionLists,
 } from "./model-options.ts";
-import type { ModelOption } from "./constants.ts";
+import {
+  MULTILLM_IMAGE_MODELS,
+  type ModelOption,
+} from "./constants.ts";
 
 const models: ModelOption[] = [
   {
@@ -119,5 +122,25 @@ test("mergeModelOptionLists retains fallbacks while live metadata wins", () => {
         metadataStatus: undefined,
       },
     ],
+  );
+});
+
+test("live AIHubMix models replace matching fallbacks without duplicates", () => {
+  const modelId = "aihubmix:gpt-image-2-free";
+  const merged = mergeModelOptionLists([
+    MULTILLM_IMAGE_MODELS,
+    [
+      {
+        id: modelId,
+        label: "AIHubMix · GPT Image 2 Free",
+        metadataStatus: "live",
+      },
+    ],
+  ]);
+
+  assert.equal(merged.filter((model) => model.id === modelId).length, 1);
+  assert.equal(
+    merged.find((model) => model.id === modelId)?.metadataStatus,
+    "live",
   );
 });

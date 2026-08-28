@@ -15,6 +15,8 @@ type CatalogTarget = {
   source?: MultiLlmMediaSource;
   path: string;
   assumeKind?: boolean;
+  idPrefix?: string;
+  requireDeclaredImageOutput?: boolean;
 };
 
 const catalogTargets: Record<MultiLlmModelKind, CatalogTarget[]> = {
@@ -26,6 +28,12 @@ const catalogTargets: Record<MultiLlmModelKind, CatalogTarget[]> = {
       source: "nanogpt",
       path: "/nanogpt/v1/image-models?detailed=true",
       assumeKind: true,
+    },
+    {
+      source: "aihubmix",
+      path: "/v1/models",
+      idPrefix: "aihubmix:",
+      requireDeclaredImageOutput: true,
     },
   ],
   video: [
@@ -94,6 +102,8 @@ export async function GET(request: Request) {
             source: target.source,
             kind: kindParam === "chat" ? undefined : kindParam,
             assumeKind: target.assumeKind,
+            idPrefix: target.idPrefix,
+            requireDeclaredImageOutput: target.requireDeclaredImageOutput,
           }),
         };
       } catch (error) {

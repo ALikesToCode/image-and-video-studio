@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { MULTILLM_CHAT_MODELS } from "./constants.ts";
+import {
+  MULTILLM_CHAT_MODELS,
+  MULTILLM_IMAGE_MODELS,
+} from "./constants.ts";
 import {
   extractImageItems,
   normalizeModelOptions,
@@ -170,6 +173,78 @@ test("does not expose vision-only chat models as image generators", () => {
   );
 });
 
+test("discovers only image-capable AIHubMix models from the unified catalog", () => {
+  const models = normalizeModelOptions(
+    {
+      data: [
+        {
+          id: "aihubmix:gpt-image-2-free",
+          capabilities: { supports_images: true },
+        },
+        {
+          id: "aihubmix:gemini-3.1-flash-image-preview-free",
+          supports_image_output: true,
+        },
+        {
+          id: "aihubmix:doubao-seedream-4-0",
+          output_modalities: ["image"],
+        },
+        {
+          id: "aihubmix:gpt-5.5-free",
+          capabilities: { supports_images: false },
+        },
+        {
+          id: "aihubmix:nano-banana-undocumented-free",
+        },
+        {
+          id: "navyai:flux",
+          capabilities: { supports_images: true },
+        },
+      ],
+    },
+    {
+      source: "aihubmix",
+      kind: "image",
+      idPrefix: "aihubmix:",
+      requireDeclaredImageOutput: true,
+    },
+  );
+
+  assert.deepEqual(
+    models.map(({ id, label, endpoint }) => ({ id, label, endpoint })),
+    [
+      {
+        id: "aihubmix:gpt-image-2-free",
+        label: "AIHubMix · gpt-image-2-free",
+        endpoint: "multillm-images-generations",
+      },
+      {
+        id: "aihubmix:gemini-3.1-flash-image-preview-free",
+        label: "AIHubMix · gemini-3.1-flash-image-preview-free",
+        endpoint: "multillm-images-generations",
+      },
+      {
+        id: "aihubmix:doubao-seedream-4-0",
+        label: "AIHubMix · doubao-seedream-4-0",
+        endpoint: "multillm-images-generations",
+      },
+    ],
+  );
+});
+
+test("keeps the three AIHubMix image models in the offline fallback catalog", () => {
+  assert.deepEqual(
+    MULTILLM_IMAGE_MODELS.filter((model) =>
+      model.id.startsWith("aihubmix:"),
+    ).map((model) => model.id),
+    [
+      "aihubmix:gpt-image-2-free",
+      "aihubmix:gemini-3.1-flash-image-preview-free",
+      "aihubmix:doubao-seedream-4-0",
+    ],
+  );
+});
+
 test("routes LinkAPI chat models through the provider-specific endpoint", () => {
   assert.deepEqual(resolveMultiLlmChatTarget("linkapi:gpt-5.6-luna"), {
     model: "gpt-5.6-luna",
@@ -326,6 +401,10 @@ test("parses only supported source-tagged media ids", () => {
   assert.deepEqual(parseMediaModelId("linkapi:gpt-image-2-c"), {
     source: "linkapi",
     model: "gpt-image-2-c",
+  });
+  assert.deepEqual(parseMediaModelId("aihubmix:gpt-image-2-free"), {
+    source: "aihubmix",
+    model: "gpt-image-2-free",
   });
   assert.throws(() => parseMediaModelId("hidream"), /source prefix/);
 });

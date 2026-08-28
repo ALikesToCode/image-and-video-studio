@@ -173,6 +173,7 @@ export async function POST(request: Request) {
     (usesDeclaredImageChatEndpoint(body.modelEndpoint) ||
       isGeminiChatImageModel(model));
   const usesImageChat = usesLinkApiImageChat || usesNavyImageChat;
+  const usesUnifiedImageGeneration = source === "aihubmix";
   const prompt =
     usesImageChat && body.negativePrompt?.trim()
       ? `${body.prompt.trim()}\n\nAvoid: ${body.negativePrompt.trim()}`
@@ -251,7 +252,7 @@ export async function POST(request: Request) {
         }
       : {
           ...parameters,
-          model,
+          model: usesUnifiedImageGeneration ? `${source}:${model}` : model,
           prompt,
           n: numberOfImages,
           response_format: source === "linkapi" ? "url" : "b64_json",
@@ -276,10 +277,13 @@ export async function POST(request: Request) {
             : {}),
         };
 
+  const upstreamPath = usesUnifiedImageGeneration
+    ? "/v1/images/generations"
+    : `/${source}/v1/${
+        usesImageChat ? "chat/completions" : "images/generations"
+      }`;
   const response = await fetch(
-    `${getMultiLlmProxyBaseUrl()}/${source}/v1/${
-      usesImageChat ? "chat/completions" : "images/generations"
-    }`,
+    `${getMultiLlmProxyBaseUrl()}${upstreamPath}`,
     {
       method: "POST",
       headers: multiLlmAuthorizationHeaders(apiKey, "application/json"),
