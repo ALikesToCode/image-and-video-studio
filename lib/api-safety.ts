@@ -40,7 +40,6 @@ const PROVIDER_ENV_KEYS: Record<ImageProvider, string[]> = {
   multillm: ["MULTILLM_API_KEY"],
 };
 
-const CORS_ALLOWED_SUFFIXES = ["janitorai.com"];
 const CORS_ALLOW_HEADERS =
   "content-type, x-user-api-key, authorization, x-janitorai-source, x-janitorai-agent";
 
@@ -89,26 +88,22 @@ export const isJanitorAiUserscriptRequest = (
   );
 };
 
-export const isAllowedJanitorAiCorsOrigin = (origin: string) => {
-  try {
-    const normalizedOrigin = origin.trim();
-    const url = new URL(normalizedOrigin);
-    if (
-      url.protocol !== "https:" ||
-      url.origin !== normalizedOrigin ||
-      url.username ||
-      url.password
-    ) {
-      return false;
-    }
-    const hostname = url.hostname.toLowerCase();
-    return CORS_ALLOWED_SUFFIXES.some(
-      (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`)
-    );
-  } catch {
-    return false;
+const allowedJanitorAiCorsOrigin = (origin: string) => {
+  const normalizedOrigin = origin.trim().toLowerCase();
+  if (normalizedOrigin === "https://janitorai.com") {
+    return "https://janitorai.com";
   }
+  if (normalizedOrigin === "https://www.janitorai.com") {
+    return "https://www.janitorai.com";
+  }
+  if (normalizedOrigin === "https://chat.janitorai.com") {
+    return "https://chat.janitorai.com";
+  }
+  return null;
 };
+
+export const isAllowedJanitorAiCorsOrigin = (origin: string) =>
+  allowedJanitorAiCorsOrigin(origin) !== null;
 
 export const janitorAiCorsHeaders = (
   req: Request,
@@ -120,8 +115,10 @@ export const janitorAiCorsHeaders = (
     Vary: "Origin",
   });
   const origin = req.headers.get("origin");
-  if (origin && isAllowedJanitorAiCorsOrigin(origin)) {
-    headers.set("Access-Control-Allow-Origin", origin);
+  const allowedOrigin = origin ? allowedJanitorAiCorsOrigin(origin) : null;
+  if (allowedOrigin) {
+    // The normalizer returns one of three literal trusted origins or null.
+    headers.set("Access-Control-Allow-Origin", allowedOrigin); // nosemgrep: javascript.express.security.cors-misconfiguration.cors-misconfiguration
   }
   return headers;
 };

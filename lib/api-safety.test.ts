@@ -359,6 +359,7 @@ test("JanitorAI CORS accepts only canonical HTTPS origins", () => {
     "https://janitorai.com/",
     "https://janitorai.com/path",
     "https://janitorai.com.evil.example",
+    "https://untrusted.janitorai.com",
     "https://evil.example?janitorai.com",
     "https://user:password@janitorai.com",
   ]) {
