@@ -104,7 +104,10 @@ import { sanitizeMediaUrl } from "@/lib/media-url";
 import { resolveImageSubmissionAttempts } from "@/lib/image-submission-policy";
 import { resolveMaximumImageQualityRequest } from "@/lib/image-quality";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
-import { refreshMultiLlmChatWorkspaceCatalogs } from "@/lib/multillm-catalog-refresh";
+import {
+    coalesceMultiLlmCatalogRefreshes,
+    refreshMultiLlmChatWorkspaceCatalogs,
+} from "@/lib/multillm-catalog-refresh";
 import {
     backupAndPruneUnsafeMediaRecords,
     partitionGeneratedImages,
@@ -1210,7 +1213,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
-    const refreshMultiLlmCatalog = useCallback(
+    const fetchMultiLlmCatalog = useCallback(
         async (kind: "chat" | "image" | "video" | "audio") => {
             const key = apiKeys.multillm.trim();
             const response = await fetch(
@@ -1258,6 +1261,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             return models;
         },
         [apiKeys.multillm]
+    );
+    const refreshMultiLlmCatalog = useMemo(
+        () => coalesceMultiLlmCatalogRefreshes(fetchMultiLlmCatalog),
+        [fetchMultiLlmCatalog]
     );
 
     const standaloneNanoGptVideoModels = useMemo(
