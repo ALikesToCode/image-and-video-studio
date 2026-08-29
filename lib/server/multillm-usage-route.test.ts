@@ -172,6 +172,7 @@ test("MultiLLM usage aggregates and allowlists provider-reported account data", 
         const headers = new Headers(init?.headers);
         assert.equal(headers.get("authorization"), "Bearer browser-proxy-secret");
         assert.equal(headers.get("accept"), "application/json");
+        assert.equal(init?.redirect, "manual");
         seen.set(url, init?.method ?? "GET");
 
         if (url === "https://proxy.test/navyai/v1/usage") {

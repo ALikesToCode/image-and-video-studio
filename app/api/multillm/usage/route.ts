@@ -57,7 +57,10 @@ const fetchUsageSection = async (
         Accept: "application/json",
       },
       cache: "no-store",
-      redirect: "error",
+      // Cloudflare Workers supports manual redirect handling but rejects
+      // `redirect: "error"`. Any 3xx response remains non-OK below and is
+      // surfaced as unavailable instead of forwarding credentials elsewhere.
+      redirect: "manual",
       signal,
     });
 
