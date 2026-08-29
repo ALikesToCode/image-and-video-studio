@@ -75,3 +75,15 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Redirect legacy Pages URL
+        run: >-
+          pnpm exec wrangler pages deploy pages-redirect
+          --project-name image-and-video-studio
+          --branch main
+          --commit-hash "$GITHUB_SHA"
+          --commit-message "Redirect legacy Pages URL to Worker"
+          --commit-dirty=false
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
