@@ -24,17 +24,15 @@ type CatalogTarget = {
 const catalogTargets: Record<MultiLlmModelKind, CatalogTarget[]> = {
   chat: [{ path: "/v1/models" }],
   image: [
+    {
+      path: "/v1/models",
+      requireDeclaredImageOutput: true,
+    },
     { source: "navyai", path: "/navyai/v1/models" },
     { source: "linkapi", path: "/linkapi/v1/models" },
     {
       source: "nanogpt",
       path: "/nanogpt/v1/image-models?detailed=true",
-    },
-    {
-      source: "aihubmix",
-      path: "/v1/models",
-      idPrefix: "aihubmix:",
-      requireDeclaredImageOutput: true,
     },
   ],
   video: [

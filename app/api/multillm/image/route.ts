@@ -11,6 +11,7 @@ import {
   sanitizeImageInputUrls,
   type MultiLlmMediaSource,
   type NormalizedImageItem,
+  usesUnifiedMultiLlmImageSource,
 } from "@/lib/multillm-proxy";
 import {
   jsonBodyErrorDetails,
@@ -181,7 +182,7 @@ export async function POST(request: Request) {
     (usesDeclaredImageChatEndpoint(body.modelEndpoint) ||
       isGeminiChatImageModel(model));
   const usesImageChat = usesLinkApiImageChat || usesNavyImageChat;
-  const usesUnifiedImageGeneration = source === "aihubmix";
+  const usesUnifiedImageGeneration = usesUnifiedMultiLlmImageSource(source);
   const prompt =
     usesImageChat && body.negativePrompt?.trim()
       ? `${body.prompt.trim()}\n\nAvoid: ${body.negativePrompt.trim()}`

@@ -190,6 +190,10 @@ test("MultiLLM model discovery keeps healthy provider catalogs", async () => {
               id: "navyai:gemini-3.1-flash-image",
               provider: "multillm",
             },
+            {
+              id: "navyai:gpt-image-2",
+              provider: "multillm",
+            },
           ]
         );
         assert.deepEqual(payload.warnings, []);
@@ -260,7 +264,7 @@ test("one MultiLLM image catalog failure preserves other providers", async () =>
           ]
         );
         assert.equal(payload.warnings.length, 1);
-        assert.match(payload.warnings[0], /^aihubmix:/);
+        assert.match(payload.warnings[0], /^unified:/);
         assert.match(payload.warnings[0], /AIHubMix catalog unavailable/);
       }
     );

@@ -13,21 +13,54 @@ import {
 export const DEFAULT_MULTILLM_PROXY_BASE_URL =
   "https://multillm-proxy.cserules.workers.dev";
 
-export type MultiLlmMediaSource =
-  | "navyai"
-  | "nanogpt"
-  | "linkapi"
-  | "aihubmix";
+export type MultiLlmMediaSource = string;
 export type MultiLlmModelKind = "chat" | "image" | "video" | "audio";
 
 type ModelRecord = Record<string, unknown>;
 
-const SOURCE_LABELS: Record<MultiLlmMediaSource, string> = {
+const SOURCE_LABELS: Record<string, string> = {
   navyai: "NavyAI",
   nanogpt: "NanoGPT",
   linkapi: "LinkAPI",
   aihubmix: "AIHubMix",
 };
+
+const MULTILLM_MEDIA_SOURCE_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+const MULTILLM_MEDIA_MODEL_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$/;
+const NATIVE_IMAGE_SOURCES = new Set(["navyai", "nanogpt", "linkapi"]);
+
+const sourceLabel = (source: string) =>
+  SOURCE_LABELS[source] ??
+  source
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) =>
+      part.length <= 4
+        ? part.toUpperCase()
+        : `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`,
+    )
+    .join(" ");
+
+const parseBoundedMediaModelId = (value: unknown) => {
+  const modelRef = typeof value === "string" ? value.trim() : "";
+  const separator = modelRef.indexOf(":");
+  if (separator <= 0) return null;
+
+  const source = modelRef.slice(0, separator);
+  const model = modelRef.slice(separator + 1).trim();
+  if (
+    source === "auto" ||
+    !MULTILLM_MEDIA_SOURCE_PATTERN.test(source) ||
+    !MULTILLM_MEDIA_MODEL_PATTERN.test(model)
+  ) {
+    return null;
+  }
+  return { source, model };
+};
+
+export const usesUnifiedMultiLlmImageSource = (source: string) =>
+  !NATIVE_IMAGE_SOURCES.has(source);
 
 const isRecord = (value: unknown): value is ModelRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -338,24 +371,36 @@ export const normalizeModelOptions = (
     const catalogRecord = withProviderMetadata(record);
     const rawId = modelIdentity(record);
     if (!rawId) continue;
+    const unifiedMediaModel =
+      options.kind && !options.source
+        ? parseBoundedMediaModelId(rawId)
+        : null;
+    if (options.kind && !options.source && !unifiedMediaModel) continue;
+    const source = options.source ?? unifiedMediaModel?.source;
+    const sourcePrefix = source ? `${source}:` : "";
     const sourceModelId = options.source
-      ? rawId.replace(new RegExp(`^${options.source}:`, "i"), "")
-      : rawId;
-    const id = options.source
-      ? `${options.source}:${sourceModelId}`
-      : sourceModelId;
-    const label = options.source
-      ? `${SOURCE_LABELS[options.source]} · ${modelLabel(record, sourceModelId)}`
-      : modelLabel(record, sourceModelId);
+      ? rawId.toLowerCase().startsWith(sourcePrefix)
+        ? rawId.slice(sourcePrefix.length)
+        : rawId
+      : unifiedMediaModel?.model ?? rawId;
+    const id = source ? `${source}:${sourceModelId}` : sourceModelId;
+    const rawLabel = modelLabel(record, sourceModelId);
+    const unscopedLabel =
+      source && rawLabel.toLowerCase().startsWith(sourcePrefix)
+        ? rawLabel.slice(sourcePrefix.length)
+        : rawLabel;
+    const label = source
+      ? `${sourceLabel(source)} · ${unscopedLabel}`
+      : unscopedLabel;
     const kind = options.kind ?? "chat";
     const usesLinkApiImageChat =
       kind === "image" &&
-      options.source === "linkapi" &&
+      source === "linkapi" &&
       isLinkApiChatImageModel(rawId);
     const upstreamEndpoint = asString(catalogRecord.endpoint);
     const usesNavyImageChat =
       kind === "image" &&
-      options.source === "navyai" &&
+      source === "navyai" &&
       (upstreamEndpoint.toLowerCase().includes("/v1/chat/completions") ||
         isGeminiChatImageModel(rawId)) &&
       modelSupportsKind(record, "image");
@@ -430,10 +475,10 @@ export const normalizeModelOptions = (
       kind === "image"
         ? {
             imageGeneration: true,
-            asyncJobs: options.source === "navyai" && !usesNavyImageChat,
+            asyncJobs: source === "navyai" && !usesNavyImageChat,
             size: true,
             aspectRatio:
-              options.source !== "linkapi" || usesImageChat,
+              source !== "linkapi" || usesImageChat,
             ...(usesImageChat
               ? { imageEdit: true, referenceImages: true }
               : {}),
@@ -485,12 +530,12 @@ export const normalizeModelOptions = (
           : {}),
       ...(supports ? { supports } : {}),
       ...(kind === "image" &&
-      (options.source === "linkapi" || usesNavyImageChat)
+      (source === "linkapi" || usesNavyImageChat || !NATIVE_IMAGE_SOURCES.has(source ?? ""))
         ? { maxReferenceImages: usesImageChat ? 5 : 0 }
         : {}),
       ...(kind === "video" ? { maxReferenceImages: 1 } : {}),
       ...(kind === "image" &&
-      options.source === "navyai" &&
+      source === "navyai" &&
       !usesNavyImageChat
         ? { maxOutputImages: 1, fixedOutputImages: 1 }
         : {}),
@@ -560,24 +605,13 @@ export const normalizeModelOptions = (
 };
 
 export const parseMediaModelId = (value: unknown) => {
-  const modelRef = asString(value);
-  const separator = modelRef.indexOf(":");
-  const source = modelRef.slice(0, separator);
-  const model = modelRef.slice(separator + 1).trim();
-
-  if (
-    (source !== "navyai" &&
-      source !== "nanogpt" &&
-      source !== "linkapi" &&
-      source !== "aihubmix") ||
-    !model
-  ) {
+  const parsed = parseBoundedMediaModelId(value);
+  if (!parsed) {
     throw new Error(
-      "Media model must include a navyai:, nanogpt:, linkapi:, or aihubmix: source prefix."
+      "Media model must include a bounded provider:model source prefix.",
     );
   }
-
-  return { source: source as MultiLlmMediaSource, model };
+  return parsed;
 };
 
 export const sanitizeImageInputUrls = (

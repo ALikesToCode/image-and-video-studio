@@ -15,19 +15,28 @@ test("GPT Image 2 uses the largest valid dimensions for the requested aspect", (
 });
 
 test("maximum quality forces GPT Image 2 size and high quality", () => {
-  assert.deepEqual(
-    resolveMaximumImageQualityRequest({
-      enabled: true,
-      provider: "multillm",
-      model: "aihubmix:gpt-image-2-free",
-      request: { aspectRatio: "16:9", size: "1024x1024", quality: "low" },
-    }),
-    {
-      aspectRatio: "16:9",
-      size: "3840x2160",
-      quality: "high",
-    },
-  );
+  for (const model of [
+    "aihubmix:gpt-image-2-free",
+    "gguu:gpt-image-2",
+  ]) {
+    assert.deepEqual(
+      resolveMaximumImageQualityRequest({
+        enabled: true,
+        provider: "multillm",
+        model,
+        request: {
+          aspectRatio: "16:9",
+          size: "1024x1024",
+          quality: "low",
+        },
+      }),
+      {
+        aspectRatio: "16:9",
+        size: "3840x2160",
+        quality: "high",
+      },
+    );
+  }
 });
 
 test("maximum quality preserves an aspect implied by selected dimensions", () => {

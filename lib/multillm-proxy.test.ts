@@ -393,7 +393,7 @@ test("does not treat audio-input chat models as speech generators", () => {
   );
 });
 
-test("parses only supported source-tagged media ids", () => {
+test("parses bounded source-tagged media ids", () => {
   assert.deepEqual(parseMediaModelId("nanogpt:hidream"), {
     source: "nanogpt",
     model: "hidream",
@@ -406,7 +406,17 @@ test("parses only supported source-tagged media ids", () => {
     source: "aihubmix",
     model: "gpt-image-2-free",
   });
+  assert.deepEqual(parseMediaModelId("gguu:gpt-image-2"), {
+    source: "gguu",
+    model: "gpt-image-2",
+  });
+  assert.deepEqual(parseMediaModelId("future-relay:artist/v2"), {
+    source: "future-relay",
+    model: "artist/v2",
+  });
   assert.throws(() => parseMediaModelId("hidream"), /source prefix/);
+  assert.throws(() => parseMediaModelId("../gguu:gpt-image-2"), /source prefix/);
+  assert.throws(() => parseMediaModelId("auto:gpt-image-2"), /source prefix/);
 });
 
 test("accepts only bounded HTTPS or image data references", () => {
