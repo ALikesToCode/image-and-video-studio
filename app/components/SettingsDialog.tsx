@@ -32,6 +32,7 @@ import {
 import { useState, type ChangeEvent } from "react";
 import type { Provider } from "@/lib/constants";
 import type { KeyStorageMode } from "@/lib/client/key-storage";
+import { MultiLlmUsagePanel } from "@/app/components/settings/MultiLlmUsagePanel";
 
 const formatUsd = (value: number | string) => {
     const parsed = typeof value === "number" ? value : Number(value);
@@ -101,7 +102,7 @@ export function SettingsDialog() {
                     <Settings className="h-5 w-5" />
                 </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[90vh] w-[95vw] overflow-y-auto sm:max-w-[560px]">
+            <DialogContent className="max-h-[90vh] w-[95vw] overflow-y-auto sm:max-w-[760px]">
                 <DialogHeader>
                     <DialogTitle>Settings</DialogTitle>
                     <DialogDescription>
@@ -462,6 +463,9 @@ export function SettingsDialog() {
                                 )}
                             </div>
                         </section>
+                    ) : null}
+                    {provider === "multillm" ? (
+                        <MultiLlmUsagePanel apiKey={apiKeys.multillm} />
                     ) : null}
                 </div>
                 <DialogFooter>

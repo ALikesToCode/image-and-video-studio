@@ -1,6 +1,6 @@
 # Provider Capabilities
 
-Last verified against the provider documentation, live model catalog, and application routes on 2026-08-24.
+Last verified against the provider documentation, live model catalog, and application routes on 2026-08-29.
 
 The capability foundation lives in `lib/providers`. Static entries in `lib/constants.ts` are fallbacks; provider catalogs replace or enrich them when live discovery succeeds. Unknown catalog values remain `null` or absent and are never treated as zero or `false`.
 
@@ -66,6 +66,7 @@ Official references: [overview](https://api.navy/docs), [models](https://api.nav
 - Reference images are limited to five validated HTTPS or image `data:` URLs. Hosted image downloads use bounded HTTPS/content-type/size validation. Provider failures preserve redacted error codes, parameters, request IDs, retry delays, and safe guidance for actionable UI diagnostics.
 - NavyAI and NanoGPT video submissions are polled by job ID until a terminal state. Processing jobs are never automatically resubmitted. Completed job downloads are re-resolved server-side and bounded before reaching the browser.
 - Audio generation uses the provider-specific OpenAI-compatible speech endpoint and streams the returned audio body without buffering it in application state.
+- Provider account usage is available in Settings when the user supplies a browser-held MultiLLM key. Studio aggregates the proxy's NavyAI usage plus NanoGPT usage, balance, and subscription endpoints, validates each section independently, and labels it as provider-reported data. A failed provider does not hide healthy sections. The shared deployment key is deliberately excluded from this private account route so a public Studio deployment cannot expose its operator's balances or quota. Process-local request telemetry remains in MultiLLM's authenticated Operations dashboard; OpenCode Go has no public quota endpoint, and roleplay metrics remain session-specific.
 - `MULTILLM_API_KEY` can remain a server-side environment secret. A browser-held key is also supported through the same key-storage modes as the direct providers. `PROXY_BASE_URL` or `MULTILLM_PROXY_BASE_URL` can override the default deployment origin.
 
 ## NanoGPT
