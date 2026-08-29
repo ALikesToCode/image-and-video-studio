@@ -56,6 +56,7 @@ import { ChutesChatModelDetails } from "./chutes-chat-model-details";
 import { ChutesChatMetrics } from "./chutes-chat-metrics";
 import { ChutesChatToolToggle } from "./chutes-chat-tool-toggle";
 import { ImagePipelineDialog } from "./image-pipeline-dialog";
+import { ModelCatalogAlert } from "./model-catalog-alert";
 import { formatCount } from "./chutes-chat-runtime";
 import {
   REASONING_EFFORT_OPTIONS,
@@ -103,6 +104,7 @@ type ChutesChatHeaderProps = {
   preferMaximumImageQuality: boolean;
   setPreferMaximumImageQuality: (enabled: boolean) => void;
   metrics: ChatMetricsSummary;
+  imageGenerationCallCeiling: number;
   orderedToolImageModels: string[];
   onTogglePipelineModel: (model: string) => void;
   onReorderPipelineModel: (
@@ -169,6 +171,7 @@ export function ChutesChatHeader({
   preferMaximumImageQuality,
   setPreferMaximumImageQuality,
   metrics,
+  imageGenerationCallCeiling,
   orderedToolImageModels,
   onTogglePipelineModel,
   onReorderPipelineModel,
@@ -253,6 +256,7 @@ export function ChutesChatHeader({
               metrics={metrics}
               preferMaximumImageQuality={preferMaximumImageQuality}
               setPreferMaximumImageQuality={setPreferMaximumImageQuality}
+              imageGenerationCallCeiling={imageGenerationCallCeiling}
             />
           </div>
         ) : null}
@@ -345,6 +349,16 @@ export function ChutesChatHeader({
         </div>
       </div>
 
+      {headerCollapsed && modelsError ? (
+        <div className="mx-auto w-full max-w-7xl">
+          <ModelCatalogAlert
+            message={modelsError}
+            compact
+            onReviewSetup={() => setHeaderCollapsed(false)}
+          />
+        </div>
+      ) : null}
+
       <div
         id="creator-setup"
         className={cn(
@@ -352,14 +366,7 @@ export function ChutesChatHeader({
           headerCollapsed && "hidden",
         )}
       >
-          {modelsError ? (
-            <p
-              role="alert"
-              className="text-xs font-medium text-destructive"
-            >
-              {modelsError}
-            </p>
-          ) : null}
+          {modelsError ? <ModelCatalogAlert message={modelsError} /> : null}
 
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-secondary p-2.5">
             {supportsReasoning ? (
@@ -437,6 +444,7 @@ export function ChutesChatHeader({
               orderedToolImageModels={orderedToolImageModels}
               onTogglePipelineModel={onTogglePipelineModel}
               onReorderPipelineModel={onReorderPipelineModel}
+              maxGenerationCalls={imageGenerationCallCeiling}
             />
 
             <ModelSearchSelect

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CircleAlert, Images, Sigma } from "lucide-react";
+import { Activity, CircleAlert, Images, Layers3, Sigma } from "lucide-react";
 
 import type { ChatMetricsSummary } from "@/lib/chat-metrics";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ type ChutesChatMetricsProps = {
   metrics: ChatMetricsSummary;
   preferMaximumImageQuality: boolean;
   setPreferMaximumImageQuality: (enabled: boolean) => void;
+  imageGenerationCallCeiling: number;
 };
 
 const compactNumber = new Intl.NumberFormat("en", {
@@ -26,6 +27,7 @@ export function ChutesChatMetrics({
   metrics,
   preferMaximumImageQuality,
   setPreferMaximumImageQuality,
+  imageGenerationCallCeiling,
 }: ChutesChatMetricsProps) {
   const workValue = metrics.activeWork
     ? `${metrics.activeWork} active${metrics.queuedWork ? ` · ${metrics.queuedWork} queued` : ""}`
@@ -72,6 +74,20 @@ export function ChutesChatMetrics({
             </dt>
             <dd className="text-xs font-semibold leading-4">
               {exactNumber.format(metrics.generatedOutputs)}
+            </dd>
+          </span>
+        </div>
+        <div
+          className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-3 text-foreground"
+          title="Maximum image-generation requests for one prompt with the current model and policy-recovery settings. Routine failures stop after one request."
+        >
+          <Layers3 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+          <span>
+            <dt className="text-[9px] font-semibold uppercase tracking-wide text-foreground/75">
+              Max calls
+            </dt>
+            <dd className="text-xs font-semibold leading-4">
+              {imageGenerationCallCeiling}
             </dd>
           </span>
         </div>

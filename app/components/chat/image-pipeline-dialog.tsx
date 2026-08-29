@@ -39,6 +39,7 @@ type ImagePipelineDialogProps = {
     model: string,
     direction: "up" | "down",
   ) => void;
+  maxGenerationCalls: number;
 };
 
 export function ImagePipelineDialog({
@@ -51,6 +52,7 @@ export function ImagePipelineDialog({
   orderedToolImageModels,
   onTogglePipelineModel,
   onReorderPipelineModel,
+  maxGenerationCalls,
 }: ImagePipelineDialogProps) {
   return (
     <Dialog>
@@ -59,8 +61,8 @@ export function ImagePipelineDialog({
           variant="ghost"
           size="icon"
           className="h-10 w-10 border border-border bg-background hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
-          title="Image tool pipeline"
-          aria-label="Image tool pipeline"
+          title="Image generation cost controls"
+          aria-label="Image generation cost controls"
           disabled={disabled}
         >
           <Layers3 className="h-4 w-4" aria-hidden="true" />
@@ -68,19 +70,19 @@ export function ImagePipelineDialog({
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Image tool pipeline</DialogTitle>
+          <DialogTitle>Image generation controls</DialogTitle>
           <DialogDescription>
-            Run selected image models in parallel with controlled retries.
+            Choose how many models and recovery attempts one prompt may use.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <label className="flex items-start justify-between gap-3 rounded-xl border border-border bg-secondary p-3">
             <span>
               <span className="block text-sm font-medium text-foreground">
-                Enable ordered pipeline
+                Compare multiple models
               </span>
               <span className="mt-1 block text-xs text-muted-foreground">
-                The requested model stays first, followed by selected fallbacks.
+                Each selected model gets its own generation request.
               </span>
             </span>
             <input
@@ -98,7 +100,7 @@ export function ImagePipelineDialog({
               htmlFor="chat-image-retries"
               className="text-sm font-medium text-foreground"
             >
-              Tries per model
+              Maximum attempts per model
             </label>
             <Select
               value={imageRetryAttempts.toString()}
@@ -113,10 +115,32 @@ export function ImagePipelineDialog({
                 {[1, 2, 3, 4].map((attempts) => (
                   <SelectItem key={attempts} value={attempts.toString()}>
                     {attempts}
+                    {attempts === 1
+                      ? " · lowest cost"
+                      : attempts === 2
+                        ? " · recommended"
+                        : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Only a policy rejection with a meaningfully rewritten prompt can
+              retry. Authentication, validation, timeout, and provider failures
+              stop after one request.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-foreground">
+            <p className="text-sm font-semibold">
+              Up to {maxGenerationCalls} image request
+              {maxGenerationCalls === 1 ? "" : "s"} per prompt
+            </p>
+            <p className="mt-1 text-xs leading-5 text-foreground/75">
+              This is a ceiling, not an estimate. Every selected model may
+              create a billable render; recovery attempts run only after a
+              repaired policy prompt.
+            </p>
           </div>
 
           <div className="max-h-80 space-y-2 overflow-y-auto pr-1">

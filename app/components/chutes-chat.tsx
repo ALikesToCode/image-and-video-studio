@@ -46,6 +46,7 @@ import {
 import { ChutesChatComposer } from "./chat/chutes-chat-composer";
 import { ChutesChatConversation } from "./chat/chutes-chat-conversation";
 import { ChutesChatHeader } from "./chat/chutes-chat-header";
+import { resolveImageGenerationCallCeiling } from "@/lib/generation-cost";
 import { runChatAudioTool } from "./chat/chutes-chat-audio-tool";
 import {
   runChatImageTool,
@@ -261,6 +262,11 @@ export function ChutesChat({
       }),
     [imageModels, imageModelOrder, imagePipelineEnabled, toolImageModel]
   );
+  const imageGenerationCallCeiling = resolveImageGenerationCallCeiling({
+    imageToolEnabled: toolSettings.image,
+    activeModelCount: activeToolImageModels.length,
+    maxAttemptsPerModel: imageRetryAttempts,
+  });
   const refreshNavyUsageAfterMediaTool = () => {
     if (provider !== "navy" || !onRefreshUsage) return;
     void Promise.resolve(onRefreshUsage()).catch(() => {
@@ -731,6 +737,7 @@ export function ChutesChat({
           preferMaximumImageQuality={preferMaximumImageQuality}
           setPreferMaximumImageQuality={setPreferMaximumImageQuality}
           metrics={chatMetrics}
+          imageGenerationCallCeiling={imageGenerationCallCeiling}
           orderedToolImageModels={
             orderedToolImageModels
           }
