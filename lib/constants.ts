@@ -1024,6 +1024,9 @@ export const TTS_VOICES = [
 ];
 export const TTS_FORMATS = ["mp3", "opus", "aac", "flac"];
 
+export const DEFAULT_MULTILLM_IMAGE_MODEL_ID =
+    "aihubmix:gpt-image-2-free";
+
 export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
     gemini: {
         image: GEMINI_IMAGE_MODELS[0].id,
@@ -1051,7 +1054,7 @@ export const DEFAULT_MODELS: Record<Provider, Record<Mode, string>> = {
         tts: NANOGPT_IMAGE_MODELS[0].id,
     },
     multillm: {
-        image: MULTILLM_IMAGE_MODELS[0].id,
+        image: DEFAULT_MULTILLM_IMAGE_MODEL_ID,
         video: MULTILLM_VIDEO_MODELS[0].id,
         tts: MULTILLM_AUDIO_MODELS[0].id,
     },

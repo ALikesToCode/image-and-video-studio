@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import {
     AUTO_IMAGE_OPTION,
     DEFAULT_MODELS,
+    DEFAULT_MULTILLM_IMAGE_MODEL_ID,
     GEMINI_IMAGE_MODELS,
     GEMINI_VIDEO_MODELS,
     CHUTES_IMAGE_MODELS,
@@ -1041,7 +1042,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [nanoGptChatModelsError, setNanoGptChatModelsError] = useState<string | null>(null);
     const [multiLlmChatModels, setMultiLlmChatModels] = useState<ModelOption[]>(MULTILLM_CHAT_MODELS);
     const [multiLlmChatModel, setMultiLlmChatModel] = useState(MULTILLM_CHAT_MODELS[0]?.id ?? "");
-    const [multiLlmToolImageModel, setMultiLlmToolImageModel] = useState(MULTILLM_IMAGE_MODELS[0]?.id ?? "");
+    const [multiLlmToolImageModel, setMultiLlmToolImageModel] = useState(
+        DEFAULT_MULTILLM_IMAGE_MODEL_ID
+    );
     const [multiLlmChatModelsLoading, setMultiLlmChatModelsLoading] = useState(false);
     const [multiLlmChatModelsError, setMultiLlmChatModelsError] = useState<string | null>(null);
 
