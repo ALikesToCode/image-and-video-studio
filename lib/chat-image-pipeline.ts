@@ -142,11 +142,13 @@ export const runImageModelPipelineParallel = async <T>({
   models,
   maxAttempts,
   runModel,
+  shouldRetry,
   onUpdate,
 }: {
   models: string[];
   maxAttempts: unknown;
   runModel: (model: string, state: ImageModelPipelineRunState) => Promise<T>;
+  shouldRetry?: (model: string, error: unknown) => boolean;
   onUpdate?: (update: ImageModelPipelineUpdate<T>) => void;
 }): Promise<
   | {
@@ -174,6 +176,7 @@ export const runImageModelPipelineParallel = async <T>({
             });
           },
           run: async (state) => await runModel(model, state),
+          shouldRetry: (error) => shouldRetry?.(model, error) ?? true,
           onError: ({ attempt, maxAttempts: attempts, error, final }) => {
             lastAttempt = attempt;
             if (!final) return;

@@ -509,6 +509,7 @@ export const runChatImageTool = async ({
       if (retryPrompt && retryPrompt !== currentPrompt) {
         request.prompt = retryPrompt;
         request.body.prompt = retryPrompt;
+        modelsWithPreparedPolicyRetry.add(targetModel);
       }
       throw error;
     }
@@ -516,10 +517,13 @@ export const runChatImageTool = async ({
 
   const normalizedRetryAttempts =
     normalizeImageRetryAttempts(imageRetryAttempts);
+  const modelsWithPreparedPolicyRetry = new Set<string>();
   const result = await runImageModelPipelineParallel({
     models: modelsToRun,
     maxAttempts: normalizedRetryAttempts,
     runModel: invokeImageModel,
+    shouldRetry: (targetModel) =>
+      modelsWithPreparedPolicyRetry.delete(targetModel),
     onUpdate: (update) => {
       const targetModel = update.model;
       const request = imageRequestByModel.get(targetModel);

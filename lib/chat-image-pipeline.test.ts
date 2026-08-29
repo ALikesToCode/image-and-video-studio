@@ -201,3 +201,22 @@ test("Image model parallel pipeline retries each failed model up to the configur
     ]
   );
 });
+
+test("Image model parallel pipeline stops when the failure is not retryable", async () => {
+  const calls: string[] = [];
+
+  const result = await runImageModelPipelineParallel({
+    models: ["gpt-image-2"],
+    maxAttempts: 4,
+    runModel: async (model) => {
+      calls.push(model);
+      throw new Error("Invalid API key");
+    },
+    shouldRetry: (_model, error) =>
+      error instanceof Error && error.message.includes("policy"),
+  });
+
+  assert.equal(result.status, "rejected");
+  assert.deepEqual(calls, ["gpt-image-2"]);
+  assert.equal(result.errors[0]?.attempts, 1);
+});

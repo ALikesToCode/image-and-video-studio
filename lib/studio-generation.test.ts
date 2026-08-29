@@ -791,8 +791,8 @@ test("Image model order persistence keeps temporarily unavailable model ids", ()
 });
 
 test("Image retry attempts normalize to a bounded tries count", () => {
-  assert.equal(normalizeImageRetryAttempts(undefined), 4);
-  assert.equal(normalizeImageRetryAttempts(0), 4);
+  assert.equal(normalizeImageRetryAttempts(undefined), 2);
+  assert.equal(normalizeImageRetryAttempts(0), 2);
   assert.equal(normalizeImageRetryAttempts("3"), 3);
   assert.equal(normalizeImageRetryAttempts(4.8), 4);
   assert.equal(normalizeImageRetryAttempts(99), 8);

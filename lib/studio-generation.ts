@@ -104,7 +104,7 @@ type NavyChatImageSizing = {
   size?: string;
 };
 
-export const DEFAULT_IMAGE_RETRY_ATTEMPTS = 4;
+export const DEFAULT_IMAGE_RETRY_ATTEMPTS = 2;
 export const MAX_IMAGE_RETRY_ATTEMPTS = 8;
 export const NAVY_JOB_POLL_INTERVAL_MS = 5000;
 export const NAVY_JOB_POLL_MAX_ATTEMPTS = 120;
