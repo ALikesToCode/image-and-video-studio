@@ -68,14 +68,14 @@ export function ImagePipelineDialog({
           <Layers3 className="h-4 w-4" aria-hidden="true" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="left-1/2 right-auto flex w-[calc(100%-2rem)] -translate-x-1/2 flex-col overflow-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Image generation controls</DialogTitle>
           <DialogDescription>
             Choose how many models and recovery attempts one prompt may use.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
           <label className="flex items-start justify-between gap-3 rounded-xl border border-border bg-secondary p-3">
             <span>
               <span className="block text-sm font-medium text-foreground">
@@ -143,7 +143,7 @@ export function ImagePipelineDialog({
             </p>
           </div>
 
-          <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+          <div className="space-y-2">
             {imageModels.map((suggestion) => {
               const index = orderedToolImageModels.indexOf(suggestion.id);
               const selected = index !== -1;
