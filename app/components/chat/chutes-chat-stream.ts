@@ -12,6 +12,7 @@ import {
   isDeepSeekV4Model,
   toChatCompletionMessages,
 } from "@/lib/chat-completion";
+import { selectChatContextMessages } from "@/lib/chat-context-budget";
 import { readAssistantTextResponseResult } from "@/lib/client/chat-stream-text";
 import {
   resolvePromptRewriteOutputTokenBudgets,
@@ -156,7 +157,7 @@ export const createChatStreamClient = ({
             messages: [
               { role: "system", content: systemPrompt },
               ...toChatCompletionMessages(
-                items.filter((item) => !item.transient),
+                selectChatContextMessages(items),
                 {
                   includeReasoningContent:
                     provider === "navy" ||
