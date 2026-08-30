@@ -364,6 +364,7 @@ test("MultiLLM native Navy images use the one-image payload contract", async () 
         assert.equal(upstreamBody.sync, true);
         assert.equal(upstreamBody.seed, 42);
         assert.equal("style" in upstreamBody, false);
+        assert.equal("moderation" in upstreamBody, false);
         assert.match(String(upstreamBody.prompt), /A lighthouse in a storm/);
         assert.match(String(upstreamBody.prompt), /artifact-free rendering/i);
         assert.deepEqual(await response.json(), {
@@ -438,10 +439,14 @@ test("MultiLLM sends AIHubMix image models through unified generation", async ()
           upstreamBodies.map((body) => ({
             size: body.size,
             quality: body.quality,
+            moderation: body.moderation,
           })),
           requests.map((request) => ({
             size: request.size,
             quality: "high",
+            moderation: request.model.includes("gpt-image-")
+              ? "low"
+              : undefined,
           })),
         );
       },
@@ -592,6 +597,7 @@ test("MultiLLM generates LinkAPI gpt-image-2-c images through the proxy", async 
           response_format: "url",
           size: "1024x1024",
           quality: "standard",
+          moderation: "low",
           style: "vivid",
         });
         assert.deepEqual(await response.json(), {

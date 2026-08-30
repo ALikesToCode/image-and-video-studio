@@ -12,6 +12,7 @@ import {
   jsonBodyErrorDetails,
   readJsonRequestObject,
 } from "@/lib/server/json-body";
+import { applyImageModerationDefault } from "@/lib/image-moderation";
 import {
   hasMediaReferencePayload,
   normalizeImageReferencePayload,
@@ -583,21 +584,24 @@ export async function POST(req: Request) {
             aspectRatio,
             outputModalities: body.outputModalities,
           })
-        : buildNavyImageGenerationPayload({
+        : applyImageModerationDefault(
             model,
-            prompt: requestPrompt,
-            size,
-            numberOfImages,
-            quality,
-            style,
-            imageUrl,
-            negativePrompt,
-            seed,
-            seconds,
-            sync: false,
-            responseFormat,
-            aspectRatio,
-          })
+            buildNavyImageGenerationPayload({
+              model,
+              prompt: requestPrompt,
+              size,
+              numberOfImages,
+              quality,
+              style,
+              imageUrl,
+              negativePrompt,
+              seed,
+              seconds,
+              sync: false,
+              responseFormat,
+              aspectRatio,
+            })
+          )
     ),
   });
 

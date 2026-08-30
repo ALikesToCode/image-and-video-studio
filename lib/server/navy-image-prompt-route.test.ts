@@ -6,6 +6,7 @@ import { POST as navyImagePost } from "../../app/api/navy/image/route.ts";
 test("Navy image route retries flagged OpenAI image prompts with safer wording", async () => {
   const originalFetch = globalThis.fetch;
   const prompts: string[] = [];
+  const moderationValues: unknown[] = [];
   globalThis.fetch = async (_input, init) => {
     const requestBody =
       typeof init?.body === "string"
@@ -13,6 +14,7 @@ test("Navy image route retries flagged OpenAI image prompts with safer wording",
         : {};
     if (typeof requestBody.prompt === "string") {
       prompts.push(requestBody.prompt);
+      moderationValues.push(requestBody.moderation);
     }
     if (prompts.length === 1) {
       return Response.json(
@@ -42,6 +44,7 @@ test("Navy image route retries flagged OpenAI image prompts with safer wording",
     assert.equal(response.status, 200);
     assert.deepEqual(payload, { id: "job_safe", status: "queued" });
     assert.equal(prompts.length, 2);
+    assert.deepEqual(moderationValues, ["low", "low"]);
     assert.match(
       prompts[0] ?? "",
       /Create a glamorous nightclub editorial portrait\./
@@ -336,4 +339,3 @@ test("Navy image route discards every partial rewrite and preserves the source p
     globalThis.fetch = originalFetch;
   }
 });
-

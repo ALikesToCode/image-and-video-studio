@@ -18,6 +18,7 @@ import {
   readJsonResponse,
   readJsonRequestObject,
 } from "@/lib/server/json-body";
+import { applyImageModerationDefault } from "@/lib/image-moderation";
 import { safeFetchExternalMedia } from "@/lib/server/safe-fetch";
 import { readBoundedMediaBody } from "@/lib/server/media-response";
 import { buildNavyImageGenerationPayload } from "@/lib/studio-generation";
@@ -238,7 +239,7 @@ export async function POST(request: Request) {
           : {}),
       }
     : source === "navyai"
-      ? {
+      ? applyImageModerationDefault(model, {
           ...navyNativeParameters(parameters),
           ...buildNavyImageGenerationPayload({
             model,
@@ -258,8 +259,8 @@ export async function POST(request: Request) {
             responseFormat: "b64_json",
             aspectRatio: body.aspectRatio,
           }),
-        }
-      : {
+        })
+      : applyImageModerationDefault(model, {
           ...parameters,
           model: usesUnifiedImageGeneration ? `${source}:${model}` : model,
           prompt,
@@ -282,7 +283,7 @@ export async function POST(request: Request) {
                   imageInputs.length === 1 ? imageInputs[0] : imageInputs,
               }
             : {}),
-        };
+        });
 
   const upstreamPath = usesUnifiedImageGeneration
     ? "/v1/images/generations"

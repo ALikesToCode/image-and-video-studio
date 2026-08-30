@@ -132,6 +132,7 @@ test("routes newly discovered image providers through unified generation", async
         assert.equal(upstreamBody.model, "gguu:gpt-image-2");
         assert.equal(upstreamBody.size, "3840x2160");
         assert.equal(upstreamBody.quality, "high");
+        assert.equal(upstreamBody.moderation, "low");
         assert.deepEqual(await response.json(), {
           images: [{ data: "aGVsbG8=", mimeType: "image/png" }],
         });
