@@ -1,3 +1,5 @@
+import { runIndexedDbTransaction } from "./client/indexed-db.ts";
+
 const DB_NAME = "studio-state";
 const DB_VERSION = 1;
 const STORE_NAME = "state";
@@ -30,35 +32,7 @@ const runStateTransaction = async <T>(
   callback: (store: IDBObjectStore) => IDBRequest<T>
 ) => {
   const db = await openStateDb();
-  return await new Promise<T>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
-    const store = transaction.objectStore(STORE_NAME);
-    const request = callback(store);
-    let settled = false;
-
-    request.onsuccess = () => {
-      settled = true;
-      resolve(request.result);
-    };
-    request.onerror = () => {
-      settled = true;
-      reject(request.error ?? new Error("IndexedDB request failed."));
-    };
-
-    transaction.onabort = () => {
-      if (settled) return;
-      settled = true;
-      reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
-    };
-    transaction.onerror = () => {
-      if (settled) return;
-      settled = true;
-      reject(transaction.error ?? new Error("IndexedDB transaction failed."));
-    };
-    transaction.oncomplete = () => {
-      settled = true;
-    };
-  });
+  return await runIndexedDbTransaction(db, STORE_NAME, mode, callback);
 };
 
 export const putStudioState = async (key: string, value: unknown) => {

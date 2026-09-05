@@ -1,3 +1,5 @@
+import { runIndexedDbTransaction } from "./client/indexed-db.ts";
+
 const DB_NAME = "studio-gallery";
 const DB_VERSION = 2;
 const LEGACY_BLOB_STORE = "images";
@@ -57,35 +59,7 @@ const runGalleryTransaction = async <T>(
   callback: (store: IDBObjectStore) => IDBRequest<T>
 ) => {
   const db = await openGalleryDb();
-  return await new Promise<T>((resolve, reject) => {
-    const transaction = db.transaction(storeName, mode);
-    const store = transaction.objectStore(storeName);
-    const request = callback(store);
-    let settled = false;
-
-    request.onsuccess = () => {
-      settled = true;
-      resolve(request.result);
-    };
-    request.onerror = () => {
-      settled = true;
-      reject(request.error ?? new Error("IndexedDB request failed."));
-    };
-
-    transaction.onabort = () => {
-      if (settled) return;
-      settled = true;
-      reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
-    };
-    transaction.onerror = () => {
-      if (settled) return;
-      settled = true;
-      reject(transaction.error ?? new Error("IndexedDB transaction failed."));
-    };
-    transaction.oncomplete = () => {
-      settled = true;
-    };
-  });
+  return await runIndexedDbTransaction(db, storeName, mode, callback);
 };
 
 export const putGalleryBlob = async (id: string, blob: Blob) => {
