@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { exportGalleryBackup, galleryAssetBlob, mergeGalleryImport, parseGalleryBackup } from "./gallery-backup.ts";
 import type { StoredMedia } from "./types.ts";
 
-const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgSDvzHwADzgIyupqDXwAAAABJRU5ErkJggg==";
 const item: StoredMedia = { id: "test-image", kind: "image", provider: "multillm", model: "gguu:image", prompt: "A red pixel", createdAt: "2026-09-05T00:00:00.000Z", dataUrl: "blob:temporary" };
 
 test("portable export embeds actual image bytes and preserves metadata", async () => {
