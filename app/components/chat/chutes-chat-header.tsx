@@ -313,6 +313,7 @@ export function ChutesChatHeader({
                 placeholder="Select a model"
                 title="Chat Model"
                 ariaLabel="Chat Model"
+                favoritesScope={`${provider}:chat`}
                 triggerClassName="w-full xl:w-[240px]"
               />
           </div>
@@ -414,6 +415,7 @@ export function ChutesChatHeader({
               placeholder="Image model"
               title="Image Tool Model"
               ariaLabel="Image Tool Model"
+                favoritesScope={`${provider}:image`}
               disabled={
                 !toolSettings.image ||
                 !imageModels.length
@@ -455,6 +457,7 @@ export function ChutesChatHeader({
               placeholder="Video model"
               title="Video Tool Model"
               ariaLabel="Video Tool Model"
+                favoritesScope={`${provider}:video`}
               disabled={
                 !toolSettings.video ||
                 !videoModels.length
@@ -476,6 +479,7 @@ export function ChutesChatHeader({
               placeholder="Audio model"
               title="Audio Tool Model"
               ariaLabel="Audio Tool Model"
+                favoritesScope={`${provider}:tts`}
               disabled={
                 !toolSettings.audio ||
                 !audioModels.length

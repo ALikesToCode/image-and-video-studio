@@ -15,6 +15,7 @@ import {
   Gauge,
   RefreshCw,
   Search,
+  Star,
 } from "lucide-react";
 
 import { Button } from "@/app/components/ui/button";
@@ -27,6 +28,8 @@ import {
   isFetchedOnlyModel,
 } from "@/lib/model-options";
 import type { NavyUsageResponse } from "@/lib/types";
+import { useModelFavorites } from "@/app/hooks/use-model-favorites";
+import { sortFavoriteModels } from "@/lib/model-favorites";
 import { cn } from "@/lib/utils";
 
 import {
@@ -118,6 +121,7 @@ export function ModelSearchSelect({
   compact = false,
   disabled = false,
   footer,
+  favoritesScope,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -131,9 +135,11 @@ export function ModelSearchSelect({
   compact?: boolean;
   disabled?: boolean;
   footer?: ReactNode;
+  favoritesScope?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const { favorites, toggle, error: favoritesError } = useModelFavorites(favoritesScope ?? ariaLabel);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -148,8 +154,8 @@ export function ModelSearchSelect({
     (model) => model.id === value,
   );
   const filteredOptions = useMemo(
-    () => filterModelOptions(options, query),
-    [options, query],
+    () => sortFavoriteModels(filterModelOptions(options, query), favorites),
+    [options, query, favorites],
   );
 
   useEffect(() => {
@@ -218,7 +224,8 @@ export function ModelSearchSelect({
 
   useEffect(() => {
     if (!open) return;
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   const selectedFetchedOnly = selectedModel
@@ -299,6 +306,13 @@ export function ModelSearchSelect({
                   />
                 </div>
               </div>
+              <div className="px-2 pb-2">
+                <Button type="button" size="sm" variant="ghost" disabled={!value} aria-pressed={favorites.has(value)} onClick={() => toggle(value)}>
+                  <Star className="mr-2 h-4 w-4" fill={favorites.has(value) ? "currentColor" : "none"} />
+                  {favorites.has(value) ? "Remove favorite" : "Favorite selected model"}
+                </Button>
+                {favoritesError && <p role="alert" className="text-xs text-destructive">{favoritesError}</p>}
+              </div>
               <div
                 className="max-h-72 overflow-y-auto p-1"
                 role="listbox"
@@ -339,7 +353,7 @@ export function ModelSearchSelect({
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                             <span className="truncate font-medium">
-                              {modelOption.label}
+                              {favorites.has(modelOption.id) ? "★ " : ""}{modelOption.label}
                             </span>
                             {fetchedOnly ? (
                               <span className="rounded-full bg-primary/12 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
