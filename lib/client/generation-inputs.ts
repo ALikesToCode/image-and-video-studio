@@ -36,3 +36,33 @@ export const videoSourceFromSnapshot = (
   references.find((reference) => reference.role === "first_frame") ??
   references[0]
 )?.dataUrl || null;
+
+export const buildNavyImageUrlPayload = (
+    referenceImages: Array<{ dataUrl: string; role?: string }>,
+    primaryImage?: string | null
+) => {
+    const ordered = [
+        ...(primaryImage ? [{ dataUrl: primaryImage, role: "source_image" }] : []),
+        ...referenceImages.filter(
+            (reference) =>
+                reference.role === "source_image" ||
+                reference.role === "first_frame" ||
+                reference.role === "last_frame"
+        ),
+        ...referenceImages.filter(
+            (reference) =>
+                reference.role !== "source_image" &&
+                reference.role !== "first_frame" &&
+                reference.role !== "last_frame"
+        ),
+    ];
+    const urls: string[] = [];
+    for (const reference of ordered) {
+        const url = reference.dataUrl.trim();
+        if (!url || urls.includes(url)) continue;
+        urls.push(url);
+        if (urls.length >= 5) break;
+    }
+    if (!urls.length) return undefined;
+    return urls.length === 1 ? urls[0] : urls;
+};

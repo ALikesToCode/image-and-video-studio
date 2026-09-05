@@ -49,7 +49,6 @@ import { useGenerationQueueControls } from "@/app/hooks/use-generation-queue-con
 import { isChatProvider } from "@/lib/chat-providers";
 import {
     type GeneratedImage,
-    type GenerationBilling,
     type NanoGptAccountResponse,
     type NavyModelHealth,
     type NavyUsageResponse,
@@ -59,7 +58,7 @@ import {
     type StoredReference,
 } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
-import { parseOptionalSeed, snapshotGenerationReferences, videoSourceFromSnapshot, type GenerationReference } from "@/lib/client/generation-inputs";
+import { buildNavyImageUrlPayload, parseOptionalSeed, snapshotGenerationReferences, videoSourceFromSnapshot, type GenerationReference } from "@/lib/client/generation-inputs";
 import {
     extractOpenRouterImageModels,
     getQueuedJobsToStart,
@@ -70,9 +69,7 @@ import {
     NAVY_JOB_POLL_INTERVAL_MS,
     NAVY_JOB_POLL_MAX_ATTEMPTS,
     resolveNavyJobPollDelayMs,
-    resolveImageSizingOptions,
     resolveImageGenerationModelPipeline,
-    retryAsyncOperation,
     isGptImage2Model,
     isValidGptImage2Size,
     isValidNavyImagePixelSize,
@@ -111,12 +108,8 @@ import {
     shouldPersistRemoteGenerationJob,
 } from "@/lib/generation-job-persistence";
 import { sanitizeMediaUrl } from "@/lib/media-url";
-import { resolveImageSubmissionAttempts } from "@/lib/image-submission-policy";
-import {
-    isRetryableImageSubmissionError,
-    submitImageRequest,
-    waitForImageSubmissionRetry,
-} from "@/lib/client/image-submission";
+import { requestGeneratedImages } from "@/lib/client/image-generation";
+import { generationMetadataFromPayload } from "@/lib/client/generation-results";
 import { resolveMaximumImageQualityRequest } from "@/lib/image-quality";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
 import {
@@ -244,7 +237,6 @@ type GenerateOptions = {
 const MAX_CACHED_MODELS = 500;
 const MAX_SAVED_MEDIA = 250;
 const MAX_REFERENCES = 24;
-const MAX_NAVY_REFERENCE_IMAGES = 5;
 
 // --- Utils ---
 
@@ -256,36 +248,6 @@ const yieldToPaint = () =>
         }
         setTimeout(resolve, 0);
     });
-
-const buildNavyImageUrlPayload = (
-    referenceImages: Array<{ dataUrl: string; role?: string }>,
-    primaryImage?: string | null
-) => {
-    const ordered = [
-        ...(primaryImage ? [{ dataUrl: primaryImage, role: "source_image" }] : []),
-        ...referenceImages.filter(
-            (reference) =>
-                reference.role === "source_image" ||
-                reference.role === "first_frame" ||
-                reference.role === "last_frame"
-        ),
-        ...referenceImages.filter(
-            (reference) =>
-                reference.role !== "source_image" &&
-                reference.role !== "first_frame" &&
-                reference.role !== "last_frame"
-        ),
-    ];
-    const urls: string[] = [];
-    for (const reference of ordered) {
-        const url = reference.dataUrl.trim();
-        if (!url || urls.includes(url)) continue;
-        urls.push(url);
-        if (urls.length >= MAX_NAVY_REFERENCE_IMAGES) break;
-    }
-    if (!urls.length) return undefined;
-    return urls.length === 1 ? urls[0] : urls;
-};
 
 const readLocalStorage = <T,>(key: string, fallback: T): T => {
     if (typeof window === "undefined") return fallback;
@@ -604,52 +566,11 @@ const sanitizeStoredModelParameterValues = (
     return result;
 };
 
-const buildGeneratedImages = (payload: unknown): GeneratedImage[] => {
-    const record = isRecord(payload) ? payload : {};
-    const rawImages = Array.isArray(record.images) ? record.images : [];
-    return rawImages
-        .map((image) => {
-            if (!isRecord(image)) return null;
-            const data = getString(image.data);
-            const url = getString(image.url);
-            if (!data && !url) return null;
-            const mimeType = getString(image.mimeType, "image/png");
-            return {
-                id: createId(),
-                dataUrl: data ? dataUrlFromBase64(data, mimeType) : url,
-                mimeType,
-            };
-        })
-        .filter((image): image is GeneratedImage => image !== null);
-};
-
 const errorMessageFromPayload = (
     payload: unknown,
     fallback: string,
     status?: number,
 ) => formatProviderErrorForDisplay(payload, { fallback, status });
-
-const generationMetadataFromPayload = (payload: unknown) => {
-    const root = isRecord(payload) ? payload : {};
-    const rawBilling = isRecord(root.billing) ? root.billing : root;
-    const billing: GenerationBilling = {};
-    if (typeof rawBilling.cost === "number" && Number.isFinite(rawBilling.cost)) {
-        billing.cost = rawBilling.cost;
-    }
-    if (typeof rawBilling.paymentSource === "string" && rawBilling.paymentSource) {
-        billing.paymentSource = rawBilling.paymentSource;
-    }
-    if (
-        typeof rawBilling.remainingBalance === "number" &&
-        Number.isFinite(rawBilling.remainingBalance)
-    ) {
-        billing.remainingBalance = rawBilling.remainingBalance;
-    }
-    return {
-        billing: Object.keys(billing).length ? billing : undefined,
-        requestId: typeof root.requestId === "string" ? root.requestId : undefined,
-    };
-};
 
 const toPersistedJob = (job: GenerationJob): PersistedGenerationJob => ({
     id: job.id,
@@ -1515,295 +1436,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const generateImages = async (job: GenerationJob) => {
         startJob(job, "Generating image...");
         try {
-            const requestHeaders = {
-                "Content-Type": "application/json",
-                "x-user-api-key": job.apiKey,
-            };
             const referenceImages = job.referenceImages ?? await snapshotGenerationReferences(job.referenceIds ?? [], references, fetchAsDataUrl);
-            const imageSizing = resolveImageSizingOptions(job.provider, {
-                imageAspect: job.imageAspect,
-                imageSize: job.imageSize,
-                navyImageSize: job.navyImageSize,
-            });
-            let generationBilling: GenerationBilling | undefined;
-            let providerRequestId: string | undefined;
-
-            const images = await retryAsyncOperation<GeneratedImage[]>({
-                maxAttempts: resolveImageSubmissionAttempts({
-                    provider: job.provider,
-                    model: job.model,
-                    remoteJobId: job.remoteJobId,
-                    configuredAttempts: job.imageRetryAttempts ?? DEFAULT_IMAGE_RETRY_ATTEMPTS,
-                }),
-                shouldRetry: (error) => job.provider !== "multillm" || isRetryableImageSubmissionError(error),
-                beforeRetry: async ({ error, attempt }) => {
-                    await waitForImageSubmissionRetry(error, attempt);
-                },
-                onAttempt: ({ attempt, maxAttempts }) => {
-                    if (maxAttempts <= 1) return;
-                    updateJob(job.id, {
-                        progress: `Generating image with ${job.model} (try ${attempt}/${maxAttempts})...`,
-                    });
-                },
-                onError: ({ attempt, maxAttempts, error, final }) => {
-                    if (final) return;
-                    const message =
-                        error instanceof Error ? error.message : "Image generation failed.";
-                    updateJob(job.id, {
-                        progress: `Retrying ${job.model} after try ${attempt}/${maxAttempts}: ${message}`,
-                    });
-                },
-                run: async ({ attempt, maxAttempts }) => {
-                    const attemptLabel =
-                        maxAttempts > 1 ? ` (try ${attempt}/${maxAttempts})` : "";
-                    let images: GeneratedImage[] = [];
-                    let url = `/api/${job.provider}/image`;
-                    let body: Record<string, unknown> = {
-                        model: job.model,
-                        prompt: job.prompt,
-                    };
-
-                    if (job.provider === "gemini") {
-                        body = {
-                            ...body,
-                            ...imageSizing,
-                            numberOfImages: job.imageCount,
-                            referenceImages,
-                        };
-                    } else if (job.provider === "openrouter") {
-                        body = {
-                            ...body,
-                            ...imageSizing,
-                            outputModalities: job.outputModalities,
-                            referenceImages,
-                        };
-                    } else if (job.provider === "navy") {
-                        const imageUrl = buildNavyImageUrlPayload(referenceImages);
-                        body = {
-                            ...body,
-                            ...imageSizing,
-                            quality: job.navyImageQuality,
-                            negativePrompt: job.negativePrompt,
-                            promptAgentModel: job.promptAgentModel,
-                            modelEndpoint: job.modelEndpoint,
-                            outputModalities: job.outputModalities,
-                            imageUrl,
-                            sync: false,
-                        };
-                    } else if (job.provider === "multillm") {
-                        body = {
-                            ...body,
-                            ...imageSizing,
-                            numberOfImages: job.imageCount,
-                            quality: job.navyImageQuality,
-                            negativePrompt: job.negativePrompt,
-                            modelEndpoint: job.modelEndpoint,
-                            outputModalities: job.outputModalities,
-                            imageDataUrls: referenceImages.map(
-                                (reference) => reference.dataUrl
-                            ),
-                            parameters: job.modelParameters,
-                            sync: false,
-                        };
-                    } else if (job.provider === "nanogpt") {
-                        const selectedNanoGptModel = nanoGptImageModels.find(
-                            (entry) => entry.id === job.model
-                        );
-                        const catalogParameters = job.modelParameters ?? {};
-                        const supportsReferenceImages =
-                            selectedNanoGptModel?.supports?.referenceImages === true;
-                        const maxReferenceImages = supportsReferenceImages
-                            ? selectedNanoGptModel?.maxReferenceImages ?? 1
-                            : 0;
-                        const catalogResolution =
-                            typeof catalogParameters.resolution === "string"
-                                ? catalogParameters.resolution
-                                : "";
-                        const requestedResolution =
-                            catalogResolution ||
-                            (job.imageSize && job.imageSize !== AUTO_IMAGE_OPTION
-                                ? job.imageSize
-                                : job.chutesResolution ?? "");
-                        const supportedResolutions =
-                            selectedNanoGptModel?.supportedResolutions ?? [];
-                        const resolution =
-                            !supportedResolutions.length ||
-                                supportedResolutions.includes(requestedResolution)
-                                ? requestedResolution
-                                : supportedResolutions.includes(AUTO_IMAGE_OPTION)
-                                    ? AUTO_IMAGE_OPTION
-                                    : supportedResolutions[0];
-                        body = {
-                            ...body,
-                            parameters: catalogParameters,
-                            resolution,
-                            numberOfImages: job.imageCount,
-                            input_references: referenceImages
-                                .slice(0, maxReferenceImages)
-                                .map((reference) => reference.dataUrl),
-                            seed: selectedNanoGptModel?.supports?.seed
-                                ? typeof catalogParameters.seed === "number"
-                                    ? catalogParameters.seed
-                                    : parseOptionalSeed(job.chutesSeed)
-                                : null,
-                            modelCapabilities: {
-                                supportedResolutions,
-                                maxOutputImages: selectedNanoGptModel?.maxOutputImages,
-                                fixedOutputImages: selectedNanoGptModel?.fixedOutputImages,
-                                maxReferenceImages,
-                                supportsReferenceImages,
-                            },
-                        };
-                    } else {
-                        url = "/api/chutes/image";
-                        body = {
-                            ...body,
-                            negativePrompt: job.negativePrompt,
-                            guidanceScale: Number(job.chutesGuidanceScale),
-                            width: Number(job.chutesWidth),
-                            height: Number(job.chutesHeight),
-                            numInferenceSteps: Number(job.chutesSteps),
-                            resolution: job.chutesResolution,
-                            seed: parseOptionalSeed(job.chutesSeed),
-                        };
-                    }
-
-                    let payload: Record<string, unknown> = {};
-                    if (
-                        (job.provider === "navy" ||
-                            job.provider === "multillm") &&
-                        job.remoteJobId
-                    ) {
-                        updateJob(job.id, {
-                            progress: `Resuming ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job ${job.remoteJobId}...`,
-                        });
-                        payload = { id: job.remoteJobId };
-                    } else {
-                        updateJob(job.id, {
-                            progress: `Submitting image request to ${job.model}${attemptLabel}...`,
-                        });
-                        payload = await submitImageRequest(url, {
-                            headers: requestHeaders,
-                            body: JSON.stringify(body),
-                        });
-                    }
-
-                    if (
-                        job.provider === "navy" ||
-                        job.provider === "multillm"
-                    ) {
-                        let navyPayload = payload;
-                        const existingJobId = job.remoteJobId;
-                        const submittedJobId =
-                            typeof payload?.id === "string" ? payload.id : existingJobId;
-                        if (typeof submittedJobId === "string" && submittedJobId) {
-                            updateJob(job.id, {
-                                remoteJobId: submittedJobId,
-                                remoteStatus:
-                                    typeof payload?.status === "string" ? payload.status : undefined,
-                            });
-                            let delayMs = NAVY_JOB_POLL_INTERVAL_MS;
-                            let didComplete = Boolean(navyPayload?.done);
-                            for (let pollAttempt = 0; pollAttempt < NAVY_JOB_POLL_MAX_ATTEMPTS && !didComplete; pollAttempt += 1) {
-                                updateJob(job.id, {
-                                    progress: `Waiting for ${job.provider === "navy" ? "Navy" : "MultiLLM"} image render${attemptLabel} (${pollAttempt + 1}/${NAVY_JOB_POLL_MAX_ATTEMPTS})...`,
-                                });
-                                await sleep(delayMs);
-                                const source =
-                                    job.model.startsWith("nanogpt:")
-                                        ? "nanogpt"
-                                        : "navyai";
-                                const pollUrl =
-                                    job.provider === "multillm"
-                                        ? `/api/multillm/image?id=${encodeURIComponent(submittedJobId)}&source=${source}`
-                                        : `/api/navy/image?id=${encodeURIComponent(submittedJobId)}`;
-                                const pollResponse = await fetch(
-                                    pollUrl,
-                                    {
-                                        headers: {
-                                            "x-user-api-key": job.apiKey,
-                                        },
-                                    }
-                                );
-                                navyPayload = await pollResponse.json();
-                                if (!pollResponse.ok && pollResponse.status !== 429) {
-                                    throw new Error(
-                                        errorMessageFromPayload(
-                                            navyPayload,
-                                            `Unable to poll ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job.`,
-                                            pollResponse.status,
-                                        )
-                                    );
-                                }
-                                didComplete = Boolean(navyPayload?.done);
-                                delayMs = resolveNavyJobPollDelayMs({
-                                    payload: navyPayload,
-                                    responseStatus: pollResponse.status,
-                                    currentDelayMs: delayMs,
-                                });
-                                if (!didComplete && (pollResponse.status === 429 || navyPayload?.status === "rate_limited")) {
-                                    updateJob(job.id, {
-                                        remoteStatus: "rate_limited",
-                                        progress: `${job.provider === "navy" ? "Navy" : "MultiLLM"} is rate limiting polls; retrying in ${Math.ceil(delayMs / 1000)}s...`,
-                                    });
-                                }
-                            }
-                            if (!didComplete) {
-                                throw new Error(
-                                    `Timed out waiting for the ${job.provider === "navy" ? "Navy" : "MultiLLM"} image job.`
-                                );
-                            }
-                        }
-
-                        const navyImages = Array.isArray(navyPayload?.images)
-                            ? (navyPayload.images as Array<{
-                                url?: string;
-                                b64_json?: string;
-                                data?: string;
-                                mimeType?: string;
-                                mime_type?: string;
-                            }>)
-                            : [];
-                        for (const image of navyImages) {
-                            const base64Data =
-                                typeof image?.data === "string" && image.data
-                                    ? image.data
-                                    : typeof image?.b64_json === "string" && image.b64_json
-                                        ? image.b64_json
-                                        : "";
-                            if (base64Data) {
-                                const mimeType =
-                                    typeof image.mimeType === "string"
-                                        ? image.mimeType
-                                        : typeof image.mime_type === "string"
-                                            ? image.mime_type
-                                            : "image/png";
-                                images.push({
-                                    id: createId(),
-                                    dataUrl: dataUrlFromBase64(base64Data, mimeType),
-                                    mimeType,
-                                });
-                                continue;
-                            }
-                            if (!image?.url) continue;
-                            const dataUrl = await fetchAsDataUrl(image.url);
-                            images.push({ id: createId(), dataUrl, mimeType: "image/png" });
-                        }
-                    } else {
-                        if (job.provider === "nanogpt") {
-                            const metadata = generationMetadataFromPayload(payload);
-                            generationBilling = metadata.billing;
-                            providerRequestId = metadata.requestId;
-                        }
-                        images = buildGeneratedImages(payload);
-                    }
-
-                    if (!images.length) {
-                        throw new Error("No images were returned by the model.");
-                    }
-
-                    return images;
-                },
+            const { images, billing: generationBilling, requestId: providerRequestId } = await requestGeneratedImages(job, {
+                referenceImages,
+                nanoGptImageModels,
+                updateJob,
             });
 
             const finalizedImages = images.flatMap((image, index) => {

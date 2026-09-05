@@ -7,12 +7,10 @@ import { runChatTools } from "../../app/components/chat/chutes-chat-tool-runner.
 import {
   isRetryableImageSubmissionError,
   submitImageRequest,
-  waitForImageSubmissionRetry,
 } from "../client/image-submission.ts";
-import { resolveImageSubmissionAttempts } from "../image-submission-policy.ts";
-import { retryAsyncOperation } from "../image-retry.ts";
+import { requestGeneratedImages } from "../client/image-generation.ts";
 
-const IMAGE = { data: "aGVsbG8=", mimeType: "image/png" };
+const IMAGE = { data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgSDvzHwADzgIyupqDXwAAAABJRU5ErkJggg==", mimeType: "image/png" };
 
 for (const resultType of ["invalid-json", "missing-image", "failed-download"]) {
   test(`accepted ${resultType} responses do not become retryable generation failures`, async (t) => {
@@ -105,16 +103,20 @@ for (const model of ["linkapi:gpt-image-2-c", "gguu:gpt-image-2"]) {
         assert.ok(progress.some((message) => message.includes(`Waiting to retry ${model} (try 2/3)`)));
         assert.ok(progress.some((message) => message.includes(`Generated 1 image with ${model}`)));
       } else {
-        const result = await retryAsyncOperation({
-          maxAttempts: resolveImageSubmissionAttempts({ provider: "multillm", configuredAttempts: 3 }),
-          shouldRetry: isRetryableImageSubmissionError,
-          beforeRetry: ({ error, attempt }) => waitForImageSubmissionRetry(error, attempt),
-          run: () => submitImageRequest("/api/multillm/image", {
-            headers: { "content-type": "application/json", "x-user-api-key": "test-proxy-key" },
-            body: JSON.stringify({ model, prompt: "A blue ceramic cup on a wooden table" }),
-          }),
+        const progress: string[] = [];
+        const result = await requestGeneratedImages({
+          id: "standalone-image", mode: "image", status: "queued", provider: "multillm", model,
+          prompt: "A blue ceramic cup on a wooden table", apiKey: "test-proxy-key",
+          createdAt: "2026-09-05T00:00:00Z", imageRetryAttempts: 3, saveToGallery: false,
+        }, {
+          referenceImages: [], nanoGptImageModels: [],
+          updateJob: (_id, patch) => { if (patch.progress) progress.push(patch.progress); },
         });
-        assert.deepEqual(result.images, [IMAGE]);
+        assert.equal(result.images.length, 1);
+        assert.equal(result.images[0]?.dataUrl, `data:image/png;base64,${IMAGE.data}`);
+        assert.equal(result.images[0]?.mimeType, IMAGE.mimeType);
+        assert.ok(progress.some((message) => message.includes(`Retrying ${model} after try 1/3`)));
+        assert.ok(progress.some((message) => message.includes(`Submitting image request to ${model} (try 2/3)`)));
       }
       assert.equal(bodies.length, 2);
       assert.deepEqual(bodies[0], bodies[1]);
