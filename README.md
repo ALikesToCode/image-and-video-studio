@@ -21,7 +21,9 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
 - NanoGPT image generation/editing support for HiDream, Chroma, Z Image Turbo, Qwen Image, and Step Image Edit 2.
 - MultiLLM Proxy chat routing plus NavyAI/NanoGPT/LinkAPI image, asynchronous video, and NavyAI audio generation through one base URL and credential.
 - Local reference strip for source images, style, character, product/object, first-frame, and last-frame references.
-- Local asset library with search, media filters, sorting, delete, clear, prompt copy, download, and JSON export.
+- Searchable model pickers with persistent favorites for generation and chat.
+- Generation queue with pause/resume, queued-job cancellation, failed-job retry, and one to four concurrent jobs. Retries resume accepted remote jobs when a job ID is available.
+- Local asset library with search, media filters, sorting, delete, clear, prompt copy, download, and portable JSON backup/import with embedded media.
 - Local storage status panel with quota estimate and persistent-storage request.
 
 ## Local storage architecture
@@ -37,6 +39,7 @@ Browser-based local-first workspace for image, video, audio/TTS, and chat-assist
   - `modelCatalogs`
   - `settings`
 - Legacy gallery blobs from the old `images` object store are still read during migration.
+- Gallery media and its metadata commit together in IndexedDB. Gallery imports, saves, and deletions are serialized; clearing the gallery preserves uploaded references.
 - Heavy chat media payloads are stripped before chat history is stored.
 
 See [Chat Embedding And Attachments](docs/chat-embedding.md) for iframe snippets, fullscreen chat URLs, and attachment behavior.
@@ -102,6 +105,7 @@ The Worker entrypoint and assets output are configured in `wrangler.jsonc`. Open
 ## Known limitations
 
 - Provider-hosted video URLs can expire; download generated videos into the local gallery promptly.
-- JSON gallery export is local-only and includes data URLs; large exports can be big.
+- Gallery backups include media data URLs and support files up to 64 MiB. The gallery holds up to 250 assets; imports skip existing IDs and reject additions that exceed the limit.
+- Pausing the queue stops new jobs from starting. Already-running requests continue; cancellation is available for queued jobs.
 - Browser storage quota and persistent-storage behavior vary by browser and private browsing mode.
 - Resumable polling depends on the provider returning a stable remote job or operation ID and either the matching browser-stored key or the server-side MultiLLM key still being available.

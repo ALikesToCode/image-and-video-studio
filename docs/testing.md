@@ -26,4 +26,9 @@ Codex sessions should not run `pnpm build`, `pnpm dev`, or `pnpm verify` unless 
 - Gemini and Navy video download route allowlist behavior.
 - Provider capability filtering and dynamic merge behavior.
 - Polling cancellation/backoff helpers.
+- LinkAPI and GGUU HTTP 524 recovery through the real image route and production chat/standalone orchestration, with simulated upstream responses.
+- Accepted-job polling without duplicate submissions and preservation of queued references and zero seeds.
+- Queue pause, cancellation, retry, and concurrency accounting before React status updates.
+- Model favorites, partial catalog refreshes, and proxy capability limits.
+- IndexedDB commit/abort behavior, portable gallery backups, durable metadata recovery, and concurrent gallery capacity checks.
 - Existing chat tooling, image payload builders, model normalization, validation, and queue selection helpers.
