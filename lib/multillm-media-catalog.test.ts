@@ -28,3 +28,20 @@ test("partial refresh keeps unavailable sources and refreshes healthy sources", 
     ["linkapi:cached", "gguu:cached", "navyai:new"]);
   assert.deepEqual(mergePartialMultiLlmCatalog(previous, incoming, []).map((model) => model.id), ["navyai:new"]);
 });
+
+test("NanoGPT catalog limits respect the MultiLLM transport bounds", () => {
+  const [model] = normalizeMultiLlmMediaCatalog({ data: [{
+    id: "many-references", output_modalities: ["image"],
+    capabilities: { image_generation: true, image_to_image: true },
+    supported_parameters: { max_input_images: 24, max_output_images: 16, input_image_constraints: { max_items: 24 } },
+  }] }, { source: "nanogpt", kind: "image" });
+  assert.equal(model.maxReferenceImages, 5);
+  assert.equal(model.inputImageConstraints?.maxItems, 5);
+  assert.equal(model.maxOutputImages, 4);
+});
+
+test("proxy transport caps do not invent reference support for text-only models", () => {
+  const [model] = normalizeMultiLlmMediaCatalog({ data: [{ id: "text-image", input_modalities: ["text"], output_modalities: ["image"], capabilities: { image_generation: true, image_to_image: false } }] }, { source: "nanogpt", kind: "image" });
+  assert.equal(model.maxReferenceImages, undefined);
+  assert.equal(model.supports?.referenceImages, undefined);
+});

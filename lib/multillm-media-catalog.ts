@@ -28,6 +28,15 @@ export const normalizeMultiLlmMediaCatalog = (
       provider: model.provider,
       endpoint: model.endpoint,
       upstreamEndpoint: model.upstreamEndpoint,
+      ...(details.maxReferenceImages !== undefined ? { maxReferenceImages: Math.min(details.maxReferenceImages, 5) } : {}),
+      ...(details.inputImageConstraints ? { inputImageConstraints: {
+        ...details.inputImageConstraints,
+        maxItems: Math.min(details.inputImageConstraints.maxItems ?? 5, 5),
+      } } : {}),
+      ...(options.kind === "image" ? {
+        maxOutputImages: Math.min(details.maxOutputImages ?? 4, 4),
+        ...(details.fixedOutputImages !== undefined ? { fixedOutputImages: Math.min(details.fixedOutputImages, 4) } : {}),
+      } : {}),
       supports: { ...details.supports, [options.kind === "image" ? "imageGeneration" : "video"]: true },
     };
   });
