@@ -45,7 +45,11 @@ export const partitionStoredMediaRecords = (
   const accepted: StoredMediaRecord[] = [];
   const rejected: unknown[] = [];
   for (const item of value) {
-    if (!isRecord(item)) {
+    if (!isRecord(item) ||
+      typeof item.id !== "string" || !item.id.trim() || item.id.startsWith("reference:") ||
+      typeof item.prompt !== "string" || typeof item.model !== "string" ||
+      !isProvider(item.provider) || typeof item.createdAt !== "string" ||
+      !Number.isFinite(Date.parse(item.createdAt))) {
       rejected.push(item);
       continue;
     }

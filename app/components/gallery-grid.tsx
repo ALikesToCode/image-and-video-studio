@@ -15,15 +15,18 @@ import {
     SelectValue,
 } from "./ui/select";
 import { motion, AnimatePresence } from "framer-motion";
+import { GalleryBackupControls } from "./gallery-backup-controls";
 import { ImageViewer } from "./image-viewer";
 
 interface GalleryGridProps {
     items: StoredMedia[];
-    onClear: () => void;
+    onClear: () => Promise<void>;
+    onImport: (text: string) => Promise<number>;
     onDelete: (id: string) => Promise<void>;
 }
 
-export function GalleryGrid({ items, onClear, onDelete }: GalleryGridProps) {
+export function GalleryGrid({ items, onClear, onDelete, onImport }: GalleryGridProps) {
+    const [actionError, setActionError] = useState<string | null>(null);
     const [activeItem, setActiveItem] = useState<StoredMedia | null>(null);
     const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
     const [query, setQuery] = useState("");
@@ -81,35 +84,8 @@ export function GalleryGrid({ items, onClear, onDelete }: GalleryGridProps) {
             setCopiedPromptId(item.id);
             window.setTimeout(() => setCopiedPromptId((prev) => (prev === item.id ? null : prev)), 1600);
         } catch {
-            // ignore clipboard failures
+            setActionError("Unable to copy the prompt. Check clipboard permissions.");
         }
-    };
-
-    const handleExportJson = () => {
-        const payload = {
-            exportedAt: new Date().toISOString(),
-            assets: visibleItems.map((item) => ({
-                id: item.id,
-                kind: resolveKind(item.kind, item.mimeType),
-                provider: item.provider,
-                model: item.model,
-                prompt: item.prompt,
-                createdAt: item.createdAt,
-                mimeType: item.mimeType,
-                dataUrl: item.dataUrl,
-            })),
-        };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], {
-            type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "studio-gallery-export.json";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
     };
 
     const closeViewer = (open: boolean) => {
@@ -143,30 +119,12 @@ export function GalleryGrid({ items, onClear, onDelete }: GalleryGridProps) {
             return right.createdAt.localeCompare(left.createdAt);
         });
 
-    if (items.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-muted-foreground">
-                <p>No saved generations yet.</p>
-                <p className="text-sm">Turn on &quot;Save to local gallery&quot; to keep them here.</p>
-            </div>
-        );
-    }
 
     return (
         <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <h3 className="text-lg font-semibold">Gallery</h3>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                    <Button variant="outline" size="sm" onClick={handleExportJson} className="w-full sm:w-auto">
-                        <Download className="mr-2 h-4 w-4" />
-                        Export JSON
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={onClear} className="w-full sm:w-auto">
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Clear Gallery
-                    </Button>
-                </div>
-            </div>
+            <GalleryBackupControls visibleItems={visibleItems} totalCount={items.length} onClear={onClear} onImport={onImport} />
+            {!items.length && <p className="rounded-xl border border-dashed py-12 text-center text-muted-foreground">No saved generations yet. Import a backup or save a generation to get started.</p>}
+            {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
             <div className="grid gap-2 md:grid-cols-[1fr_160px_160px]">
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -266,7 +224,7 @@ export function GalleryGrid({ items, onClear, onDelete }: GalleryGridProps) {
                                             <Button
                                                 size="icon"
                                                 variant="destructive"
-                                                onClick={() => void onDelete(item.id)}
+                                                onClick={() => { setActionError(null); void onDelete(item.id).catch((error: unknown) => setActionError(error instanceof Error ? error.message : "Unable to delete this asset.")); }}
                                                 className="h-8 w-8 rounded-full"
                                                 title="Delete asset"
                                             >

@@ -42,6 +42,9 @@ import { fetchMultiLlmModelCatalog } from "@/lib/client/model-catalog";
 import { mergePartialMultiLlmCatalog } from "@/lib/multillm-media-catalog";
 import type { GenerationJob } from "@/lib/jobs/types";
 import { trimJobHistory } from "@/lib/jobs/queue";
+import { useGalleryState } from "@/app/hooks/use-gallery-state";
+import { mergeDurableGalleryRecords } from "@/lib/gallery-records";
+import { useGalleryActions } from "@/app/hooks/use-gallery-actions";
 import { useGenerationQueueControls } from "@/app/hooks/use-generation-queue-controls";
 import { isChatProvider } from "@/lib/chat-providers";
 import {
@@ -128,11 +131,12 @@ import {
 } from "@/lib/studio-media-persistence";
 import { normalizeVeoDuration } from "@/lib/studio-validation";
 import {
-    clearGalleryStore,
     deleteGalleryBlob,
     deletePersistedJobRecord,
     deleteReferenceRecord,
     getGalleryBlob,
+    putGalleryAssets,
+    listGalleryAssetRecords,
     isIndexedDbAvailable,
     listPersistedJobRecords,
     listReferenceRecords,
@@ -879,7 +883,8 @@ interface StudioContextType {
 
     // Actions
     clearKey: () => void;
-    clearGallery: () => void;
+    clearGallery: () => Promise<void>;
+    importGalleryBackup: (text: string) => Promise<number>;
     refreshModels: () => Promise<void>;
     refreshChutesChatModels: () => Promise<void>;
     refreshNavyChatModels: () => Promise<void>;
@@ -1001,7 +1006,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     // --- App Logic State ---
     const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-    const [savedMedia, setSavedMedia] = useState<StoredMedia[]>([]);
+    const { items: savedMedia, setItems: setSavedMedia, getItems: getGalleryItems, mutate: mutateGallery } = useGalleryState();
     const [references, setReferences] = useState<StoredReference[]>([]);
     const [selectedReferenceIds, setSelectedReferenceIds] = useState<string[]>([]);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -1372,10 +1377,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             saveToGallery: boolean;
             kind: StoredMedia["kind"];
         }
-    ): Promise<StoredMedia[]> => {
+    ): Promise<StoredMedia[]> => mutateGallery(async () => {
         if (!metadata.saveToGallery || items.length === 0) return [];
+        const entries: StoredMedia[] = [];
         try {
-            const entries: StoredMedia[] = [];
+            if (getGalleryItems().length + items.length > MAX_SAVED_MEDIA) throw new Error("Gallery is full. Export or remove some assets before saving more. Generated results are still available.");
             for (const item of items) {
                 const safeUrl = sanitizeMediaUrl(item.url, {
                     kind: metadata.kind,
@@ -1401,20 +1407,18 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         continue;
                     }
                 }
-                await putGalleryBlob(id, blob);
+                await putGalleryAssets([{ metadata: { id, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType: mimeType ?? blob.type }, blob }]);
                 const url = URL.createObjectURL(blob);
                 galleryUrlsRef.current.set(id, url);
                 entries.push({ id, dataUrl: url, prompt: metadata.prompt, model, provider: metadata.provider, createdAt: new Date().toISOString(), kind: metadata.kind, mimeType: mimeType ?? blob.type });
             }
-            if (entries.length) {
-                setSavedMedia((prev) => [...entries, ...prev].slice(0, MAX_SAVED_MEDIA));
-            }
-            return entries;
+
         } catch (error) {
             setErrorMessage(error instanceof Error ? error.message : "Gallery save failed");
-            return [];
         }
-    };
+        if (entries.length) setSavedMedia((prev) => [...entries, ...prev]);
+        return entries;
+    });
 
     const addReferenceFile = useCallback(async (file: File, role: ReferenceRole = "general") => {
         const validationError = validateModelImageInputs(
@@ -2897,29 +2901,9 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setApiKeyForProvider(provider, "");
     };
 
-    const clearGallery = () => {
-        setSavedMedia([]);
-        for (const url of galleryUrlsRef.current.values()) {
-            URL.revokeObjectURL(url);
-        }
-        galleryUrlsRef.current.clear();
-        clearGalleryStore().catch(() => {
-            setStorageError("Unable to clear all gallery blobs from IndexedDB.");
-        });
-    };
-
-    const deleteSavedMedia = useCallback(async (id: string) => {
-        setSavedMedia((prev) => {
-            const target = prev.find((item) => item.id === id);
-            if (target?.dataUrl.startsWith("blob:")) URL.revokeObjectURL(target.dataUrl);
-            return prev.filter((item) => item.id !== id);
-        });
-        try {
-            await deleteGalleryBlob(id);
-        } catch {
-            setStorageError("Unable to remove the asset blob from IndexedDB.");
-        }
-    }, []);
+    const { clearGallery, deleteSavedMedia, importGalleryBackup } = useGalleryActions({
+        getItems: getGalleryItems, mutate: mutateGallery, setItems: setSavedMedia, urls: galleryUrlsRef, idbAvailable,
+    });
 
     const saveChatImages = async (payload: {
         images: { id: string; dataUrl: string; mimeType: string; model?: string }[];
@@ -3526,7 +3510,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         }
 
         const loadSavedMedia = async () => {
-            if (!storedMedia.length) return;
             if (!idbAvailable) {
                 const legacyEntries = storedMedia.filter(
                     (item): item is StoredMediaRecord & { dataUrl: string } =>
@@ -3548,8 +3531,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 }
                 return;
             }
+            const durableRecords = await listGalleryAssetRecords();
+            const galleryRecords = mergeDurableGalleryRecords(storedMedia, durableRecords);
             const entries: StoredMedia[] = [];
-            for (const item of storedMedia) {
+            for (const item of galleryRecords) {
                 try {
                     let blob = await getGalleryBlob(item.id);
                     if (!blob && item.dataUrl) {
@@ -3576,7 +3561,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             }
             setSavedMedia(entries);
         };
-        void loadSavedMedia();
+        void mutateGallery(loadSavedMedia).catch(() => setStorageError("Unable to restore saved gallery assets."));
 
         const loadReferences = async () => {
             if (!idbAvailable) return;
@@ -3626,7 +3611,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         };
         void loadPersistedJobs();
 
-    }, [idbAvailable]);
+    }, [idbAvailable, mutateGallery, setSavedMedia]);
 
     useEffect(() => {
         if (!hydrated) return;
@@ -4068,7 +4053,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 ...(!idbAvailable || !item.dataUrl.startsWith("blob:") ? { dataUrl: item.dataUrl } : {}),
             }));
             writeLocalStorage(STORAGE_KEYS.images, JSON.stringify(storedMedia));
-        } catch { }
+        } catch { setStorageError("Gallery metadata could not be saved. Export a backup before closing this tab."); }
     }, [savedMedia, hydrated, idbAvailable]);
 
     useEffect(() => {
@@ -4219,7 +4204,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         activeJobCount,
         hasActiveJobs, runningJobs, queuedJobs, recentJobs,
         supportsVideo, supportsTts,
-        clearKey, clearGallery,
+        clearKey, clearGallery, importGalleryBackup,
         refreshModels, refreshChutesChatModels, refreshNavyChatModels,
         refreshNanoGptChatModels, refreshMultiLlmChatModels,
         saveChatImages,

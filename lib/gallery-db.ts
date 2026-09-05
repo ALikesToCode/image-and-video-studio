@@ -1,4 +1,6 @@
 import { runIndexedDbTransaction } from "./client/indexed-db.ts";
+import { runIndexedDbBatch } from "./client/indexed-db-batch.ts";
+import type { StoredMediaRecord } from "./studio-media-persistence.ts";
 
 const DB_NAME = "studio-gallery";
 const DB_VERSION = 2;
@@ -89,17 +91,35 @@ export const deleteGalleryBlob = async (id: string) => {
   );
 };
 
-export const clearGalleryStore = async () => {
-  await runGalleryTransaction(ASSET_BLOBS_STORE, "readwrite", (store) =>
-    store.clear()
-  );
-  await runGalleryTransaction(LEGACY_BLOB_STORE, "readwrite", (store) =>
-    store.clear()
-  );
-  await runGalleryTransaction(ASSETS_STORE, "readwrite", (store) =>
-    store.clear()
-  );
+export const clearGalleryStore = async (ids: readonly string[]) => {
+  const galleryIds = ids.filter((id) => !id.startsWith("reference:"));
+  if (!galleryIds.length) return;
+  const stores = [ASSET_BLOBS_STORE, LEGACY_BLOB_STORE, ASSETS_STORE];
+  await runIndexedDbBatch(await openGalleryDb(), stores, (transaction) => {
+    for (const storeName of stores) {
+      const store = transaction.objectStore(storeName);
+      for (const id of galleryIds) {
+        if (storeName === ASSETS_STORE) store.put({ id, deleted: true }, id);
+        else store.delete(id);
+      }
+    }
+  });
 };
+
+export const putGalleryAssets = async (entries: { metadata: StoredMediaRecord; blob: Blob }[]) => {
+  if (!entries.length) return;
+  await runIndexedDbBatch(await openGalleryDb(), [ASSET_BLOBS_STORE, ASSETS_STORE], (transaction) => {
+    for (const { metadata, blob } of entries) {
+      transaction.objectStore(ASSET_BLOBS_STORE).put(blob, metadata.id);
+      const { id, prompt, model, provider, createdAt, kind, mimeType } = metadata;
+      const record = { id, prompt, model, provider, createdAt, kind, mimeType };
+      transaction.objectStore(ASSETS_STORE).put(record, metadata.id);
+    }
+  });
+};
+
+export const listGalleryAssetRecords = async () =>
+  await runGalleryTransaction<unknown[]>(ASSETS_STORE, "readonly", (store) => store.getAll());
 
 export const putReferenceRecord = async <T extends { id: string }>(
   reference: T
