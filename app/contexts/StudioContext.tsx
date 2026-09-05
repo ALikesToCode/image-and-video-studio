@@ -51,6 +51,7 @@ import {
     type StoredReference,
 } from "@/lib/types";
 import { dataUrlFromBase64, fetchAsDataUrl } from "@/lib/utils";
+import { parseOptionalSeed, snapshotGenerationReferences, videoSourceFromSnapshot, type GenerationReference } from "@/lib/client/generation-inputs";
 import {
     extractOpenRouterImageModels,
     getQueuedJobsToStart,
@@ -179,6 +180,7 @@ export type GenerationJob = {
     negativePrompt?: string;
     promptAgentModel?: string;
     referenceIds?: string[];
+    referenceImages?: GenerationReference[];
 
     imageCount?: number;
     imageRetryAttempts?: number;
@@ -1607,40 +1609,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         setSelectedReferenceIds([]);
     }, []);
 
-    const buildSelectedReferencePayload = useCallback(async (ids = selectedReferenceIds) => {
-        const selected = new Set(ids);
-        const payload: Array<{ dataUrl: string; role?: string }> = [];
-        for (const reference of references.filter((entry) => selected.has(entry.id))) {
-            try {
-                const dataUrl = reference.dataUrl.startsWith("data:")
-                    ? reference.dataUrl
-                    : await fetchAsDataUrl(reference.dataUrl);
-                payload.push({ dataUrl, role: reference.role });
-            } catch {
-                // Skip references that can no longer be read from local storage.
-            }
-        }
-        return payload;
-    }, [references, selectedReferenceIds]);
-
-    const resolveVideoSourceImage = useCallback(async (ids = selectedReferenceIds) => {
-        if (videoImage) return videoImage;
-        const selected = new Set(ids);
-        const jobReferences = references.filter((reference) => selected.has(reference.id));
-        const source =
-            jobReferences.find((reference) => reference.role === "source_image") ??
-            jobReferences.find((reference) => reference.role === "first_frame") ??
-            jobReferences[0];
-        if (!source) return null;
-        try {
-            return source.dataUrl.startsWith("data:")
-                ? source.dataUrl
-                : await fetchAsDataUrl(source.dataUrl);
-        } catch {
-            return null;
-        }
-    }, [references, selectedReferenceIds, videoImage]);
-
     const generateImages = async (job: GenerationJob) => {
         startJob(job, "Generating image...");
         try {
@@ -1648,7 +1616,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 "Content-Type": "application/json",
                 "x-user-api-key": job.apiKey,
             };
-            const referenceImages = await buildSelectedReferencePayload(job.referenceIds);
+            const referenceImages = job.referenceImages ?? await snapshotGenerationReferences(job.referenceIds ?? [], references, fetchAsDataUrl);
             const imageSizing = resolveImageSizingOptions(job.provider, {
                 imageAspect: job.imageAspect,
                 imageSize: job.imageSize,
@@ -1773,7 +1741,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             seed: selectedNanoGptModel?.supports?.seed
                                 ? typeof catalogParameters.seed === "number"
                                     ? catalogParameters.seed
-                                    : Number(job.chutesSeed) || null
+                                    : parseOptionalSeed(job.chutesSeed)
                                 : null,
                             modelCapabilities: {
                                 supportedResolutions,
@@ -1793,7 +1761,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             height: Number(job.chutesHeight),
                             numInferenceSteps: Number(job.chutesSteps),
                             resolution: job.chutesResolution,
-                            seed: Number(job.chutesSeed) || null,
+                            seed: parseOptionalSeed(job.chutesSeed),
                         };
                     }
 
@@ -2018,8 +1986,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 "Content-Type": "application/json",
                 "x-user-api-key": job.apiKey,
             };
-            const sourceImage = job.videoImage || await resolveVideoSourceImage(job.referenceIds);
-            const referenceImages = await buildSelectedReferencePayload(job.referenceIds);
+            const referenceImages = job.referenceImages ?? await snapshotGenerationReferences(job.referenceIds ?? [], references, fetchAsDataUrl);
+            const sourceImage = videoSourceFromSnapshot(job.videoImage, referenceImages);
 
             if (job.provider === "chutes") {
                 response = await fetch("/api/chutes/video", {
@@ -2117,7 +2085,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                             seconds: Number(job.videoDuration),
                             aspectRatio: job.videoAspect,
                             size: job.videoResolution,
-                            seed: Number(job.chutesSeed) || null,
+                            seed: parseOptionalSeed(job.chutesSeed),
                         }),
                     });
                     submitPayload = await submitResponse.json();
@@ -2791,7 +2759,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [jobs, hydrated, queueTick]);
 
-    const handleGenerate = (options: GenerateOptions = {}) => {
+    const handleGenerate = async (options: GenerateOptions = {}) => {
         const activeMode = options.mode ?? mode;
         const activePrompt = options.prompt ?? prompt;
 
@@ -2924,6 +2892,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
+        let referenceImages: GenerationReference[];
+        try {
+            referenceImages = activeMode === "tts" ? [] : await snapshotGenerationReferences(
+                selectedReferenceIds, references, fetchAsDataUrl
+            );
+        } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : "Unable to read selected references.");
+            return;
+        }
+
         const jobsToQueue = modelsToRun.map((jobModel, index) => {
             const selectedModel = modelSuggestions.find((entry) => entry.id === jobModel);
             const modelParameters = buildModelParameterPayload(
@@ -2991,7 +2969,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                 chutesVideoGuidanceScale,
                 modelParameters: maximumQuality.parameters ?? modelParameters,
                 videoImage: videoImage || undefined,
-                referenceIds: selectedReferenceIds,
+                referenceIds: [...selectedReferenceIds],
+                referenceImages,
                 videoAspect,
                 videoResolution,
                 videoDuration: effectiveVideoDuration,
