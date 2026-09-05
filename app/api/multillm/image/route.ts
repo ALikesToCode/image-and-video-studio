@@ -47,6 +47,12 @@ type ImageRequest = {
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
 
+// The upstream accepted the request; result failures must not resubmit generation.
+const imageResultError = (error: string) => Response.json(
+  { error, code: "image_result_unavailable" },
+  { status: 502 },
+);
+
 const arrayBufferToBase64 = (buffer: ArrayBuffer | Uint8Array) => {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -319,10 +325,7 @@ export async function POST(request: Request) {
         maxBytes: MAX_IMAGE_BYTES,
       });
     } catch {
-      return Response.json(
-        { error: "MultiLLM returned invalid image data." },
-        { status: 502 }
-      );
+      return imageResultError("MultiLLM returned invalid image data.");
     }
     return Response.json({
       images: [
@@ -338,16 +341,15 @@ export async function POST(request: Request) {
   try {
     responsePayload = await readJsonResponse(response);
   } catch {
-    return Response.json(
-      { error: "MultiLLM returned invalid image data." },
-      { status: 502 }
-    );
+    return imageResultError("MultiLLM returned invalid image data.");
   }
   const items = extractImageItems(responsePayload);
   if (items.length) {
-    return Response.json({
-      images: await materializeImages(items),
-    });
+    try {
+      return Response.json({ images: await materializeImages(items) });
+    } catch {
+      return imageResultError("Unable to retrieve the generated image.");
+    }
   }
 
   const id = extractJobId(responsePayload);
@@ -358,9 +360,8 @@ export async function POST(request: Request) {
     );
   }
 
-  return Response.json(
-    { error: "The provider returned neither image data nor a job ID." },
-    { status: 502 }
+  return imageResultError(
+    "The provider returned neither image data nor a job ID.",
   );
 }
 export async function GET(request: Request) {

@@ -12,7 +12,14 @@ import {
 } from "@/lib/chat-image-pipeline";
 import { repairImageToolArguments } from "@/lib/chat-tool-prompts";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
+import {
+  ImageSubmissionError,
+  isRetryableImageSubmissionError,
+  submitImageRequest,
+  waitForImageSubmissionRetry,
+} from "@/lib/client/image-submission";
 import { resolveMaximumImageQualityRequest } from "@/lib/image-quality";
+import { usesSingleImageSubmissionAttempt } from "@/lib/image-submission-policy";
 import {
   dataUrlFromBase64,
   fetchAsDataUrl,
@@ -43,7 +50,7 @@ import {
 
 export type ImageToolProgress = {
   model: string;
-  status: "refining" | "running" | "rewriting" | "success" | "error";
+  status: "refining" | "running" | "retrying" | "rewriting" | "success" | "error";
   attempt?: number;
   maxAttempts?: number;
   prompt?: string;
@@ -323,8 +330,7 @@ export const runChatImageTool = async ({
     }
 
     const executeRequest = async () => {
-      const response = await fetch(endpoint, {
-        method: "POST",
+      let payload = await submitImageRequest(endpoint, {
         headers: {
           "Content-Type": "application/json",
           "x-user-api-key": imageApiKey,
@@ -332,15 +338,6 @@ export const runChatImageTool = async ({
         body: JSON.stringify(request.body),
         signal,
       });
-      let payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(
-          formatProviderErrorForDisplay(payload, {
-            fallback: "Image tool failed.",
-            status: response.status,
-          }),
-        );
-      }
 
       if (
         (targetProvider === "navy" ||
@@ -487,6 +484,9 @@ export const runChatImageTool = async ({
           : prompt;
       const shouldRecoverPrompt =
         state.attempt < state.maxAttempts &&
+        !signal?.aborted &&
+        error instanceof ImageSubmissionError &&
+        !isRetryableImageSubmissionError(error) &&
         isLikelyImagePolicyError(message);
       if (!shouldRecoverPrompt) throw error;
 
@@ -522,8 +522,26 @@ export const runChatImageTool = async ({
     models: modelsToRun,
     maxAttempts: normalizedRetryAttempts,
     runModel: invokeImageModel,
-    shouldRetry: (targetModel) =>
-      modelsWithPreparedPolicyRetry.delete(targetModel),
+    shouldRetry: (targetModel, error) => {
+      if (signal?.aborted) return false;
+      if (modelsWithPreparedPolicyRetry.delete(targetModel)) return true;
+      const targetProvider = imageProviderByModelId.get(targetModel) ?? provider;
+      return targetProvider === "multillm" &&
+        !usesSingleImageSubmissionAttempt(targetProvider, targetModel) &&
+        isRetryableImageSubmissionError(error);
+    },
+    beforeRetry: async (targetModel, error, attempt) => {
+      if (isRetryableImageSubmissionError(error)) {
+        onModelProgress?.({
+          model: targetModel,
+          status: "retrying",
+          attempt: attempt + 1,
+          maxAttempts: normalizedRetryAttempts,
+          prompt: imageRequestByModel.get(targetModel)?.prompt,
+        });
+      }
+      await waitForImageSubmissionRetry(error, attempt, signal);
+    },
     onUpdate: (update) => {
       const targetModel = update.model;
       const request = imageRequestByModel.get(targetModel);

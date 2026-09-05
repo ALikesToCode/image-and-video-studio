@@ -125,9 +125,11 @@ export function ImagePipelineDialog({
               </SelectContent>
             </Select>
             <p className="text-xs leading-5 text-muted-foreground">
-              Only a policy rejection with a meaningfully rewritten prompt can
-              retry. Authentication, validation, timeout, and provider failures
-              stop after one request.
+              MultiLLM timeouts (including HTTP 524), rate limits, and server
+              errors retry with a delay up to this limit, except for NavyAI.
+              Policy rejections
+              require a rewritten prompt. Authentication and validation errors
+              stop immediately. A timeout retry can incur another generation charge.
             </p>
           </div>
 

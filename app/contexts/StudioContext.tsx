@@ -103,6 +103,11 @@ import {
 } from "@/lib/generation-job-persistence";
 import { sanitizeMediaUrl } from "@/lib/media-url";
 import { resolveImageSubmissionAttempts } from "@/lib/image-submission-policy";
+import {
+    isRetryableImageSubmissionError,
+    submitImageRequest,
+    waitForImageSubmissionRetry,
+} from "@/lib/client/image-submission";
 import { resolveMaximumImageQualityRequest } from "@/lib/image-quality";
 import { formatProviderErrorForDisplay } from "@/lib/client/provider-error";
 import {
@@ -1655,9 +1660,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             const images = await retryAsyncOperation<GeneratedImage[]>({
                 maxAttempts: resolveImageSubmissionAttempts({
                     provider: job.provider,
+                    model: job.model,
                     remoteJobId: job.remoteJobId,
                     configuredAttempts: job.imageRetryAttempts ?? DEFAULT_IMAGE_RETRY_ATTEMPTS,
                 }),
+                shouldRetry: (error) => job.provider !== "multillm" || isRetryableImageSubmissionError(error),
+                beforeRetry: async ({ error, attempt }) => {
+                    await waitForImageSubmissionRetry(error, attempt);
+                },
                 onAttempt: ({ attempt, maxAttempts }) => {
                     if (maxAttempts <= 1) return;
                     updateJob(job.id, {
@@ -1801,21 +1811,10 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
                         updateJob(job.id, {
                             progress: `Submitting image request to ${job.model}${attemptLabel}...`,
                         });
-                        const response = await fetch(url, {
-                            method: "POST",
+                        payload = await submitImageRequest(url, {
                             headers: requestHeaders,
                             body: JSON.stringify(body),
                         });
-                        payload = await response.json();
-                        if (!response.ok) {
-                            throw new Error(
-                                errorMessageFromPayload(
-                                    payload,
-                                    "Image generation failed.",
-                                    response.status,
-                                )
-                            );
-                        }
                     }
 
                     if (

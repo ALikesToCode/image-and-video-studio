@@ -231,6 +231,8 @@ export const runChatTools = async (
                   ? `Asking a stronger chat model to refine the prompt before generating with ${update.model}…`
                   : update.status === "running"
                   ? `Generating image with ${update.model}${attemptLabel}…`
+                  : update.status === "retrying"
+                    ? `Waiting to retry ${update.model}${attemptLabel} after a temporary provider failure…`
                   : update.status === "rewriting"
                     ? `Rephrasing prompt for ${update.model}${attemptLabel} after safety rejection…`
                     : update.status === "success"

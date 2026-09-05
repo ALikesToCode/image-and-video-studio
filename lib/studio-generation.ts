@@ -39,6 +39,13 @@ export {
   type ImagePromptHelpModel,
 } from "./image-prompt-policy.ts";
 
+export {
+  DEFAULT_IMAGE_RETRY_ATTEMPTS,
+  MAX_IMAGE_RETRY_ATTEMPTS,
+  normalizeImageRetryAttempts,
+  retryAsyncOperation,
+} from "./image-retry.ts";
+
 type ActiveJobLike = {
   status: "queued" | "running" | "success" | "error";
 };
@@ -104,8 +111,6 @@ type NavyChatImageSizing = {
   size?: string;
 };
 
-export const DEFAULT_IMAGE_RETRY_ATTEMPTS = 2;
-export const MAX_IMAGE_RETRY_ATTEMPTS = 8;
 export const NAVY_JOB_POLL_INTERVAL_MS = 5000;
 export const NAVY_JOB_POLL_MAX_ATTEMPTS = 120;
 const NAVY_JOB_POLL_MAX_DELAY_MS = 30000;
@@ -136,60 +141,6 @@ export const resolveNavyJobPollDelayMs = ({
     return clampNavyPollDelayMs(currentDelayMs * 2);
   }
   return NAVY_JOB_POLL_INTERVAL_MS;
-};
-
-export const normalizeImageRetryAttempts = (
-  value: unknown,
-  fallback = DEFAULT_IMAGE_RETRY_ATTEMPTS,
-) => {
-  const numericValue =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : NaN;
-  if (!Number.isFinite(numericValue) || numericValue < 1) {
-    return fallback;
-  }
-  return Math.min(MAX_IMAGE_RETRY_ATTEMPTS, Math.floor(numericValue));
-};
-
-export const retryAsyncOperation = async <T>({
-  maxAttempts,
-  run,
-  onAttempt,
-  onError,
-  shouldRetry,
-}: {
-  maxAttempts: unknown;
-  run: (state: { attempt: number; maxAttempts: number }) => Promise<T>;
-  onAttempt?: (state: { attempt: number; maxAttempts: number }) => void;
-  onError?: (state: {
-    attempt: number;
-    maxAttempts: number;
-    error: unknown;
-    final: boolean;
-  }) => void;
-  shouldRetry?: (error: unknown) => boolean;
-}) => {
-  const attempts = normalizeImageRetryAttempts(maxAttempts);
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    onAttempt?.({ attempt, maxAttempts: attempts });
-    try {
-      return await run({ attempt, maxAttempts: attempts });
-    } catch (error) {
-      lastError = error;
-      const final = attempt >= attempts || shouldRetry?.(error) === false;
-      onError?.({ attempt, maxAttempts: attempts, error, final });
-      if (final) throw error;
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Operation failed.");
 };
 
 const normalizeModalities = (modalities?: string[] | null) =>

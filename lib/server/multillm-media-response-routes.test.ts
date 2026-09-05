@@ -85,6 +85,7 @@ test("MultiLLM media routes reject invalid provider body types", async () => {
         });
         assert.deepEqual(await imageResponse.json(), {
           error: "MultiLLM returned invalid image data.",
+          code: "image_result_unavailable",
         });
       }
     );
