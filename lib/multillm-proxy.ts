@@ -867,7 +867,13 @@ export const parseVideoJobPayload = (payload: unknown): ParsedVideoJob => {
   ).toLowerCase();
   const rawVideoUrl =
     asString(payload.videoUrl) ||
+    asString(payload.video_url) ||
     asString(payload.url) ||
+    asString(data.videoUrl) ||
+    asString(data.video_url) ||
+    asString(result.videoUrl) ||
+    asString(result.video_url) ||
+    nestedString(payload, ["output", "video", "url"]) ||
     nestedString(payload, ["data", "output", "video", "url"]) ||
     nestedString(payload, ["result", "output", "video", "url"]) ||
     nestedString(payload, ["data", "0", "url"]) ||

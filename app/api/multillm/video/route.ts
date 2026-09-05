@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (source === "linkapi") {
+  if (source !== "navyai" && source !== "nanogpt") {
     return Response.json(
       {
         error:
@@ -111,6 +111,7 @@ export async function POST(request: Request) {
   if (source === "navyai") {
     path = "/navyai/v1/images/generations";
     payload.sync = false;
+    if (body.resolution) payload.size = body.resolution;
     if (Number.isFinite(body.seconds)) payload.seconds = body.seconds;
     if (imageInputs.length) {
       payload.image_url =
