@@ -3,10 +3,14 @@ packages:
 
 blockExoticSubdeps: true
 minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - "@humanfs/node@0.16.8"
+  - "qs@6.16.0"
 trustPolicy: no-downgrade
 
 overrides:
   "@babel/core": 7.29.6
+  "@humanfs/node": 0.16.8
   body-parser: 2.3.0
   brace-expansion: 5.0.9
   "esbuild@>=0.27.3 <0.28.1": 0.28.1
@@ -19,7 +23,7 @@ overrides:
   picomatch@2: 2.3.2
   picomatch@4: 4.0.4
   postcss: 8.5.26
-  qs: 6.15.2
+  qs: 6.16.0
   sharp: 0.35.0
   undici: 7.29.0
   ws: 8.21.0
