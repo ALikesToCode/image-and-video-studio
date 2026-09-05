@@ -39,16 +39,14 @@ export {
   type ImagePromptHelpModel,
 } from "./image-prompt-policy.ts";
 
+export { getActiveJobCount, getQueuedJobsToStart } from "./jobs/queue.ts";
+
 export {
   DEFAULT_IMAGE_RETRY_ATTEMPTS,
   MAX_IMAGE_RETRY_ATTEMPTS,
   normalizeImageRetryAttempts,
   retryAsyncOperation,
 } from "./image-retry.ts";
-
-type ActiveJobLike = {
-  status: "queued" | "running" | "success" | "error";
-};
 
 type NavyImageGenerationInput = {
   model: string;
@@ -84,14 +82,6 @@ type SanitizedReferenceImage = {
   data: string;
   mimeType: string;
   role?: string;
-};
-
-type QueueMode = "image" | "video" | "tts";
-
-type QueueJobLike = {
-  id: string;
-  status: "queued" | "running" | "success" | "error";
-  mode: QueueMode;
 };
 
 type ImageSizingOptionsInput = {
@@ -673,9 +663,7 @@ export const buildGeminiVideoPayload = ({
   };
 };
 
-export const getActiveJobCount = (jobs: ActiveJobLike[]) =>
-  jobs.filter((job) => job.status === "queued" || job.status === "running")
-    .length;
+
 
 export const isFluxModel = (model: string) =>
   /(^|[/:.-])flux([/:.-]|$)/i.test(model);
@@ -1131,48 +1119,6 @@ export const resolveActiveImageToolModels = ({
     fallbackModel,
     availableModels,
   );
-
-export const getQueuedJobsToStart = (
-  jobs: QueueJobLike[],
-  {
-    maxConcurrentImageJobs = 3,
-    maxConcurrentNonImageJobs = 1,
-    activeIds = [],
-  }: {
-    maxConcurrentImageJobs?: number;
-    maxConcurrentNonImageJobs?: number;
-    activeIds?: string[];
-  } = {},
-) => {
-  const activeSet = new Set(activeIds);
-  let availableImageSlots =
-    maxConcurrentImageJobs -
-    jobs.filter((job) => job.status === "running" && job.mode === "image")
-      .length;
-  let availableNonImageSlots =
-    maxConcurrentNonImageJobs -
-    jobs.filter((job) => job.status === "running" && job.mode !== "image")
-      .length;
-
-  const nextJobs: QueueJobLike[] = [];
-
-  for (const job of jobs) {
-    if (job.status !== "queued" || activeSet.has(job.id)) continue;
-
-    if (job.mode === "image") {
-      if (availableImageSlots <= 0) continue;
-      nextJobs.push(job);
-      availableImageSlots -= 1;
-      continue;
-    }
-
-    if (availableNonImageSlots <= 0) continue;
-    nextJobs.push(job);
-    availableNonImageSlots -= 1;
-  }
-
-  return nextJobs;
-};
 
 export const mergeGeneratedImagesInDisplayOrder = (
   existing: GeneratedImage[],

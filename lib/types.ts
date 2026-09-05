@@ -55,7 +55,7 @@ export type StoredReference = {
 
 export type PersistedGenerationJob = {
     id: string;
-    status: "queued" | "running" | "success" | "error";
+    status: "queued" | "running" | "success" | "error" | "cancelled";
     mode: "image" | "video" | "tts";
     provider: Provider;
     model: string;

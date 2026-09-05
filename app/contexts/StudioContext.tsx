@@ -40,6 +40,9 @@ import {
 } from "@/lib/constants";
 import { fetchMultiLlmModelCatalog } from "@/lib/client/model-catalog";
 import { mergePartialMultiLlmCatalog } from "@/lib/multillm-media-catalog";
+import type { GenerationJob } from "@/lib/jobs/types";
+import { trimJobHistory } from "@/lib/jobs/queue";
+import { useGenerationQueueControls } from "@/app/hooks/use-generation-queue-controls";
 import { isChatProvider } from "@/lib/chat-providers";
 import {
     type GeneratedImage,
@@ -154,68 +157,7 @@ import {
 
 // --- Types ---
 
-type JobStatus = "queued" | "running" | "success" | "error";
-
-export type GenerationJob = {
-    id: string;
-    status: JobStatus;
-    mode: Mode;
-    provider: Provider;
-    model: string;
-    modelEndpoint?: string;
-    outputModalities?: string[];
-    prompt: string;
-    apiKey: string;
-    createdAt: string;
-    batchId?: string;
-    batchCreatedAt?: string;
-    batchOrder?: number;
-    startedAt?: string;
-    finishedAt?: string;
-    error?: string;
-    progress?: string;
-    remoteJobId?: string;
-    remoteOperationName?: string;
-    remoteStatus?: string;
-    billing?: GenerationBilling;
-    requestId?: string;
-    negativePrompt?: string;
-    promptAgentModel?: string;
-    referenceIds?: string[];
-    referenceImages?: GenerationReference[];
-
-    imageCount?: number;
-    imageRetryAttempts?: number;
-    imageAspect?: string;
-    imageSize?: string;
-    navyImageSize?: string;
-    navyImageQuality?: string;
-    chutesGuidanceScale?: string;
-    chutesWidth?: string;
-    chutesHeight?: string;
-    chutesSteps?: string;
-    chutesResolution?: string;
-    chutesSeed?: string;
-    videoAspect?: string;
-    videoResolution?: string;
-    videoDuration?: string;
-    ttsVoice?: string;
-    ttsFormat?: string;
-    ttsSpeed?: string;
-    chutesVideoFps?: string;
-    chutesVideoGuidanceScale?: string;
-    modelParameters?: ModelParameterValues;
-    videoImage?: string;
-    saveToGallery: boolean;
-    // Chutes TTS params
-    chutesTtsSpeed?: string;
-    chutesTtsSpeaker?: string;
-    chutesTtsMaxDuration?: string;
-    // Audio output
-    audioUrl?: string; // result
-    videoUrl?: string; // result
-    audioData?: string; // base64
-};
+export type { GenerationJob } from "@/lib/jobs/types";
 
 type StorageSnapshot = {
     usage: number;
@@ -297,7 +239,6 @@ type GenerateOptions = {
 
 const MAX_CACHED_MODELS = 500;
 const MAX_SAVED_MEDIA = 250;
-const MAX_JOB_HISTORY = 20;
 const MAX_REFERENCES = 24;
 const MAX_NAVY_REFERENCE_IMAGES = 5;
 
@@ -924,6 +865,7 @@ interface StudioContextType {
 
     // Jobs
     jobs: GenerationJob[];
+    queueControls: ReturnType<typeof useGenerationQueueControls>;
     updateJobs: (param: GenerationJob[] | ((prev: GenerationJob[]) => GenerationJob[])) => void;
     activeJobCount: number;
     hasActiveJobs: boolean;
@@ -1366,6 +1308,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         chutesResolution,
     ]);
 
+    const queueControls = useGenerationQueueControls(setJobs, processingRef);
+
     const runningJobs = jobs.filter((job) => job.status === "running");
     const queuedJobs = jobs.filter((job) => job.status === "queued");
     const activeJobCount = getActiveJobCount(jobs);
@@ -1386,25 +1330,6 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     }, [references, selectedReferenceIds]);
 
     // --- Actions ---
-
-    // Trim job history
-    const trimJobHistory = (items: GenerationJob[]) => {
-        const completedCount = items.filter(
-            (job) => job.status === "success" || job.status === "error"
-        ).length;
-        const overflow = completedCount - MAX_JOB_HISTORY;
-        if (overflow <= 0) return items;
-        let removed = 0;
-        return items.filter((job) => {
-            if (job.status === "success" || job.status === "error") {
-                if (removed < overflow) {
-                    removed += 1;
-                    return false;
-                }
-            }
-            return true;
-        });
-    };
 
     const updateJobs = useCallback((param: GenerationJob[] | ((prev: GenerationJob[]) => GenerationJob[])) => {
         setJobs((prev) => {
@@ -2705,7 +2630,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     // Queue Processor
     useEffect(() => {
-        if (!hydrated) return;
+        if (!hydrated || queueControls.queuePaused) return;
         const nextJobs = getQueuedJobsToStart(
             jobs.map((job) => ({
                 id: job.id,
@@ -2714,7 +2639,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             })),
             {
                 activeIds: Array.from(processingRef.current),
-                maxConcurrentImageJobs: 4,
+                maxConcurrentImageJobs: queueControls.imageConcurrency,
                 maxConcurrentNonImageJobs: 1,
             }
         );
@@ -2731,7 +2656,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [jobs, hydrated, queueTick]);
+    }, [jobs, hydrated, queueTick, queueControls.queuePaused, queueControls.imageConcurrency]);
 
     const handleGenerate = async (options: GenerateOptions = {}) => {
         const activeMode = options.mode ?? mode;
@@ -4290,7 +4215,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         audioUrl, setAudioUrl,
         audioMimeType, setAudioMimeType,
         lastOutput, setLastOutput,
-        jobs, updateJobs,
+        jobs, queueControls, updateJobs,
         activeJobCount,
         hasActiveJobs, runningJobs, queuedJobs, recentJobs,
         supportsVideo, supportsTts,

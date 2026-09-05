@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
+import { GenerationQueue } from "../generation-queue";
 import { useStudio } from "@/app/contexts/StudioContext";
 import { ImgGenSettings } from "../img-gen-settings";
 import { PromptInput } from "../prompt-input";
@@ -16,7 +17,6 @@ import {
     Download,
     Trash2,
     Image as ImageIcon,
-    Clock3,
     Loader2,
     Settings2,
     Maximize2,
@@ -484,51 +484,7 @@ export function ImageGenView() {
                             </div>
                         ) : null}
 
-                        {context.recentJobs.length > 0 ? (
-                            <div className="mt-4 space-y-2 rounded-xl border border-border/50 bg-background/40 p-3">
-                                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                    <Clock3 className="h-3.5 w-3.5" />
-                                    Queue Activity
-                                </div>
-                                <div className="space-y-2">
-                                    {context.recentJobs.map((job) => (
-                                        <div
-                                            key={job.id}
-                                            className="flex items-center gap-3 rounded-lg border border-border/40 bg-background/60 px-3 py-2 text-xs"
-                                        >
-                                            <div className="min-w-0 flex-1">
-                                                <div className="truncate font-medium text-foreground">
-                                                    {job.model}
-                                                </div>
-                                                <div className="truncate text-muted-foreground">
-                                                    {job.progress || job.status}
-                                                </div>
-                                            </div>
-                                            <div
-                                                className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-                                                    job.status === "running"
-                                                        ? "bg-primary/10 text-primary"
-                                                        : job.status === "queued"
-                                                            ? "bg-secondary text-secondary-foreground"
-                                                            : job.status === "success"
-                                                                ? "bg-emerald-500/10 text-emerald-600"
-                                                                : "bg-destructive/10 text-destructive"
-                                                }`}
-                                            >
-                                                {job.status === "running" ? (
-                                                    <span className="inline-flex items-center gap-1">
-                                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                                        Running
-                                                    </span>
-                                                ) : (
-                                                    job.status
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : null}
+                        <GenerationQueue />
                     </motion.div>
 
                     {/* Output Grid */}
