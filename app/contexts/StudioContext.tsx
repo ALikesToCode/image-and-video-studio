@@ -38,6 +38,8 @@ import {
     type ModelOption,
     type ModelParameterValue,
 } from "@/lib/constants";
+import { fetchMultiLlmModelCatalog } from "@/lib/client/model-catalog";
+import { mergePartialMultiLlmCatalog } from "@/lib/multillm-media-catalog";
 import { isChatProvider } from "@/lib/chat-providers";
 import {
     type GeneratedImage,
@@ -1069,6 +1071,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     const [modelsLoading, setModelsLoading] = useState(false);
+    const [multiLlmCatalogWarnings, setMultiLlmCatalogWarnings] = useState<Record<string, string | null>>({});
     const [modelsError, setModelsError] = useState<string | null>(null);
     const [lastOutput, setLastOutput] = useState<{ mode: Mode; prompt: string; model: string; provider: Provider; ttsVoice?: string; mediaIds?: string[] } | null>(null);
 
@@ -1225,48 +1228,19 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
 
     const fetchMultiLlmCatalog = useCallback(
         async (kind: "chat" | "image" | "video" | "audio") => {
-            const key = apiKeys.multillm.trim();
-            const response = await fetch(
-                `/api/multillm/models?kind=${encodeURIComponent(kind)}`,
-                {
-                    headers: key ? { "x-user-api-key": key } : undefined,
-                    cache: "no-store",
-                }
+            const { models, failedSources, warning } = await fetchMultiLlmModelCatalog(
+                kind, apiKeys.multillm, sanitizeModelOptions
             );
-            const payload = await response.json();
-            if (!response.ok) {
-                throw new Error(
-                    errorMessageFromPayload(
-                        payload,
-                        `Unable to fetch MultiLLM ${kind} models.`
-                    )
-                );
-            }
-            const models = sanitizeModelOptions(payload?.models ?? []);
+            setMultiLlmCatalogWarnings((previous) => ({ ...previous, [kind]: warning }));
+            const merge = (previous: ModelOption[]) => mergePartialMultiLlmCatalog(previous, models, failedSources);
             if (kind === "image") {
-                const imageModels = sanitizeImageModelOptions(
-                    models,
-                    MAX_CACHED_MODELS
-                );
-                if (!imageModels.length) {
-                    throw new Error("MultiLLM returned no image models.");
-                }
-                setMultiLlmImageModels(
-                    mergeImageModelOptions(MULTILLM_IMAGE_MODELS, imageModels)
-                );
-                return imageModels;
-            }
-            if (!models.length) {
-                throw new Error(`MultiLLM returned no ${kind} models.`);
-            }
-            if (kind === "chat") {
-                setMultiLlmChatModels(mergeModelOptions(MULTILLM_CHAT_MODELS, models));
-            }
-            if (kind === "video") {
-                setMultiLlmVideoModels(mergeModelOptions(MULTILLM_VIDEO_MODELS, models));
-            }
-            if (kind === "audio") {
-                setMultiLlmAudioModels(mergeModelOptions(MULTILLM_AUDIO_MODELS, models));
+                setMultiLlmImageModels((previous) => mergeImageModelOptions(MULTILLM_IMAGE_MODELS, merge(previous)));
+            } else if (kind === "chat") {
+                setMultiLlmChatModels((previous) => mergeModelOptions(MULTILLM_CHAT_MODELS, merge(previous)));
+            } else if (kind === "video") {
+                setMultiLlmVideoModels((previous) => mergeModelOptions(MULTILLM_VIDEO_MODELS, merge(previous)));
+            } else {
+                setMultiLlmAudioModels((previous) => mergeModelOptions(MULTILLM_AUDIO_MODELS, merge(previous)));
             }
             return models;
         },
@@ -4282,7 +4256,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         multiLlmChatModel, setMultiLlmChatModel,
         multiLlmToolImageModel, setMultiLlmToolImageModel,
         multiLlmChatModelsLoading,
-        multiLlmChatModelsError,
+        multiLlmChatModelsError: multiLlmChatModelsError ?? (Object.values(multiLlmCatalogWarnings).filter(Boolean).join(" ") || null),
         openRouterImageModels,
         navyImageModels,
         navyVideoModels,
@@ -4296,7 +4270,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         modelSuggestions,
         statusMessage, setStatusMessage,
         errorMessage, setErrorMessage,
-        modelsLoading, modelsError,
+        modelsLoading, modelsError: modelsError ?? (provider === "multillm" ? multiLlmCatalogWarnings[mode === "tts" ? "audio" : mode] ?? null : null),
         navyUsage, navyUsageError, navyUsageLoading, navyUsageUpdatedAt, refreshNavyUsage,
         navyModelHealth, navyModelHealthError, navyModelHealthLoading,
         navyModelHealthUpdatedAt, refreshNavyModelHealth,

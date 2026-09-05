@@ -2,7 +2,6 @@ import {
   getMultiLlmProxyBaseUrl,
   multiLlmAuthorizationHeaders,
   multiLlmErrorMessage,
-  normalizeModelOptions,
   readUpstreamError,
   resolveMultiLlmApiKey,
   type MultiLlmMediaSource,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/multillm-proxy";
 import { mergeImageModelOptionLists } from "@/lib/model-options";
 import { readJsonResponse } from "@/lib/server/json-body";
+import { normalizeMultiLlmMediaCatalog } from "@/lib/multillm-media-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -97,7 +97,7 @@ export async function GET(request: Request) {
         const payload = await readJsonResponse(response, 8 * 1024 * 1024);
         return {
           status: "fulfilled" as const,
-          models: normalizeModelOptions(payload, {
+          models: normalizeMultiLlmMediaCatalog(payload, {
             source: target.source,
             kind: kindParam === "chat" ? undefined : kindParam,
             assumeKind: target.assumeKind,
@@ -137,7 +137,7 @@ export async function GET(request: Request) {
   }
 
   return Response.json(
-    { models, warnings },
+    { models, warnings, failedSources: settled.flatMap((entry) => entry.status === "rejected" ? [entry.source] : []) },
     { headers: { "Cache-Control": "no-store" } }
   );
 }
