@@ -663,8 +663,6 @@ export const buildGeminiVideoPayload = ({
   };
 };
 
-
-
 export const isFluxModel = (model: string) =>
   /(^|[/:.-])flux([/:.-]|$)/i.test(model);
 

@@ -65,4 +65,3 @@ export type GenerationJob = {
     videoUrl?: string; // result
     audioData?: string; // base64
 };
-

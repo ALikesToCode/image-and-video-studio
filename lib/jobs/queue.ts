@@ -22,11 +22,11 @@ export const getQueuedJobsToStart = (
   const activeSet = new Set(activeIds);
   let availableImageSlots =
     maxConcurrentImageJobs -
-    jobs.filter((job) => job.status === "running" && job.mode === "image")
+    jobs.filter((job) => (job.status === "running" || activeSet.has(job.id)) && job.mode === "image")
       .length;
   let availableNonImageSlots =
     maxConcurrentNonImageJobs -
-    jobs.filter((job) => job.status === "running" && job.mode !== "image")
+    jobs.filter((job) => (job.status === "running" || activeSet.has(job.id)) && job.mode !== "image")
       .length;
 
   const nextJobs: QueueJobLike[] = [];

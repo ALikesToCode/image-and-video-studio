@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cancelQueuedJobs, getQueuedJobsToStart, retryQueuedJob, trimJobHistory } from "./queue.ts";
 
+test("dispatched jobs occupy slots before React updates their queued status", () => {
+  const jobs = ["first", "second"].map((id) => ({ id, status: "queued" as const, mode: "image" as const }));
+  assert.deepEqual(getQueuedJobsToStart(jobs, { activeIds: ["first"], maxConcurrentImageJobs: 1 }), []);
+});
+
 test("cancelling waiting jobs cannot cancel running or already dispatched submissions", () => {
   const jobs = [
     { id: "waiting", status: "queued" as const, mode: "image" as const },
