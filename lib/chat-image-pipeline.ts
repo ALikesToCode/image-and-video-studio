@@ -182,16 +182,9 @@ export const runImageModelPipelineParallel = async <T>({
           beforeRetry: async ({ error, attempt }) => {
             await beforeRetry?.(model, error, attempt);
           },
-          onError: ({ attempt, maxAttempts: attempts, error, final }) => {
+          onError: ({ attempt, maxAttempts: attempts }) => {
             lastAttempt = attempt;
-            if (!final) return;
-            onUpdate?.({
-              model,
-              status: "error",
-              error,
-              attempt,
-              maxAttempts: attempts,
-            });
+            configuredAttempts = attempts;
           },
         });
         onUpdate?.({
@@ -203,6 +196,13 @@ export const runImageModelPipelineParallel = async <T>({
         });
         return { model, status: "fulfilled" as const, value };
       } catch (error) {
+        onUpdate?.({
+          model,
+          status: "error",
+          error,
+          attempt: lastAttempt,
+          maxAttempts: configuredAttempts,
+        });
         return {
           model,
           status: "rejected" as const,

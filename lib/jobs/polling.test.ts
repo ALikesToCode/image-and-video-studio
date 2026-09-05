@@ -1,7 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getEventListeners } from "node:events";
 
 import { computeBackoffDelay, pollOperation } from "./polling.ts";
+
+test("polling removes completed delay listeners", async () => {
+  await pollOperation({
+    poll: async (attempt, signal) => {
+      assert.equal(getEventListeners(signal, "abort").length, 0);
+      return attempt;
+    },
+    isDone: (attempt) => attempt === 12,
+    getResult: (attempt) => attempt,
+    intervalMs: 1,
+    maxAttempts: 15,
+  });
+});
+
+test("cancellation during a poll takes precedence over a late result", async () => {
+  const controller = new AbortController();
+  await assert.rejects(pollOperation({
+    poll: async () => { controller.abort(); return "ready"; },
+    isDone: () => true,
+    getResult: (result) => result,
+    signal: controller.signal,
+    intervalMs: 1,
+    maxAttempts: 2,
+  }), { name: "AbortError" });
+});
 
 test("computeBackoffDelay applies factor, cap, and deterministic jitter", () => {
   assert.equal(

@@ -21,15 +21,15 @@ const defaultSleep = (ms: number, signal: AbortSignal) =>
       reject(new DOMException("Polling was cancelled.", "AbortError"));
       return;
     }
-    const timeout = setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timeout);
-        reject(new DOMException("Polling was cancelled.", "AbortError"));
-      },
-      { once: true }
-    );
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException("Polling was cancelled.", "AbortError"));
+    };
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 
 const throwIfAborted = (signal: AbortSignal) => {
@@ -80,6 +80,7 @@ export async function pollOperation<TPollResult, TResult>({
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       throwIfAborted(controller.signal);
       const result = await poll(attempt, controller.signal);
+      throwIfAborted(controller.signal);
       if (isDone(result)) return getResult(result);
 
       if (attempt === maxAttempts - 1) break;

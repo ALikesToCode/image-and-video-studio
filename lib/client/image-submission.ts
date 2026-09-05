@@ -52,6 +52,7 @@ export const submitImageRequest = async (
   init.signal?.throwIfAborted();
   const response = await fetch(endpoint, { ...init, method: "POST" });
   const value: unknown = await response.json().catch(() => null);
+  init.signal?.throwIfAborted();
   const payload = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};

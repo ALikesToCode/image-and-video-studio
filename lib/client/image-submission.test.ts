@@ -8,6 +8,19 @@ import {
   waitForImageSubmissionRetry,
 } from "./image-submission.ts";
 
+test("cancelling while reading an image response preserves AbortError", async (t) => {
+  const controller = new AbortController();
+  const response = new Response("{}");
+  t.mock.method(response, "json", async () => {
+    controller.abort();
+    throw new DOMException("Cancelled", "AbortError");
+  });
+  t.mock.method(globalThis, "fetch", async () => response);
+  await assert.rejects(submitImageRequest("/api/multillm/image", {
+    signal: controller.signal,
+  }), { name: "AbortError" });
+});
+
 for (const status of [408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]) {
   test(`image submission HTTP ${status} is retryable`, async (t) => {
     t.mock.method(globalThis, "fetch", async () => new Response("Upstream unavailable", { status }));

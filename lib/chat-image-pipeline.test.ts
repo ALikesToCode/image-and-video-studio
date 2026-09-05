@@ -1,6 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+test("cancellation during retry delay emits one terminal model update", async () => {
+  const statuses: string[] = [];
+  const cancelled = new DOMException("Cancelled", "AbortError");
+  let calls = 0;
+  const result = await runImageModelPipelineParallel({
+    models: ["linkapi:gpt-image-2-c"],
+    maxAttempts: 3,
+    runModel: async () => { calls++; throw new Error("HTTP 524"); },
+    beforeRetry: async () => { throw cancelled; },
+    onUpdate: (update) => statuses.push(update.status),
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(statuses, ["running", "error"]);
+  assert.equal(result.errors[0]?.reason, cancelled);
+  assert.equal(result.errors[0]?.attempts, 1);
+});
+
 import {
   normalizeImageToolModelRequest,
   resolveRequestedImageModels,
